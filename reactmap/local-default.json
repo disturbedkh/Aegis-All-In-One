@@ -90,6 +90,8 @@
           "scanCell",
           "spawnpoint",
           "weather",
+          "station",
+          "nest",
           "route"
         ]
       },
