@@ -206,27 +206,14 @@ services:
 
   # Xilriws Anti-Bot Bypass by the Unown Team.
   # This Requires you enable `remote_auth_url` under [general] section in your `dragonite_config.toml`.
-  xilriws-load-balancer:
-    image: traefik:v2.11
+  xilriws:
     container_name: xilriws
-    command: --api.insecure=true --providers.docker --providers.docker.exposedbydefault=false --entrypoints.def.address=:5090
-    ports:
-      - "5090:5090"
-    volumes:
-      - /var/run/docker.sock:/var/run/docker.sock
-  xilriws-worker:
-    image: ghcr.io/unownhash/xilriws-public:main
+    image: ghcr.io/unownhash/xilriws:main
     restart: unless-stopped
-    expose:
-    - "5090"
+    ports:
+    - "5090:5090"
     volumes:
       - ./unown/proxies.txt:/xilriws/proxies.txt
-    labels:
-      - traefik.http.routers.xilriws.rule=HostRegexp(`{catchall:.*}`)
-      - traefik.enable=true
-    deploy:
-      # You will need to increase this if you just starting using Unown stack and dragonite and have no refresh tokens. Read readme.
-      replicas: 1
 
 networks:
   mapping_network:
