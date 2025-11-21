@@ -282,6 +282,16 @@
         "enabled": true,
         "trialPeriodEligible": false,
         "roles": []
+      },
+      "stations": {
+        "enabled": true,
+        "trialPeriodEligible": false,
+        "roles": []
+      },
+      "dynamax": {
+        "enabled": true,
+        "trialPeriodEligible": false,
+        "roles": []
       }
     }
   },
