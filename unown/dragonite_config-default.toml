@@ -14,6 +14,27 @@ api_port = 7272
 # Uses login proxy as you wish, e.g. Swirlix or Xilriws
 remote_auth_url = "http://xilriws:5090/api/v1/login-code"
 
+[auth.ptc]
+# to use this provider pls enable it
+enable = true
+# seconds to sleep in-between PTC authing on one proxy
+login_delay = 120
+# background initer to collect tokens of accounts without using them - this is false by default
+token_init_enabled=true
+remote_auth_url = "http://xilriws:5090/api/v1/login-code"
+# don't rely on remote auth and only use accounts with stored token
+token_refresh_only = true
+
+[auth.nk]
+# to use this provider pls enable it
+enable = false
+# seconds to sleep in-between NK authing on one proxy
+#login_delay = 20
+# background initer to collect tokens of accounts without using them - this is false by default
+token_init_enabled=true
+# don't rely on user-pass auth and only use accounts with stored token
+token_refresh_only = true
+
 [koji]
 url = "http://koji:8080"
 bearer_token = "SuperSecureKojiSecret"
@@ -29,8 +50,6 @@ minimum_account_reuse_hours = 168
 #location_delay = 0
 #fort_location_delay = 0
 #scout_age_limit = 30
-#token_refresh_only=true # INSANELY useful setting which will make dragonite work 100% only with refresh tokens instead of trying password PTC AUTHs! 
-# This is adviced when Imperva config is changed and xil (or any other proxy doesn't work)
 
 #[accounts]
 #required_level = 30 # used for everything except leveling (quest can force level 31 at specific events)
