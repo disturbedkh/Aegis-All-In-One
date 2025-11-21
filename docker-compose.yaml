@@ -32,7 +32,7 @@ services:
   # internet through the reverse proxy (pointing directly to the container port)
 
   reactmap:
-    image: ghcr.io/watwowmap/reactmap:latest
+    image: ghcr.io/watwowmap/reactmap:develop
     container_name: reactmap
     command: sh -c "yarn start"
     restart: unless-stopped
