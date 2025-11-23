@@ -155,7 +155,9 @@ Albeit not critical to normal operation, it's always nice and informative to hav
 
 That's it. If you want more dashboards, you can find them at Unown#'s github.
 
-### 7. What now?
+### 7. Fletchling
+
+### 8. What now?
 
 Now comes the fun part. Start reading and learning how all of this works. We recommed you to head over to the unown# discord server for specific help regarding Dragonite, Golbat and Rotom (https://discord.gg/Vjze47qchG), for Reactmap and Koji check ou their server at https://discord.gg/EYYsKPVawn.
 
@@ -169,7 +171,7 @@ In general terms, you will need to:
 4. Add at least one Aegis Device (should be autodetected by Rotom once you configure the ATV and Aegis properly)
 5. Map away
 
-### 8. Aegis config
+### 9. Aegis config
 
 This is typically unnecessary, because filling in the details in the app is usually sufficient.
 
