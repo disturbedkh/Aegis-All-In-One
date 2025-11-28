@@ -193,6 +193,12 @@ services:
 
   grafana:
     image: grafana/grafana:latest
+    env_file:
+      - .env
+    environment:
+      # On Linux, automatically override with real user if the variables exist in the host environment
+      UID: ${UID:-1000}
+      GID: ${GID:-1000}
     container_name: grafana
     restart: unless-stopped
     user: "$UID:$GID"
