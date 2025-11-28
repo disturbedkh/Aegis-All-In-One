@@ -1,23 +1,94 @@
 #!/bin/bash
-set -e  # Exit on error
-echo "Setting up Aegis-All-In-One..."
 
-# Auto-copy defaults if missing
-[[ ! -f .env ]] && cp env-default .env && echo "Copied .env – edit secrets!"
-[[ ! -f reactmap/local.json ]] && cp reactmap/local-default.json reactmap/local.json
-[[ ! -f unown/dragonite_config.toml ]] && cp unown/dragonite_config-default.toml unown/dragonite_config.toml
-[[ ! -f unown/golbat_config.toml ]] && cp unown/golbat_config-default.toml unown/golbat_config.toml
-[[ ! -f unown/rotom_config.json ]] && cp unown/rotom_config-default.json unown/rotom_config.json
+# Welcome message
+echo "Welcome! This is the first-time setup script for Aegis All-in-One 2.0."
+echo "It will guide you through copying default configs, setting up secure values (prompting for input or generating random ones), and updating the files accordingly."
 
-# Prompt for key secrets (append to .env if missing)
-read -p "Enter PTC API key (or Enter for default): " ptc_key
-[[ -n "$ptc_key" ]] && echo "PTC_API_KEY=$ptc_key" >> .env
+# This script assumes you are in the root directory of the downloaded repo (Aegis-All-In-One)
+# It copies the default config files, prompts for tokens and passwords (or generates random if enter is pressed), and replaces the defaults in the config files.
 
-# Validate Dragonite/Golbat password match (simple grep check)
-if grep -q "password=" unown/dragonite_config.toml && grep -q "password=" unown/golbat_config.toml; then
-  d_pass=$(grep "password=" unown/dragonite_config.toml | cut -d= -f2 | tr -d '"')
-  g_pass=$(grep "password=" unown/golbat_config.toml | cut -d= -f2 | tr -d '"')
-  [[ "$d_pass" != "$g_pass" ]] && echo "Warning: Dragonite/Golbat passwords mismatch – fix manually!"
+# Copy the default files as per README
+cp env-default .env
+cp reactmap/local-default.json reactmap/local.json
+cp unown/dragonite_config-default.toml unown/dragonite_config.toml
+cp unown/golbat_config-default.toml unown/golbat_config.toml
+cp unown/rotom_config-default.json unown/rotom_config.json
+
+# Function to generate random string
+generate_random() {
+    local length=$1
+    local charset=$2
+    openssl rand -base64 48 | tr -dc "$charset" | fold -w "$length" | head -n 1
+}
+
+# Prompt for each value or generate random
+
+read -p "Enter DB_USER (or press enter for random): " DB_USER
+if [ -z "$DB_USER" ]; then
+    DB_USER=$(generate_random 16 'a-zA-Z0-9')
 fi
 
-echo "Setup complete! Run: docker compose up -d"
+read -p "Enter DB_PASSWORD (or press enter for random): " DB_PASSWORD
+if [ -z "$DB_PASSWORD" ]; then
+    DB_PASSWORD=$(generate_random 32 'a-zA-Z0-9')
+fi
+
+read -p "Enter KOJI_BEARER (or press enter for random): " KOJI_BEARER
+if [ -z "$KOJI_BEARER" ]; then
+    KOJI_BEARER=$(generate_random 32 'a-zA-Z0-9')
+fi
+
+read -p "Enter GOLBAT_RAW_SECRET (or press enter for random): " GOLBAT_RAW_SECRET
+if [ -z "$GOLBAT_RAW_SECRET" ]; then
+    GOLBAT_RAW_SECRET=$(generate_random 32 'a-zA-Z0-9')
+fi
+
+read -p "Enter GOLBAT_API_SECRET (or press enter for random): " GOLBAT_API_SECRET
+if [ -z "$GOLBAT_API_SECRET" ]; then
+    GOLBAT_API_SECRET=$(generate_random 32 'a-zA-Z0-9')
+fi
+
+read -p "Enter SESSION_SECRET (or press enter for random): " SESSION_SECRET
+if [ -z "$SESSION_SECRET" ]; then
+    SESSION_SECRET=$(generate_random 40 'a-zA-Z0-9~!@#^')
+fi
+
+read -p "Enter REACTMAP_SECRET (or press enter for random): " REACTMAP_SECRET
+if [ -z "$REACTMAP_SECRET" ]; then
+    REACTMAP_SECRET=$(generate_random 40 'a-zA-Z0-9~!@#^')
+fi
+
+read -p "Enter ROTOM_AUTH_BEARER (or press enter for random): " ROTOM_AUTH_BEARER
+if [ -z "$ROTOM_AUTH_BEARER" ]; then
+    ROTOM_AUTH_BEARER=$(generate_random 32 'a-zA-Z0-9')
+fi
+
+# Replace defaults in all relevant config files (including .env if it contains them)
+# We use sed to replace exact string matches
+
+# Replace DB user
+sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace DB password
+sed -i "s/SuperSecuredbuserPassword/${DB_PASSWORD}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace Koji bearer token
+sed -i "s/SuperSecureKojiSecret/${KOJI_BEARER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace Golbat raw secret
+sed -i "s/SuperSecureGolbatRawSecret/${GOLBAT_RAW_SECRET}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace Golbat API secret
+sed -i "s/SuperSecureGolbatApiSecret/${GOLBAT_API_SECRET}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace ReactMap session secret (specific default string)
+sed -i 's/98ki^e72~!@#(85o3kXLI*#c9wu5l!ZUGA/'"${SESSION_SECRET}"'/g' .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace ReactMap secret (specific default string)
+sed -i 's/98ki^e72~!@#(85o3kXLI*#c9wu5l!Zx10venikyoa0/'"${REACTMAP_SECRET}"'/g' .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+# Replace Rotom AuthBearer (assuming default is "bearer_for_rotom" based on README example)
+sed -i "s/bearer_for_rotom/${ROTOM_AUTH_BEARER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+
+echo "Setup complete. Config files have been copied and defaults replaced with provided or randomized values."
+echo "Review the files for any additional manual changes, then run 'docker compose up -d --force-recreate --build' to start."
