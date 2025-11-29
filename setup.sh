@@ -14,7 +14,7 @@ echo ""
 echo "======================================"
 echo "  Aegis All-in-One 2.0 - Setup"
 echo "  By The Pokemod Group"
-echo "  https://pokemon.pokemon"
+echo "  https://pokemod.dev/"
 echo "======================================"
 echo ""
 
