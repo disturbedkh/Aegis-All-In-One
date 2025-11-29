@@ -32,6 +32,51 @@ else
     REAL_GROUP=$(id -gn)
 fi
 
+# =============================================================================
+# Helper Functions for JSON Parsing
+# =============================================================================
+
+# Extract simple string value from JSON
+get_json_string() {
+    local file=$1
+    local key=$2
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/'
+}
+
+# Extract boolean value from JSON
+get_json_bool() {
+    local file=$1
+    local key=$2
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\(true\|false\)" "$file" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*\(true\|false\).*/\1/'
+}
+
+# Extract array from JSON (simple single-line arrays)
+get_json_array() {
+    local file=$1
+    local key=$2
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\[[^]]*\]" "$file" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*\(\[[^]]*\]\).*/\1/'
+}
+
+# Extract first element of token array (for Discord which uses array)
+get_json_token_array() {
+    local file=$1
+    local key=$2
+    local arr=$(get_json_array "$file" "$key")
+    echo "$arr" | sed 's/\["\([^"]*\)".*/\1/'
+}
+
+# Check if a value is a placeholder
+is_placeholder() {
+    local value=$1
+    if [[ "$value" == *"YOUR_"* ]] || \
+       [[ "$value" == *"CHANGE_ME"* ]] || \
+       [[ "$value" == *"SuperSecure"* ]] || \
+       [[ -z "$value" ]]; then
+        return 0
+    fi
+    return 1
+}
+
 echo ""
 echo "=============================================="
 echo "  Poracle Setup - Pokemon Alert Notifications"
@@ -103,19 +148,107 @@ fi
 print_success "Database credentials available"
 
 # =============================================================================
+# Parse Existing Configuration
+# =============================================================================
+print_header "Detecting Existing Configuration"
+
+# Parse existing values from Poracle config
+EXISTING_DISCORD_ENABLED=$(get_json_bool "$CONFIG_FILE" "enabled" | head -1)
+EXISTING_DISCORD_TOKEN=$(get_json_token_array "$CONFIG_FILE" "token")
+EXISTING_DISCORD_PREFIX=$(get_json_token_array "$CONFIG_FILE" "prefix")
+EXISTING_DISCORD_ADMINS=$(get_json_array "$CONFIG_FILE" "admins" | head -1)
+EXISTING_DISCORD_CHANNELS=$(grep -A5 '"discord"' "$CONFIG_FILE" | grep -o '"channels"[[:space:]]*:[[:space:]]*\[[^]]*\]' | head -1 | sed 's/.*:\s*\(\[.*\]\)/\1/')
+
+# Telegram config (appears after discord section)
+EXISTING_TELEGRAM_TOKEN=$(grep -A20 '"telegram"' "$CONFIG_FILE" | grep -o '"token"[[:space:]]*:[[:space:]]*"[^"]*"' | head -1 | sed 's/.*:\s*"\([^"]*\)".*/\1/')
+EXISTING_TELEGRAM_ADMINS=$(grep -A20 '"telegram"' "$CONFIG_FILE" | grep -o '"admins"[[:space:]]*:[[:space:]]*\[[^]]*\]' | head -1 | sed 's/.*:\s*\(\[.*\]\)/\1/')
+EXISTING_TELEGRAM_CHANNELS=$(grep -A20 '"telegram"' "$CONFIG_FILE" | grep -o '"channels"[[:space:]]*:[[:space:]]*\[[^]]*\]' | head -1 | sed 's/.*:\s*\(\[.*\]\)/\1/')
+EXISTING_TELEGRAM_ENABLED=$(grep -A5 '"telegram"' "$CONFIG_FILE" | grep -o '"enabled"[[:space:]]*:[[:space:]]*\(true\|false\)' | head -1 | sed 's/.*:\s*\(true\|false\)/\1/')
+
+# General settings
+EXISTING_LOCALE=$(get_json_string "$CONFIG_FILE" "locale")
+EXISTING_POKEMON=$(get_json_bool "$CONFIG_FILE" "pokemon")
+EXISTING_RAIDS=$(get_json_bool "$CONFIG_FILE" "raids")
+EXISTING_QUESTS=$(get_json_bool "$CONFIG_FILE" "quests")
+EXISTING_INVASIONS=$(get_json_bool "$CONFIG_FILE" "invasions")
+EXISTING_NESTS=$(get_json_bool "$CONFIG_FILE" "nests")
+EXISTING_LURES=$(get_json_bool "$CONFIG_FILE" "lures")
+EXISTING_GYMS=$(get_json_bool "$CONFIG_FILE" "gyms")
+EXISTING_WEATHER=$(get_json_bool "$CONFIG_FILE" "weather")
+
+# Database config from existing file
+EXISTING_DB_USER=$(get_json_string "$CONFIG_FILE" "user")
+EXISTING_DB_PASS=$(get_json_string "$CONFIG_FILE" "password")
+
+# Display detected values
+echo "Detected existing configuration:"
+echo ""
+
+# Check Discord
+if [ "$EXISTING_DISCORD_ENABLED" = "true" ] && ! is_placeholder "$EXISTING_DISCORD_TOKEN"; then
+    print_success "Discord: Configured (token ends with ...${EXISTING_DISCORD_TOKEN: -8})"
+    DISCORD_PRECONFIGURED=true
+else
+    print_info "Discord: Not configured"
+    DISCORD_PRECONFIGURED=false
+fi
+
+# Check Telegram
+if [ "$EXISTING_TELEGRAM_ENABLED" = "true" ] && ! is_placeholder "$EXISTING_TELEGRAM_TOKEN"; then
+    print_success "Telegram: Configured (token ends with ...${EXISTING_TELEGRAM_TOKEN: -8})"
+    TELEGRAM_PRECONFIGURED=true
+else
+    print_info "Telegram: Not configured"
+    TELEGRAM_PRECONFIGURED=false
+fi
+
+# Check database consistency
+if [ "$EXISTING_DB_PASS" = "$MYSQL_PASSWORD" ]; then
+    print_success "Database password: Matches .env"
+else
+    print_warning "Database password: Will be updated from .env"
+fi
+
+if [ -n "$EXISTING_LOCALE" ]; then
+    print_info "Language: $EXISTING_LOCALE"
+fi
+
+echo ""
+
+# =============================================================================
 # Platform Selection
 # =============================================================================
 print_header "Select Messaging Platform"
 
 echo "Poracle can send notifications to Discord, Telegram, or both."
 echo ""
+
+# Show current status
+if [ "$DISCORD_PRECONFIGURED" = true ] || [ "$TELEGRAM_PRECONFIGURED" = true ]; then
+    echo "Current configuration detected:"
+    [ "$DISCORD_PRECONFIGURED" = true ] && echo "  • Discord is currently enabled"
+    [ "$TELEGRAM_PRECONFIGURED" = true ] && echo "  • Telegram is currently enabled"
+    echo ""
+fi
+
 echo "Which platform(s) would you like to configure?"
 echo ""
 echo "  1) Discord only"
 echo "  2) Telegram only"
 echo "  3) Both Discord and Telegram"
+
+# Suggest default based on existing config
+if [ "$DISCORD_PRECONFIGURED" = true ] && [ "$TELEGRAM_PRECONFIGURED" = true ]; then
+    DEFAULT_PLATFORM=3
+elif [ "$TELEGRAM_PRECONFIGURED" = true ]; then
+    DEFAULT_PLATFORM=2
+else
+    DEFAULT_PLATFORM=1
+fi
+
 echo ""
-read -p "Select option [1-3]: " PLATFORM_CHOICE
+read -p "Select option [1-3, default: $DEFAULT_PLATFORM]: " PLATFORM_CHOICE
+PLATFORM_CHOICE=${PLATFORM_CHOICE:-$DEFAULT_PLATFORM}
 
 SETUP_DISCORD=false
 SETUP_TELEGRAM=false
@@ -146,29 +279,43 @@ esac
 if [ "$SETUP_DISCORD" = true ]; then
     print_header "Discord Bot Configuration"
     
-    echo "To use Poracle with Discord, you need to create a Discord Bot."
-    echo ""
-    echo "How to create a Discord Bot:"
-    echo "  1. Go to https://discord.com/developers/applications"
-    echo "  2. Click 'New Application' and give it a name (e.g., 'Pokemon Alerts')"
-    echo "  3. Go to the 'Bot' section in the left menu"
-    echo "  4. Click 'Add Bot' and confirm"
-    echo "  5. Under 'Token', click 'Copy' to get your bot token"
-    echo "  6. IMPORTANT: Enable these 'Privileged Gateway Intents':"
-    echo "     - MESSAGE CONTENT INTENT"
-    echo "     - SERVER MEMBERS INTENT"
-    echo "  7. Go to OAuth2 > URL Generator"
-    echo "  8. Select 'bot' scope and these permissions:"
-    echo "     - Send Messages, Embed Links, Attach Files, Read Message History"
-    echo "  9. Copy the generated URL and open it to invite the bot to your server"
-    echo ""
+    # Show existing values if available
+    if [ "$DISCORD_PRECONFIGURED" = true ]; then
+        echo -e "${GREEN}Existing Discord configuration detected!${NC}"
+        echo "Press Enter to keep existing values, or enter new values to update."
+        echo ""
+    else
+        echo "To use Poracle with Discord, you need to create a Discord Bot."
+        echo ""
+        echo "How to create a Discord Bot:"
+        echo "  1. Go to https://discord.com/developers/applications"
+        echo "  2. Click 'New Application' and give it a name (e.g., 'Pokemon Alerts')"
+        echo "  3. Go to the 'Bot' section in the left menu"
+        echo "  4. Click 'Add Bot' and confirm"
+        echo "  5. Under 'Token', click 'Copy' to get your bot token"
+        echo "  6. IMPORTANT: Enable these 'Privileged Gateway Intents':"
+        echo "     - MESSAGE CONTENT INTENT"
+        echo "     - SERVER MEMBERS INTENT"
+        echo "  7. Go to OAuth2 > URL Generator"
+        echo "  8. Select 'bot' scope and these permissions:"
+        echo "     - Send Messages, Embed Links, Attach Files, Read Message History"
+        echo "  9. Copy the generated URL and open it to invite the bot to your server"
+        echo ""
+    fi
     
     # Bot Token
     echo -e "${CYAN}Discord Bot Token${NC}"
     echo "This is the secret token that allows Poracle to control your bot."
     echo "Keep this private! Never share it publicly."
-    echo ""
-    read -p "Enter your Discord Bot Token: " DISCORD_TOKEN
+    
+    if ! is_placeholder "$EXISTING_DISCORD_TOKEN"; then
+        echo -e "Current: ${GREEN}****${EXISTING_DISCORD_TOKEN: -8}${NC}"
+        read -p "Enter new Discord Bot Token [Enter to keep current]: " DISCORD_TOKEN_INPUT
+        DISCORD_TOKEN=${DISCORD_TOKEN_INPUT:-$EXISTING_DISCORD_TOKEN}
+    else
+        echo ""
+        read -p "Enter your Discord Bot Token: " DISCORD_TOKEN
+    fi
     
     if [ -z "$DISCORD_TOKEN" ]; then
         print_error "Discord Bot Token is required"
@@ -181,9 +328,10 @@ if [ "$SETUP_DISCORD" = true ]; then
     echo -e "${CYAN}Command Prefix${NC}"
     echo "This is the character users type before commands (e.g., !track pikachu)"
     echo "Common choices: ! . $ ?"
-    echo ""
-    read -p "Enter command prefix [default: !]: " DISCORD_PREFIX
-    DISCORD_PREFIX=${DISCORD_PREFIX:-!}
+    
+    EXISTING_PREFIX=${EXISTING_DISCORD_PREFIX:-!}
+    read -p "Enter command prefix [default: $EXISTING_PREFIX]: " DISCORD_PREFIX_INPUT
+    DISCORD_PREFIX=${DISCORD_PREFIX_INPUT:-$EXISTING_PREFIX}
     
     echo ""
     
@@ -195,14 +343,24 @@ if [ "$SETUP_DISCORD" = true ]; then
     echo "  1. Enable Developer Mode in Discord (Settings > Advanced > Developer Mode)"
     echo "  2. Right-click on your username and select 'Copy ID'"
     echo ""
+    
+    # Show existing admins
+    if [ -n "$EXISTING_DISCORD_ADMINS" ] && [ "$EXISTING_DISCORD_ADMINS" != "[]" ]; then
+        echo -e "Current admins: ${GREEN}$EXISTING_DISCORD_ADMINS${NC}"
+        echo "Enter new IDs to replace, or press Enter to keep current"
+    fi
+    
     echo "Enter admin Discord User IDs (comma-separated for multiple)"
     echo "Example: 123456789012345678,987654321098765432"
-    echo ""
-    read -p "Enter Admin User ID(s): " DISCORD_ADMINS_INPUT
+    read -p "Admin User ID(s): " DISCORD_ADMINS_INPUT
     
     if [ -z "$DISCORD_ADMINS_INPUT" ]; then
-        print_warning "No admin IDs provided. You can add them later in the config file."
-        DISCORD_ADMINS="[]"
+        if [ -n "$EXISTING_DISCORD_ADMINS" ] && [ "$EXISTING_DISCORD_ADMINS" != "[]" ]; then
+            DISCORD_ADMINS="$EXISTING_DISCORD_ADMINS"
+        else
+            print_warning "No admin IDs provided. You can add them later in the config file."
+            DISCORD_ADMINS="[]"
+        fi
     else
         # Convert comma-separated to JSON array
         DISCORD_ADMINS=$(echo "$DISCORD_ADMINS_INPUT" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
@@ -218,11 +376,19 @@ if [ "$SETUP_DISCORD" = true ]; then
     echo "How to get a Channel ID:"
     echo "  1. Right-click on the channel name"
     echo "  2. Select 'Copy ID'"
-    echo ""
-    read -p "Enter Channel ID(s) [leave empty for all]: " DISCORD_CHANNELS_INPUT
+    
+    if [ -n "$EXISTING_DISCORD_CHANNELS" ] && [ "$EXISTING_DISCORD_CHANNELS" != "[]" ]; then
+        echo -e "Current channels: ${GREEN}$EXISTING_DISCORD_CHANNELS${NC}"
+    fi
+    
+    read -p "Enter Channel ID(s) [leave empty for all/keep current]: " DISCORD_CHANNELS_INPUT
     
     if [ -z "$DISCORD_CHANNELS_INPUT" ]; then
-        DISCORD_CHANNELS="[]"
+        if [ -n "$EXISTING_DISCORD_CHANNELS" ]; then
+            DISCORD_CHANNELS="$EXISTING_DISCORD_CHANNELS"
+        else
+            DISCORD_CHANNELS="[]"
+        fi
     else
         DISCORD_CHANNELS=$(echo "$DISCORD_CHANNELS_INPUT" | sed 's/,/","/g' | sed 's/^/["/' | sed 's/$/"]/')
     fi
@@ -236,20 +402,34 @@ fi
 if [ "$SETUP_TELEGRAM" = true ]; then
     print_header "Telegram Bot Configuration"
     
-    echo "To use Poracle with Telegram, you need to create a Telegram Bot."
-    echo ""
-    echo "How to create a Telegram Bot:"
-    echo "  1. Open Telegram and search for @BotFather"
-    echo "  2. Send /newbot command"
-    echo "  3. Follow the prompts to name your bot"
-    echo "  4. BotFather will give you an API token - copy it"
-    echo ""
+    # Show existing values if available
+    if [ "$TELEGRAM_PRECONFIGURED" = true ]; then
+        echo -e "${GREEN}Existing Telegram configuration detected!${NC}"
+        echo "Press Enter to keep existing values, or enter new values to update."
+        echo ""
+    else
+        echo "To use Poracle with Telegram, you need to create a Telegram Bot."
+        echo ""
+        echo "How to create a Telegram Bot:"
+        echo "  1. Open Telegram and search for @BotFather"
+        echo "  2. Send /newbot command"
+        echo "  3. Follow the prompts to name your bot"
+        echo "  4. BotFather will give you an API token - copy it"
+        echo ""
+    fi
     
     # Bot Token
     echo -e "${CYAN}Telegram Bot Token${NC}"
     echo "This is the API token from BotFather (looks like: 123456789:ABCdefGHIjklMNOpqrsTUVwxyz)"
-    echo ""
-    read -p "Enter your Telegram Bot Token: " TELEGRAM_TOKEN
+    
+    if ! is_placeholder "$EXISTING_TELEGRAM_TOKEN"; then
+        echo -e "Current: ${GREEN}****${EXISTING_TELEGRAM_TOKEN: -8}${NC}"
+        read -p "Enter new Telegram Bot Token [Enter to keep current]: " TELEGRAM_TOKEN_INPUT
+        TELEGRAM_TOKEN=${TELEGRAM_TOKEN_INPUT:-$EXISTING_TELEGRAM_TOKEN}
+    else
+        echo ""
+        read -p "Enter your Telegram Bot Token: " TELEGRAM_TOKEN
+    fi
     
     if [ -z "$TELEGRAM_TOKEN" ]; then
         print_error "Telegram Bot Token is required"
@@ -267,14 +447,23 @@ if [ "$SETUP_TELEGRAM" = true ]; then
     echo "  2. Start a chat and it will show your User ID"
     echo "  Alternative: Search for @getmyid_bot"
     echo ""
+    
+    if [ -n "$EXISTING_TELEGRAM_ADMINS" ] && [ "$EXISTING_TELEGRAM_ADMINS" != "[]" ]; then
+        echo -e "Current admins: ${GREEN}$EXISTING_TELEGRAM_ADMINS${NC}"
+        echo "Enter new IDs to replace, or press Enter to keep current"
+    fi
+    
     echo "Enter admin Telegram User IDs (comma-separated for multiple)"
     echo "Example: 123456789,987654321"
-    echo ""
-    read -p "Enter Admin User ID(s): " TELEGRAM_ADMINS_INPUT
+    read -p "Admin User ID(s): " TELEGRAM_ADMINS_INPUT
     
     if [ -z "$TELEGRAM_ADMINS_INPUT" ]; then
-        print_warning "No admin IDs provided. You can add them later in the config file."
-        TELEGRAM_ADMINS="[]"
+        if [ -n "$EXISTING_TELEGRAM_ADMINS" ] && [ "$EXISTING_TELEGRAM_ADMINS" != "[]" ]; then
+            TELEGRAM_ADMINS="$EXISTING_TELEGRAM_ADMINS"
+        else
+            print_warning "No admin IDs provided. You can add them later in the config file."
+            TELEGRAM_ADMINS="[]"
+        fi
     else
         # Convert comma-separated to JSON array (Telegram IDs are numbers, not strings)
         TELEGRAM_ADMINS=$(echo "$TELEGRAM_ADMINS_INPUT" | sed 's/,/,/g' | sed 's/^/[/' | sed 's/$/]/')
@@ -290,11 +479,19 @@ if [ "$SETUP_TELEGRAM" = true ]; then
     echo "How to get a Chat ID:"
     echo "  1. Add @getmyid_bot to your group"
     echo "  2. It will show the group's Chat ID"
-    echo ""
-    read -p "Enter Chat ID(s) [leave empty for all]: " TELEGRAM_CHANNELS_INPUT
+    
+    if [ -n "$EXISTING_TELEGRAM_CHANNELS" ] && [ "$EXISTING_TELEGRAM_CHANNELS" != "[]" ]; then
+        echo -e "Current channels: ${GREEN}$EXISTING_TELEGRAM_CHANNELS${NC}"
+    fi
+    
+    read -p "Enter Chat ID(s) [leave empty for all/keep current]: " TELEGRAM_CHANNELS_INPUT
     
     if [ -z "$TELEGRAM_CHANNELS_INPUT" ]; then
-        TELEGRAM_CHANNELS="[]"
+        if [ -n "$EXISTING_TELEGRAM_CHANNELS" ]; then
+            TELEGRAM_CHANNELS="$EXISTING_TELEGRAM_CHANNELS"
+        else
+            TELEGRAM_CHANNELS="[]"
+        fi
     else
         TELEGRAM_CHANNELS=$(echo "$TELEGRAM_CHANNELS_INPUT" | sed 's/,/,/g' | sed 's/^/[/' | sed 's/$/]/')
     fi
@@ -310,40 +507,100 @@ print_header "Notification Types"
 echo "Choose which types of notifications to enable by default."
 echo "Users can still customize their personal preferences."
 echo ""
-echo "Enter 'y' for yes or 'n' for no (press Enter for default)"
+echo "Enter 'y' for yes or 'n' for no (press Enter for default/current)"
 echo ""
 
-read -p "Enable Pokemon spawn alerts? [Y/n]: " ENABLE_POKEMON
-ENABLE_POKEMON=${ENABLE_POKEMON:-y}
-[ "$ENABLE_POKEMON" = "y" ] || [ "$ENABLE_POKEMON" = "Y" ] && POKEMON_ENABLED=true || POKEMON_ENABLED=false
+# Use existing values as defaults, or sensible defaults if not set
+DEFAULT_POKEMON=${EXISTING_POKEMON:-true}
+DEFAULT_RAIDS=${EXISTING_RAIDS:-true}
+DEFAULT_QUESTS=${EXISTING_QUESTS:-true}
+DEFAULT_INVASIONS=${EXISTING_INVASIONS:-true}
+DEFAULT_NESTS=${EXISTING_NESTS:-false}
+DEFAULT_LURES=${EXISTING_LURES:-false}
+DEFAULT_GYMS=${EXISTING_GYMS:-false}
+DEFAULT_WEATHER=${EXISTING_WEATHER:-false}
 
-read -p "Enable Raid alerts? [Y/n]: " ENABLE_RAIDS
-ENABLE_RAIDS=${ENABLE_RAIDS:-y}
-[ "$ENABLE_RAIDS" = "y" ] || [ "$ENABLE_RAIDS" = "Y" ] && RAIDS_ENABLED=true || RAIDS_ENABLED=false
+# Convert to y/n for display
+[ "$DEFAULT_POKEMON" = "true" ] && DEF_POK="Y/n" || DEF_POK="y/N"
+[ "$DEFAULT_RAIDS" = "true" ] && DEF_RAID="Y/n" || DEF_RAID="y/N"
+[ "$DEFAULT_QUESTS" = "true" ] && DEF_QUEST="Y/n" || DEF_QUEST="y/N"
+[ "$DEFAULT_INVASIONS" = "true" ] && DEF_INV="Y/n" || DEF_INV="y/N"
+[ "$DEFAULT_NESTS" = "true" ] && DEF_NEST="Y/n" || DEF_NEST="y/N"
+[ "$DEFAULT_LURES" = "true" ] && DEF_LURE="Y/n" || DEF_LURE="y/N"
+[ "$DEFAULT_GYMS" = "true" ] && DEF_GYM="Y/n" || DEF_GYM="y/N"
+[ "$DEFAULT_WEATHER" = "true" ] && DEF_WEATH="Y/n" || DEF_WEATH="y/N"
 
-read -p "Enable Quest alerts? [Y/n]: " ENABLE_QUESTS
-ENABLE_QUESTS=${ENABLE_QUESTS:-y}
-[ "$ENABLE_QUESTS" = "y" ] || [ "$ENABLE_QUESTS" = "Y" ] && QUESTS_ENABLED=true || QUESTS_ENABLED=false
+read -p "Enable Pokemon spawn alerts? [$DEF_POK]: " ENABLE_POKEMON
+if [ -z "$ENABLE_POKEMON" ]; then
+    POKEMON_ENABLED=$DEFAULT_POKEMON
+elif [ "$ENABLE_POKEMON" = "y" ] || [ "$ENABLE_POKEMON" = "Y" ]; then
+    POKEMON_ENABLED=true
+else
+    POKEMON_ENABLED=false
+fi
 
-read -p "Enable Team Rocket invasion alerts? [Y/n]: " ENABLE_INVASIONS
-ENABLE_INVASIONS=${ENABLE_INVASIONS:-y}
-[ "$ENABLE_INVASIONS" = "y" ] || [ "$ENABLE_INVASIONS" = "Y" ] && INVASIONS_ENABLED=true || INVASIONS_ENABLED=false
+read -p "Enable Raid alerts? [$DEF_RAID]: " ENABLE_RAIDS
+if [ -z "$ENABLE_RAIDS" ]; then
+    RAIDS_ENABLED=$DEFAULT_RAIDS
+elif [ "$ENABLE_RAIDS" = "y" ] || [ "$ENABLE_RAIDS" = "Y" ]; then
+    RAIDS_ENABLED=true
+else
+    RAIDS_ENABLED=false
+fi
 
-read -p "Enable Nest alerts? [y/N]: " ENABLE_NESTS
-ENABLE_NESTS=${ENABLE_NESTS:-n}
-[ "$ENABLE_NESTS" = "y" ] || [ "$ENABLE_NESTS" = "Y" ] && NESTS_ENABLED=true || NESTS_ENABLED=false
+read -p "Enable Quest alerts? [$DEF_QUEST]: " ENABLE_QUESTS
+if [ -z "$ENABLE_QUESTS" ]; then
+    QUESTS_ENABLED=$DEFAULT_QUESTS
+elif [ "$ENABLE_QUESTS" = "y" ] || [ "$ENABLE_QUESTS" = "Y" ]; then
+    QUESTS_ENABLED=true
+else
+    QUESTS_ENABLED=false
+fi
 
-read -p "Enable Lure alerts? [y/N]: " ENABLE_LURES
-ENABLE_LURES=${ENABLE_LURES:-n}
-[ "$ENABLE_LURES" = "y" ] || [ "$ENABLE_LURES" = "Y" ] && LURES_ENABLED=true || LURES_ENABLED=false
+read -p "Enable Team Rocket invasion alerts? [$DEF_INV]: " ENABLE_INVASIONS
+if [ -z "$ENABLE_INVASIONS" ]; then
+    INVASIONS_ENABLED=$DEFAULT_INVASIONS
+elif [ "$ENABLE_INVASIONS" = "y" ] || [ "$ENABLE_INVASIONS" = "Y" ]; then
+    INVASIONS_ENABLED=true
+else
+    INVASIONS_ENABLED=false
+fi
 
-read -p "Enable Gym alerts? [y/N]: " ENABLE_GYMS
-ENABLE_GYMS=${ENABLE_GYMS:-n}
-[ "$ENABLE_GYMS" = "y" ] || [ "$ENABLE_GYMS" = "Y" ] && GYMS_ENABLED=true || GYMS_ENABLED=false
+read -p "Enable Nest alerts? [$DEF_NEST]: " ENABLE_NESTS
+if [ -z "$ENABLE_NESTS" ]; then
+    NESTS_ENABLED=$DEFAULT_NESTS
+elif [ "$ENABLE_NESTS" = "y" ] || [ "$ENABLE_NESTS" = "Y" ]; then
+    NESTS_ENABLED=true
+else
+    NESTS_ENABLED=false
+fi
 
-read -p "Enable Weather alerts? [y/N]: " ENABLE_WEATHER
-ENABLE_WEATHER=${ENABLE_WEATHER:-n}
-[ "$ENABLE_WEATHER" = "y" ] || [ "$ENABLE_WEATHER" = "Y" ] && WEATHER_ENABLED=true || WEATHER_ENABLED=false
+read -p "Enable Lure alerts? [$DEF_LURE]: " ENABLE_LURES
+if [ -z "$ENABLE_LURES" ]; then
+    LURES_ENABLED=$DEFAULT_LURES
+elif [ "$ENABLE_LURES" = "y" ] || [ "$ENABLE_LURES" = "Y" ]; then
+    LURES_ENABLED=true
+else
+    LURES_ENABLED=false
+fi
+
+read -p "Enable Gym alerts? [$DEF_GYM]: " ENABLE_GYMS
+if [ -z "$ENABLE_GYMS" ]; then
+    GYMS_ENABLED=$DEFAULT_GYMS
+elif [ "$ENABLE_GYMS" = "y" ] || [ "$ENABLE_GYMS" = "Y" ]; then
+    GYMS_ENABLED=true
+else
+    GYMS_ENABLED=false
+fi
+
+read -p "Enable Weather alerts? [$DEF_WEATH]: " ENABLE_WEATHER
+if [ -z "$ENABLE_WEATHER" ]; then
+    WEATHER_ENABLED=$DEFAULT_WEATHER
+elif [ "$ENABLE_WEATHER" = "y" ] || [ "$ENABLE_WEATHER" = "Y" ]; then
+    WEATHER_ENABLED=true
+else
+    WEATHER_ENABLED=false
+fi
 
 # =============================================================================
 # Language Selection
@@ -362,8 +619,10 @@ echo "  ko - Korean"
 echo "  pt-br - Portuguese (Brazil)"
 echo "  zh-tw - Chinese (Traditional)"
 echo ""
-read -p "Enter language code [default: en]: " LOCALE
-LOCALE=${LOCALE:-en}
+
+DEFAULT_LOCALE=${EXISTING_LOCALE:-en}
+read -p "Enter language code [default: $DEFAULT_LOCALE]: " LOCALE_INPUT
+LOCALE=${LOCALE_INPUT:-$DEFAULT_LOCALE}
 
 # =============================================================================
 # Generate Configuration
@@ -379,6 +638,20 @@ DB_USER=${MYSQL_USER:-dbuser}
 
 # Build the new configuration
 print_info "Building new configuration..."
+
+# Set defaults for platforms not being configured
+if [ "$SETUP_DISCORD" = false ]; then
+    DISCORD_TOKEN="YOUR_DISCORD_BOT_TOKEN"
+    DISCORD_PREFIX="!"
+    DISCORD_ADMINS="[]"
+    DISCORD_CHANNELS="[]"
+fi
+
+if [ "$SETUP_TELEGRAM" = false ]; then
+    TELEGRAM_TOKEN="YOUR_TELEGRAM_BOT_TOKEN"
+    TELEGRAM_ADMINS="[]"
+    TELEGRAM_CHANNELS="[]"
+fi
 
 cat > "$CONFIG_FILE" << EOF
 {
@@ -425,9 +698,9 @@ cat > "$CONFIG_FILE" << EOF
   "discord": {
     "enabled": $SETUP_DISCORD,
     "prefix": ["$DISCORD_PREFIX"],
-    "token": ["${DISCORD_TOKEN:-YOUR_DISCORD_BOT_TOKEN}"],
-    "channels": ${DISCORD_CHANNELS:-[]},
-    "admins": ${DISCORD_ADMINS:-[]},
+    "token": ["$DISCORD_TOKEN"],
+    "channels": $DISCORD_CHANNELS,
+    "admins": $DISCORD_ADMINS,
     "limitSec": 0,
     "limitAmount": 0,
     "pokemonRole": [],
@@ -443,9 +716,9 @@ cat > "$CONFIG_FILE" << EOF
   },
   "telegram": {
     "enabled": $SETUP_TELEGRAM,
-    "token": "${TELEGRAM_TOKEN:-YOUR_TELEGRAM_BOT_TOKEN}",
-    "channels": ${TELEGRAM_CHANNELS:-[]},
-    "admins": ${TELEGRAM_ADMINS:-[]},
+    "token": "$TELEGRAM_TOKEN",
+    "channels": $TELEGRAM_CHANNELS,
+    "admins": $TELEGRAM_ADMINS,
     "pokemonRole": [],
     "pokestopRole": [],
     "invasionRole": [],
@@ -509,19 +782,25 @@ fi
 # =============================================================================
 print_header "Golbat Webhook Configuration"
 
-echo "For Poracle to receive Pokemon data, Golbat needs to send webhooks to it."
-echo ""
-read -p "Would you like to add Poracle webhook to Golbat config? (y/n) [y]: " ADD_WEBHOOK
-ADD_WEBHOOK=${ADD_WEBHOOK:-y}
+GOLBAT_CONFIG="unown/golbat_config.toml"
+WEBHOOK_EXISTS=false
 
-if [ "$ADD_WEBHOOK" = "y" ] || [ "$ADD_WEBHOOK" = "Y" ]; then
-    GOLBAT_CONFIG="unown/golbat_config.toml"
+# Check if webhook already exists
+if [ -f "$GOLBAT_CONFIG" ]; then
+    if grep -q "poracle:3030" "$GOLBAT_CONFIG"; then
+        WEBHOOK_EXISTS=true
+        print_success "Poracle webhook already configured in Golbat"
+    fi
+fi
+
+if [ "$WEBHOOK_EXISTS" = false ]; then
+    echo "For Poracle to receive Pokemon data, Golbat needs to send webhooks to it."
+    echo ""
+    read -p "Would you like to add Poracle webhook to Golbat config? (y/n) [y]: " ADD_WEBHOOK
+    ADD_WEBHOOK=${ADD_WEBHOOK:-y}
     
-    if [ -f "$GOLBAT_CONFIG" ]; then
-        # Check if webhook already exists
-        if grep -q "poracle:3030" "$GOLBAT_CONFIG"; then
-            print_info "Poracle webhook already configured in Golbat"
-        else
+    if [ "$ADD_WEBHOOK" = "y" ] || [ "$ADD_WEBHOOK" = "Y" ]; then
+        if [ -f "$GOLBAT_CONFIG" ]; then
             print_info "Adding Poracle webhook to Golbat config..."
             
             # Add webhook configuration at end of file
@@ -535,16 +814,18 @@ EOF
             
             print_success "Poracle webhook added to Golbat config"
             print_warning "Remember to restart Golbat: docker compose restart golbat"
+        else
+            print_warning "Golbat config not found. You'll need to manually add the webhook."
+            echo ""
+            echo "Add this to your golbat_config.toml:"
+            echo ""
+            echo '[[webhooks]]'
+            echo 'url = "http://poracle:3030"'
+            echo 'types = ["pokemon_iv", "pokemon_no_iv", "raid", "quest", "invasion", "pokestop", "gym", "weather", "nest"]'
         fi
-    else
-        print_warning "Golbat config not found. You'll need to manually add the webhook."
-        echo ""
-        echo "Add this to your golbat_config.toml:"
-        echo ""
-        echo '[[webhooks]]'
-        echo 'url = "http://poracle:3030"'
-        echo 'types = ["pokemon_iv", "pokemon_no_iv", "raid", "quest", "invasion", "pokestop", "gym", "weather", "nest"]'
     fi
+else
+    ADD_WEBHOOK="n"
 fi
 
 # =============================================================================
@@ -554,7 +835,7 @@ print_info "Restoring file ownership..."
 chown "$REAL_USER:$REAL_GROUP" "$CONFIG_FILE" 2>/dev/null || true
 chown "$REAL_USER:$REAL_GROUP" "${CONFIG_FILE}.backup."* 2>/dev/null || true
 chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml 2>/dev/null || true
-chown "$REAL_USER:$REAL_GROUP" unown/golbat_config.toml 2>/dev/null || true
+chown "$REAL_USER:$REAL_GROUP" "$GOLBAT_CONFIG" 2>/dev/null || true
 print_success "File ownership restored"
 
 # =============================================================================
@@ -609,6 +890,8 @@ echo ""
 echo "  Configuration Summary:"
 echo "  ├── Config File: $CONFIG_FILE"
 echo "  ├── Language: $LOCALE"
+echo "  ├── Database User: $DB_USER"
+echo "  ├── Database: poracle"
 if [ "$SETUP_DISCORD" = true ]; then
 echo "  ├── Discord: Enabled"
 echo "  │   ├── Prefix: $DISCORD_PREFIX"
@@ -658,7 +941,6 @@ echo "  Stop:           docker compose stop poracle"
 echo "  Edit config:    nano $CONFIG_FILE"
 echo ""
 echo "Documentation:"
-echo "  https://poracle.pokemon.pokemon.pokemon/"
 echo "  https://github.com/KartulUdus/PoracleJS"
 echo ""
 
@@ -669,4 +951,3 @@ if [ "$ADD_WEBHOOK" = "y" ] || [ "$ADD_WEBHOOK" = "Y" ]; then
 fi
 
 print_success "Enjoy your Pokemon alerts!"
-
