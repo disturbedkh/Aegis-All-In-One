@@ -24,6 +24,15 @@ echo "  https://pokemod.dev/"
 echo "=============================================="
 echo ""
 
+# Get the original user who called sudo (to fix file ownership later)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
+
 # Welcome message
 print_info "This script will setup Fletchling to import Pokemon nests to ReactMap."
 echo ""
@@ -228,6 +237,13 @@ else
     print_error "docker-osm-importer.sh not found"
     exit 1
 fi
+
+# Restore file ownership to the original user (not root)
+print_info "Restoring file ownership..."
+chown "$REAL_USER:$REAL_GROUP" "$CONFIG_FILE" 2>/dev/null || true
+chown "$REAL_USER:$REAL_GROUP" "${CONFIG_FILE}.backup."* 2>/dev/null || true
+chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml 2>/dev/null || true
+print_success "File ownership restored to $REAL_USER"
 
 # Print summary
 echo ""
