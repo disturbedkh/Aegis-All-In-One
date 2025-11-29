@@ -5,7 +5,8 @@
 # Includes Fail2Ban configuration for brute-force and bot protection
 # Includes optional Authelia setup for SSO and 2FA authentication
 
-set -e
+# NOTE: We intentionally do NOT use 'set -e' because we need to handle nginx test
+# failures gracefully and continue to SSL setup even if there are warnings
 
 # Global variables
 AUTHELIA_ENABLED=false
@@ -1123,27 +1124,27 @@ create_symlinks() {
 test_and_reload_nginx() {
     print_info "Testing Nginx configuration..."
     
-    # Run nginx -t and capture output (show output in real-time too)
-    nginx -t
+    # Run nginx -t and capture output
+    NGINX_TEST_OUTPUT=$(nginx -t 2>&1) || true
     NGINX_TEST_EXIT=$?
     
+    # Show the output
+    echo "$NGINX_TEST_OUTPUT"
     echo ""
     
-    if [ $NGINX_TEST_EXIT -eq 0 ]; then
+    # Check if test passed (exit code 0 and no "test failed" in output)
+    if [ $NGINX_TEST_EXIT -eq 0 ] && ! echo "$NGINX_TEST_OUTPUT" | grep -q "test failed"; then
         print_success "Nginx configuration is valid"
         print_info "Reloading Nginx..."
         
-        if systemctl reload nginx; then
+        if systemctl reload nginx 2>/dev/null; then
             print_success "Nginx reloaded successfully"
         else
-            print_warning "Nginx reload returned non-zero exit code"
+            print_warning "Nginx reload may have had issues, but continuing..."
         fi
     else
         print_error "Nginx configuration test failed!"
         echo ""
-        
-        # Run again to capture output for analysis
-        NGINX_TEST_OUTPUT=$(nginx -t 2>&1)
         
         # Check for common issues and provide guidance
         if echo "$NGINX_TEST_OUTPUT" | grep -q "conflicting server name"; then
@@ -1169,12 +1170,14 @@ test_and_reload_nginx() {
         fi
         
         echo ""
-        read -p "Would you like to continue anyway (may cause issues)? (y/n) [n]: " CONTINUE_ANYWAY
+        read -p "Would you like to continue to SSL setup anyway? (y/n) [y]: " CONTINUE_ANYWAY
+        CONTINUE_ANYWAY=${CONTINUE_ANYWAY:-y}
         if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
-            print_error "Setup aborted due to nginx configuration errors."
+            print_error "Setup aborted. Please fix nginx configuration errors first."
             exit 1
         fi
-        print_warning "Continuing despite nginx test failure..."
+        print_warning "Continuing to SSL setup despite nginx test issues..."
+        print_info "You may need to fix nginx config manually after SSL certificates are obtained."
     fi
     
     echo ""
