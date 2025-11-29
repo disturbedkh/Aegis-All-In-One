@@ -1,30 +1,117 @@
-# Aegis All in One Mapping Solution
+# Aegis All-in-One Mapping Solution
 
-## Introduction
+> A complete, beginner-friendly Docker stack for Pokémon mapping using Aegis and the Unown# ecosystem.
 
-This repository is meant to help newbies to give their first steps into the Pokémon Mapping world using Aegis (https://www.pokemod.dev) and the Unown# (https://github.com/UnownHash) stack.
+---
 
-For people rather interested in Atlas (https://www.pokemod.dev) and RDM (https://github.com/RealDeviceMap), you should head over to our other repository (https://github.com/The-Pokemod-Group/Atlas-All-In-One)
+## 📋 Table of Contents
 
-## Disclaimer
+- [Overview](#overview)
+- [Architecture](#architecture)
+- [Prerequisites](#prerequisites)
+- [Quick Start](#quick-start)
+- [Installation](#installation)
+- [Services](#services)
+- [Optional Features](#optional-features)
+- [Security Setup](#security-setup)
+- [Configuration](#configuration)
+- [Device Setup](#device-setup)
+- [Troubleshooting](#troubleshooting)
+- [Screenshots](#screenshots)
+- [Support](#support)
 
-This repository is meant to be used as a **learning tool** to help you understand how the different services interact with each other. For production use, please follow the security setup instructions in Step 3.
+---
 
-## Pre-installation
+## Overview
 
-Make sure you have a Linux environment available. Albeit it is possible to run Docker under Windows, this AIO hasn't been tested in that environment so no support can be provided.
+This repository provides a complete, pre-configured Docker stack that brings together all the services needed for Pokémon mapping. It's designed as a **learning tool** to help newcomers understand how the different components interact.
 
-Moreover, you will need to have Docker Engine and Docker Compose plugin updated to a recent version in order for services used in this AIO repository to work correctly!!!
+### What's Included
 
-Regarding Docker configurations, due to the massive logs size that can accumulate over time, it is strongly recommended that you configure your Docker service to limit and rotate logs. You can achieve this by creating or editing the daemon.json file in your system:
+| Component | Purpose |
+|-----------|---------|
+| **Aegis** | Mobile device client for scanning |
+| **Dragonite** | Scanner backend & task distribution |
+| **Golbat** | Data processor & Pokemon tracker |
+| **Rotom** | Device manager & communication hub |
+| **ReactMap** | Beautiful web-based map frontend |
+| **Koji** | Geofence & area management |
+| **Grafana** | Performance monitoring & statistics |
+| **MariaDB** | Database for all services |
+
+### Alternative Stack
+
+Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/The-Pokemod-Group/Atlas-All-In-One).
+
+---
+
+## Architecture
 
 ```
+┌─────────────────────────────────────────────────────────────────┐
+│                         Your Server                              │
+├─────────────────────────────────────────────────────────────────┤
+│                                                                  │
+│  ┌──────────┐    ┌──────────┐    ┌──────────┐    ┌──────────┐  │
+│  │  Aegis   │───▶│  Rotom   │───▶│ Dragonite│───▶│  Golbat  │  │
+│  │ (Device) │    │ (Manager)│    │ (Scanner)│    │(Processor│  │
+│  └──────────┘    └──────────┘    └──────────┘    └──────────┘  │
+│       │                │               │               │        │
+│       │                │               │               │        │
+│       │                ▼               ▼               ▼        │
+│       │          ┌─────────────────────────────────────┐       │
+│       │          │            MariaDB                   │       │
+│       │          │  (golbat_db, dragonite_db, koji_db) │       │
+│       │          └─────────────────────────────────────┘       │
+│       │                              │                          │
+│       │                              ▼                          │
+│       │          ┌──────────┐  ┌──────────┐  ┌──────────┐      │
+│       └─────────▶│ ReactMap │  │   Koji   │  │ Grafana  │      │
+│      Port 7070   │  (Map)   │  │ (Areas)  │  │ (Stats)  │      │
+│                  └──────────┘  └──────────┘  └──────────┘      │
+│                                                                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Prerequisites
+
+### System Requirements
+
+- **Operating System**: Linux (Ubuntu 20.04+ or Debian 11+ recommended)
+- **RAM**: Minimum 4GB, 8GB+ recommended
+- **Storage**: 20GB+ free space (SSD recommended for database performance)
+- **CPU**: 2+ cores recommended
+
+> ⚠️ **Note**: While Docker runs on Windows/macOS, this AIO is designed and tested for Linux only.
+
+### Required Software
+
+1. **Docker Engine** (version 20.10+)
+2. **Docker Compose Plugin** (v2)
+
+### Install Docker (if needed)
+
+```bash
+# Ubuntu/Debian
+curl -fsSL https://get.docker.com | sh
+sudo usermod -aG docker $USER
+
+# Log out and back in for group changes to take effect
+```
+
+### Configure Docker Logging (Recommended)
+
+Docker can generate massive log files. Configure log rotation to prevent disk space issues:
+
+```bash
 sudo nano /etc/docker/daemon.json
 ```
 
-and placing inside:
+Add the following configuration:
 
-```
+```json
 {
   "log-driver": "json-file",
   "log-opts": {
@@ -34,222 +121,549 @@ and placing inside:
 }
 ```
 
-This will limit the logs to a total of 300Mbytes and rotate them every 100Mbytes.
+Apply changes:
 
-Don't forget to restart the docker service once you've edited/create the file above with
-
-```
+```bash
 sudo systemctl restart docker
 ```
 
+This limits logs to 300MB total (3 files × 100MB each) with automatic rotation.
+
+---
+
+## Quick Start
+
+For experienced users, here's the fastest path to a running system:
+
+```bash
+# Clone and enter directory
+git clone https://github.com/The-Pokemod-Group/Aegis-All-In-One.git
+cd Aegis-All-In-One
+
+# Run setup (creates configs, databases, passwords)
+sudo bash ./setup.sh
+
+# Start all services
+docker compose up -d
+
+# (Optional) Secure for external access
+sudo bash ./nginx-setup.sh
+```
+
+Then visit http://localhost:6001 for ReactMap.
+
+---
+
 ## Installation
 
-### 1. Clone the repository
+### Step 1: Clone the Repository
 
-```
+```bash
 git clone https://github.com/The-Pokemod-Group/Aegis-All-In-One.git
 cd Aegis-All-In-One
 ```
 
-### 2. Run the setup script
+### Step 2: Run the Setup Script
 
-```
+```bash
 sudo bash ./setup.sh
 ```
 
-This will prompt you to create all needed environmental and config variables and import them into relevant configs and the docker compose file. The script will also create the initial databases.
+The setup script will:
 
-### 3. Start the stack
+- ✅ Generate secure random passwords for all services
+- ✅ Create configuration files from templates
+- ✅ Set up MariaDB with optimized settings for your hardware
+- ✅ Create all required databases
+- ✅ Configure inter-service communication
 
-```
+You'll be prompted to customize:
+- Database usernames and passwords
+- API secrets and bearer tokens
+- Service-specific settings
+
+### Step 3: Start the Stack
+
+```bash
 docker compose up -d --force-recreate --build
 ```
 
-(\*) You might need to run the above command with sudo if your local user doesn't have permissions over the docker service
+> 💡 **Tip**: Add `sudo` if your user isn't in the docker group.
 
-You should check each running container for errors after first start in the form of:
+First startup may take a few minutes as Docker downloads images and builds containers.
 
+### Step 4: Verify Services
+
+Check that all containers are running:
+
+```bash
+docker compose ps
 ```
-docker logs <name_of_container>
+
+All services should show `Up` status. Check individual logs if needed:
+
+```bash
+docker logs <container_name>
 ```
 
-It's normal that after the first start some errors appear as, for example, Koji needs to have at least one project for dragonite/reactmap to pull the areas from but overall, all containers should boot up normally.
+> 📝 **Note**: Some initial errors are normal (e.g., Koji needs projects before Dragonite can sync). These resolve once you complete the initial configuration.
 
-### 4. Check if all systems are running
+### Step 5: Access the Web Interfaces
 
-Point your browser to the following addresses. Replace localhost with your server's IP address, if needed:
+Open your browser and visit these URLs (replace `localhost` with your server IP if remote):
 
-| Service | URL | Description |
-|---------|-----|-------------|
-| ReactMap | http://localhost:6001 | Pokemon Map Frontend |
-| Dragonite Admin | http://localhost:6002 | Scanner Management |
-| Rotom | http://localhost:6003 | Device Manager |
-| Koji | http://localhost:6004 | Geofence & Area Management |
-| phpMyAdmin | http://localhost:6005 | Database Management |
-| Grafana | http://localhost:6006 | Statistics & Monitoring |
-| Poracle* | http://localhost:6007 | Discord/Telegram Alerts (optional) |
+| Service | URL | Default Credentials |
+|---------|-----|---------------------|
+| ReactMap | http://localhost:6001 | None required |
+| Dragonite Admin | http://localhost:6002 | Set in setup |
+| Rotom | http://localhost:6003 | None required |
+| Koji | http://localhost:6004 | None required |
+| phpMyAdmin | http://localhost:6005 | DB credentials from setup |
+| Grafana | http://localhost:6006 | admin / admin (change immediately!) |
 
-*Poracle is commented out by default. Uncomment in `docker-compose.yaml` if you want Discord/Telegram alerts.
+---
 
-#### Special note
+## Services
 
-On some occasions one or more of these ports may already be assigned to other services which largely depends on each specific machine. If you're presented with a **_"port already in use"_** error, please change the corresponding container port in the `docker-compose.yaml` file.
+### ReactMap (Port 6001)
 
-### 5. (Optional) Setup Poracle for Discord/Telegram Alerts
+The user-facing map interface that displays:
+- Pokemon spawns and IVs
+- Raids and gyms
+- Pokestops and quests
+- Nests (with Fletchling)
 
-If you want Pokemon spawn, raid, and quest alerts sent to Discord or Telegram:
+### Dragonite Admin (Port 6002)
 
-```
+Scanner management dashboard for:
+- Adding and managing accounts
+- Viewing worker status
+- Configuring scan settings
+- Monitoring scan progress
+
+### Rotom (Port 6003 + 7070)
+
+Device manager that:
+- Receives connections from Aegis devices (port 7070)
+- Assigns tasks to devices
+- Monitors device health
+- Manages device configurations
+
+### Koji (Port 6004)
+
+Geofence management tool for:
+- Drawing scan areas on a map
+- Creating projects (area groups)
+- Exporting geofences to Dragonite/ReactMap
+- Managing Pokemon spawn points
+
+### phpMyAdmin (Port 6005)
+
+Database management interface for:
+- Viewing and editing database tables
+- Running SQL queries
+- Managing users and permissions
+- Database maintenance
+
+### Grafana (Port 6006)
+
+Performance monitoring with:
+- Real-time statistics dashboards
+- Pokemon catch rates
+- Device performance metrics
+- Historical data analysis
+
+---
+
+## Optional Features
+
+### Poracle - Discord/Telegram Alerts
+
+Send Pokemon spawn, raid, and quest notifications to Discord or Telegram.
+
+```bash
 sudo bash ./poracle.sh
 ```
 
-The script will guide you through:
+The script guides you through:
 - Creating a Discord or Telegram bot
-- Configuring bot tokens and admin users
-- Selecting which notification types to enable
+- Configuring notification filters
 - Setting up webhooks from Golbat
 
-More info: https://github.com/KartulUdus/PoracleJS
+📚 [Poracle Documentation](https://github.com/KartulUdus/PoracleJS)
 
-### 6. (Optional) Setup Fletchling for Pokemon Nests
+### Fletchling - Pokemon Nests
 
-If you want Pokemon nests displayed on ReactMap, you'll need to setup Fletchling:
+Display Pokemon nests on ReactMap.
 
-1. First, create a project with geofences in Koji Admin (http://localhost:6004)
-2. Run the Fletchling setup script:
+**Prerequisites**: Create a project with geofences in Koji first.
 
-```
+```bash
 sudo bash ./fletchling.sh
 ```
 
 The script will:
 - Configure Fletchling with your Koji project
 - Import park data from OpenStreetMap
-- Enable nest tracking in your scanning area
+- Enable automatic nest detection
 
-More info: https://github.com/UnownHash/Fletchling
+📚 [Fletchling Documentation](https://github.com/UnownHash/Fletchling)
 
-### 7. (Recommended) Secure Your Setup for External Access
+### Grafana Dashboards
 
-If you plan to access your setup from outside localhost or expose it to the internet, run the nginx security setup script:
+Import the included dashboard for comprehensive monitoring:
 
-```
+1. Login to Grafana (http://localhost:6006) with admin/admin
+2. **Change the default password immediately!**
+3. Go to **Settings → Data Sources → Add data source**
+4. Select **Prometheus** and set URL to `http://victoriametrics:8428`
+5. Go to **Dashboards → Import**
+6. Upload `grafana/Dragonite-Emi-v5.json`
+
+---
+
+## Security Setup
+
+### Why Secure Your Setup?
+
+If you plan to:
+- Access your setup from outside your local network
+- Expose services to the internet
+- Allow others to view your map
+
+**You MUST secure your setup!** Unsecured services can be exploited.
+
+### Run the Security Script
+
+```bash
 sudo bash ./nginx-setup.sh
 ```
 
-This comprehensive security script provides:
+### Security Features
 
-- **Nginx Reverse Proxy** - Domain-based access with subdomain or path-based routing
-- **SSL/TLS Certificates** - Free Let's Encrypt certificates via Certbot
-- **Basic Authentication** - Password protection for sensitive services
-- **Authelia SSO** (Optional) - Single Sign-On with Two-Factor Authentication
-- **Fail2Ban Protection** - Brute-force and bot protection
-- **UFW Firewall** - Automatic firewall configuration with SSH/VNC/RDP port management
-- **Docker Port Security** - Binds Docker ports to localhost, forcing traffic through Nginx
+#### 🔒 Nginx Reverse Proxy
+- **Subdomain routing**: `map.yourdomain.com`, `admin.yourdomain.com`
+- **Path-based routing**: `yourdomain.com/map`, `yourdomain.com/admin`
+- Proper proxy headers and WebSocket support
+- Optimized timeouts for long-running connections
 
-The script guides you through 11 setup steps:
-1. Permission checks
-2. Web server detection
-3. Domain/subdomain configuration
-4. Authentication setup (Basic Auth or Authelia 2FA)
-5. Nginx configuration creation
-6. Configuration testing
-7. Rotom device port setup (WebSocket proxy option)
-8. SSL certificate setup
-9. Fail2Ban configuration
-10. UFW firewall setup (SSH port hardening, common ports)
-11. Docker port security (closes Docker firewall holes)
+#### 🔐 SSL/TLS Encryption
+- Free certificates from Let's Encrypt
+- Automatic certificate renewal
+- Forces HTTPS for all connections
+- Modern TLS configuration
 
-**For production use, this step is highly recommended!**
+#### 🛡️ Authentication Options
 
-### 8. Validate Your Configuration
+**Basic Authentication**
+- Simple username/password protection
+- Configurable per-service
+- Quick to set up
 
-Run the configuration checker to ensure everything is properly set up:
+**Authelia SSO** (Advanced)
+- Single Sign-On across all services
+- Two-Factor Authentication (TOTP)
+- Session management
+- User access control
 
-```
+#### 🚫 Fail2Ban Protection
+- Blocks brute-force attacks
+- Bans malicious IPs automatically
+- Protects SSH, Nginx, and services
+- Configurable ban times and thresholds
+
+#### 🔥 UFW Firewall
+- Automatic firewall configuration
+- SSH port hardening (prompts to change from default 22)
+- VNC/RDP support for remote desktop users
+- Opens only necessary ports
+
+#### 🐳 Docker Port Security
+- Binds service ports to localhost only
+- Prevents Docker from bypassing firewall rules
+- Forces all traffic through Nginx (with SSL + auth)
+- Only port 7070 remains external for device connections
+
+### Setup Steps
+
+The security script guides you through 11 steps:
+
+1. **Permission Check** - Ensures root access
+2. **Web Server Detection** - Installs/configures Nginx
+3. **Domain Configuration** - Set your domain/subdomains
+4. **Authentication Setup** - Basic Auth or Authelia
+5. **Nginx Configuration** - Creates site configs
+6. **Configuration Testing** - Validates Nginx syntax
+7. **Rotom Device Setup** - WebSocket proxy for devices
+8. **SSL Certificates** - Let's Encrypt setup
+9. **Fail2Ban** - Intrusion prevention
+10. **UFW Firewall** - Port management
+11. **Docker Security** - Localhost port binding
+
+---
+
+## Configuration
+
+### Validate Your Setup
+
+Run the configuration checker to ensure everything is properly configured:
+
+```bash
 sudo bash ./check.sh
 ```
 
-This script validates:
-- Environment variables match across configs
-- Database passwords are consistent
-- API secrets are properly configured
-- Docker containers are running
-- Required files exist
+This validates:
+- ✅ Environment variables match across all configs
+- ✅ Database passwords are consistent
+- ✅ API secrets are properly configured
+- ✅ Docker containers are running
+- ✅ Required files exist
 
-### 9. Working with Grafana
+### Database Tuning
 
-Albeit not critical to normal operation, it's always nice and informative to have some kind of performance metrics of your setup. In order to get a glimpse of what you can get with it, you should import our custom example dashboard that's inside the grafana folder (based on Dragonite's default prometheus dashboard but with some other metrics).
+The setup script automatically tunes MariaDB based on your hardware:
+- Detects available RAM and allocates buffer pool
+- Configures I/O settings based on storage type (SSD/HDD)
+- Sets appropriate connection limits
 
-1. Point your browser to http://localhost:6006
-2. Login with the default admin/admin credentials (**change them once you've logged in!**)
-3. Add a new prometheus datasource and point it to `victoriametrics:8428`
-4. Tap on Dashboards → Add New → Import and select `Dragonite-Emi-v5.json`
-5. Tap save
+To re-run database tuning:
 
-That's it. If you want more dashboards, you can find them at Unown#'s github.
+```bash
+sudo bash ./dbsetup.sh
+```
 
-### 10. What now?
+### Configuration Files
 
-Now comes the fun part. Start reading and learning how all of this works. We recommend you to head over to:
+| File | Purpose |
+|------|---------|
+| `.env` | Main environment variables |
+| `reactmap/local.json` | ReactMap configuration |
+| `unown/dragonite_config.toml` | Dragonite settings |
+| `unown/golbat_config.toml` | Golbat settings |
+| `unown/rotom_config.json` | Rotom settings |
+| `docker-compose.yaml` | Docker service definitions |
 
-- **Unown# Discord** - Help with Dragonite, Golbat and Rotom: https://discord.gg/Vjze47qchG
-- **ReactMap/Koji Discord** - Help with ReactMap and Koji: https://discord.gg/EYYsKPVawn
-- **Pokemod Discord** - Help with Aegis and general questions: https://discord.gg/pokemod
+---
 
-In general terms, you will need to:
+## Device Setup
 
-1. Add accounts to Dragonite (lots of them! Account usage depends on each setup and use case including active options like `recycle_on_jail=true` but to be safe, consider at least 100 per worker x `minimum_account_reuse_hours` / 24)
-2. Add at least one project with areas in Koji (check the image below for an example of a full running setup)
-3. Sync the project with Dragonite and Reactmap
-4. Add at least one Aegis Device (should be autodetected by Rotom once you configure the ATV and Aegis properly)
-5. Map away
+### Aegis App Configuration
 
-### 11. Aegis Device Configuration
+1. **Install Aegis** on your Android device
+2. **Open the app** and enter connection details:
+   - **Rotom URL**: `your-server-ip:7070`
+   - **Auth Bearer**: The token from your setup
+   - **Device Name**: A unique identifier
 
-This is typically unnecessary, because filling in the details in the app is usually sufficient.
+### Manual Configuration (Advanced)
 
-The configuration file for Aegis is placed in `/data/local/tmp/aegis_config.json`, and the same goes for the logs at `/data/local/tmp/aegis.log`.
+Configuration file location on device:
+```
+/data/local/tmp/aegis_config.json
+```
 
-As for the configuration file, here is an example:
+Example configuration:
 
 ```json
 {
-    "authBearer": "bearer_for_rotom",
-    "deviceAuthToken": "your_unique_auth_token_from_aegis_portal",
-    "deviceName": "your_device_name",
-    "email": "your_email_from_aegis_portal",
-    "rotomUrl": "ip:port",
+    "authBearer": "your_rotom_auth_bearer",
+    "deviceAuthToken": "your_unique_device_token",
+    "deviceName": "device-01",
+    "email": "your_aegis_portal_email",
+    "rotomUrl": "your-server-ip:7070",
     "runOnBoot": true
 }
 ```
 
-## Screenshots
+Log file location:
+```
+/data/local/tmp/aegis.log
+```
 
-_Koji Projects:_
+### Device Connection Flow
 
-![Koji Sample Projects](https://i.ibb.co/YhdSWCq/koji-projects.png)
-
-_ReactMap:_
-
-![Reactmap Sample Area](https://i.ibb.co/b7BS6Ww/reactmap.png)
-
-_Dragonite:_
-
-![Dragonite Sample](https://i.ibb.co/7SDmxrm/dragonite.png)
-
-_Rotom:_
-
-![Rotom Sample](https://i.ibb.co/6FPB2ry/rotom.png)
-
-_Grafana:_
-
-![Grafana Sample](https://i.ibb.co/qr1v3CP/grafana.png)
-
-## Support
-
-Debugging is a big part of the process, so don't be afraid to ask for help in our Discord server: https://discord.gg/pokemod
+1. Device connects to Rotom on port 7070
+2. Rotom authenticates using the bearer token
+3. Device appears in Rotom dashboard
+4. Dragonite assigns scan tasks
+5. Device executes tasks and reports data
+6. Golbat processes and stores data
+7. ReactMap displays results
 
 ---
 
-**Aegis All-in-One** by [The Pokemod Group](https://pokemod.dev/)
+## Troubleshooting
+
+### Common Issues
+
+#### Port Already in Use
+
+```
+Error: port is already allocated
+```
+
+**Solution**: Change the port in `docker-compose.yaml` or stop the conflicting service.
+
+#### Container Won't Start
+
+```bash
+# Check logs for specific error
+docker logs <container_name>
+
+# Restart the container
+docker compose restart <service_name>
+
+# Rebuild if needed
+docker compose up -d --force-recreate --build <service_name>
+```
+
+#### Database Connection Failed
+
+1. Verify MariaDB is running: `docker compose ps mariadb`
+2. Check credentials in `.env` match service configs
+3. Ensure databases exist: `docker exec -it mariadb mysql -u root -p`
+
+#### Device Not Connecting
+
+1. Verify port 7070 is open: `sudo ufw status`
+2. Check Rotom logs: `docker logs rotom`
+3. Verify bearer token matches in device and `rotom_config.json`
+4. Test connectivity: `telnet your-server-ip 7070`
+
+#### Nginx 502 Bad Gateway
+
+1. Check if backend service is running
+2. Verify port numbers in Nginx config match docker-compose
+3. Check Nginx error log: `sudo tail -f /var/log/nginx/error.log`
+
+#### SSL Certificate Issues
+
+```bash
+# Test certificate renewal
+sudo certbot renew --dry-run
+
+# Force renewal
+sudo certbot renew --force-renewal
+
+# Check certificate status
+sudo certbot certificates
+```
+
+### Useful Commands
+
+```bash
+# View all container status
+docker compose ps
+
+# Follow logs for all services
+docker compose logs -f
+
+# Restart everything
+docker compose restart
+
+# Full rebuild
+docker compose down && docker compose up -d --force-recreate --build
+
+# Check disk usage
+docker system df
+
+# Clean up unused resources
+docker system prune -a
+```
+
+---
+
+## Screenshots
+
+### Koji - Area Management
+
+Define your scan areas with the intuitive geofence editor:
+
+![Koji Sample Projects](https://i.ibb.co/YhdSWCq/koji-projects.png)
+
+### ReactMap - Pokemon Map
+
+View Pokemon, raids, quests, and more on the beautiful map interface:
+
+![Reactmap Sample Area](https://i.ibb.co/b7BS6Ww/reactmap.png)
+
+### Dragonite - Scanner Control
+
+Manage accounts, workers, and scan settings:
+
+![Dragonite Sample](https://i.ibb.co/7SDmxrm/dragonite.png)
+
+### Rotom - Device Manager
+
+Monitor connected devices and their status:
+
+![Rotom Sample](https://i.ibb.co/6FPB2ry/rotom.png)
+
+### Grafana - Statistics
+
+Track performance with detailed dashboards:
+
+![Grafana Sample](https://i.ibb.co/qr1v3CP/grafana.png)
+
+---
+
+## Getting Started Checklist
+
+After installation, complete these steps to start mapping:
+
+- [ ] **Add accounts to Dragonite** 
+  - Rule of thumb: 100 accounts per worker × (`minimum_account_reuse_hours` / 24)
+  - Enable `recycle_on_jail=true` to maximize account usage
+
+- [ ] **Create a project in Koji**
+  - Draw geofences for your scan area
+  - Name your project meaningfully
+
+- [ ] **Sync Koji with Dragonite**
+  - In Dragonite, import areas from Koji
+  - Configure scan modes (Pokemon, Raids, Quests)
+
+- [ ] **Sync Koji with ReactMap**
+  - Import geofences for map display
+  - Configure tile providers
+
+- [ ] **Connect your first device**
+  - Install Aegis on device
+  - Configure Rotom URL and bearer token
+  - Verify connection in Rotom dashboard
+
+- [ ] **Start mapping!**
+  - Assign device to area in Dragonite
+  - Watch Pokemon appear on ReactMap
+
+---
+
+## Support
+
+### Community Discord Servers
+
+| Server | Focus |
+|--------|-------|
+| [Unown# Discord](https://discord.gg/Vjze47qchG) | Dragonite, Golbat, Rotom |
+| [ReactMap/Koji Discord](https://discord.gg/EYYsKPVawn) | ReactMap, Koji |
+| [Pokemod Discord](https://discord.gg/pokemod) | Aegis, General Questions |
+
+### Before Asking for Help
+
+1. Check container logs: `docker logs <container>`
+2. Run the config checker: `sudo bash ./check.sh`
+3. Search Discord for similar issues
+4. Provide logs and error messages when asking
+
+---
+
+## License
+
+This project is provided as-is for educational purposes.
+
+---
+
+<p align="center">
+  <strong>Aegis All-in-One</strong><br>
+  by <a href="https://pokemod.dev/">The Pokemod Group</a>
+</p>
