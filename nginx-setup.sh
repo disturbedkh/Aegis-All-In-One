@@ -1952,6 +1952,333 @@ STREAMEOF
     fi
 }
 
+# Setup UFW Firewall
+setup_firewall() {
+    echo ""
+    print_info "Firewall Configuration (UFW)"
+    echo ""
+    
+    # Check if UFW is installed
+    if ! command -v ufw &> /dev/null; then
+        print_warning "UFW is not installed."
+        read -p "Would you like to install UFW? (y/n) [y]: " INSTALL_UFW
+        INSTALL_UFW=${INSTALL_UFW:-y}
+        
+        if [ "$INSTALL_UFW" = "y" ] || [ "$INSTALL_UFW" = "Y" ]; then
+            apt-get update -y
+            apt-get install -y ufw
+            print_success "UFW installed"
+        else
+            print_warning "Skipping firewall configuration"
+            return
+        fi
+    fi
+    
+    # Check if UFW is enabled
+    UFW_STATUS=$(ufw status | head -1)
+    if echo "$UFW_STATUS" | grep -q "inactive"; then
+        print_warning "UFW firewall is currently DISABLED"
+        echo ""
+        echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${YELLOW}║  WARNING: Your server has no firewall protection!             ║${NC}"
+        echo -e "  ${YELLOW}║  Enabling UFW is strongly recommended for security.           ║${NC}"
+        echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        read -p "Would you like to enable UFW firewall? (y/n) [y]: " ENABLE_UFW
+        ENABLE_UFW=${ENABLE_UFW:-y}
+        
+        if [ "$ENABLE_UFW" = "y" ] || [ "$ENABLE_UFW" = "Y" ]; then
+            UFW_WILL_ENABLE=true
+        else
+            print_warning "Skipping firewall configuration - server will remain unprotected"
+            return
+        fi
+    else
+        print_success "UFW firewall is active"
+        UFW_WILL_ENABLE=false
+    fi
+    
+    echo ""
+    print_info "Configuring essential ports..."
+    echo ""
+    
+    # =========================================================================
+    # SSH Configuration
+    # =========================================================================
+    print_info "SSH Port Configuration"
+    
+    # Try to detect current SSH port
+    CURRENT_SSH_PORT=$(grep -E "^Port " /etc/ssh/sshd_config 2>/dev/null | awk '{print $2}')
+    if [ -z "$CURRENT_SSH_PORT" ]; then
+        CURRENT_SSH_PORT="22"
+    fi
+    
+    echo "  Current SSH port: $CURRENT_SSH_PORT"
+    
+    if [ "$CURRENT_SSH_PORT" = "22" ]; then
+        print_warning "SSH is using default port 22 (commonly targeted by attackers)"
+        read -p "  Would you like to change SSH port? (y/n) [n]: " CHANGE_SSH
+        CHANGE_SSH=${CHANGE_SSH:-n}
+        
+        if [ "$CHANGE_SSH" = "y" ] || [ "$CHANGE_SSH" = "Y" ]; then
+            read -p "  Enter new SSH port [2222]: " NEW_SSH_PORT
+            NEW_SSH_PORT=${NEW_SSH_PORT:-2222}
+            
+            # Validate port number
+            if [[ "$NEW_SSH_PORT" =~ ^[0-9]+$ ]] && [ "$NEW_SSH_PORT" -ge 1024 ] && [ "$NEW_SSH_PORT" -le 65535 ]; then
+                print_info "Changing SSH port to $NEW_SSH_PORT..."
+                
+                # Backup sshd_config
+                cp /etc/ssh/sshd_config /etc/ssh/sshd_config.backup.$(date +%Y%m%d_%H%M%S)
+                
+                # Update SSH port
+                if grep -q "^Port " /etc/ssh/sshd_config; then
+                    sed -i "s/^Port .*/Port $NEW_SSH_PORT/" /etc/ssh/sshd_config
+                else
+                    echo "Port $NEW_SSH_PORT" >> /etc/ssh/sshd_config
+                fi
+                
+                SSH_PORT="$NEW_SSH_PORT"
+                print_success "SSH port changed to $NEW_SSH_PORT"
+                print_warning "Remember to reconnect using: ssh -p $NEW_SSH_PORT user@server"
+                RESTART_SSH=true
+            else
+                print_error "Invalid port number. Using current port $CURRENT_SSH_PORT"
+                SSH_PORT="$CURRENT_SSH_PORT"
+            fi
+        else
+            SSH_PORT="$CURRENT_SSH_PORT"
+        fi
+    else
+        SSH_PORT="$CURRENT_SSH_PORT"
+        print_success "SSH is already using non-default port: $SSH_PORT"
+    fi
+    
+    # Allow SSH port
+    ufw allow "$SSH_PORT/tcp" comment 'SSH' >/dev/null 2>&1
+    print_success "Allowed SSH on port $SSH_PORT"
+    
+    echo ""
+    
+    # =========================================================================
+    # VNC Configuration
+    # =========================================================================
+    print_info "VNC Port Configuration"
+    read -p "  Do you use VNC for remote desktop? (y/n) [n]: " USE_VNC
+    USE_VNC=${USE_VNC:-n}
+    
+    if [ "$USE_VNC" = "y" ] || [ "$USE_VNC" = "Y" ]; then
+        read -p "  Enter VNC port [5900]: " VNC_PORT
+        VNC_PORT=${VNC_PORT:-5900}
+        
+        if [ "$VNC_PORT" = "5900" ]; then
+            print_warning "VNC using default port 5900"
+            read -p "  Would you like to use a different port? (y/n) [n]: " CHANGE_VNC
+            CHANGE_VNC=${CHANGE_VNC:-n}
+            
+            if [ "$CHANGE_VNC" = "y" ] || [ "$CHANGE_VNC" = "Y" ]; then
+                read -p "  Enter new VNC port: " VNC_PORT
+            fi
+        fi
+        
+        ufw allow "$VNC_PORT/tcp" comment 'VNC' >/dev/null 2>&1
+        print_success "Allowed VNC on port $VNC_PORT"
+    fi
+    
+    echo ""
+    
+    # =========================================================================
+    # RDP Configuration
+    # =========================================================================
+    print_info "RDP Port Configuration"
+    read -p "  Do you use RDP (xrdp) for remote desktop? (y/n) [n]: " USE_RDP
+    USE_RDP=${USE_RDP:-n}
+    
+    if [ "$USE_RDP" = "y" ] || [ "$USE_RDP" = "Y" ]; then
+        read -p "  Enter RDP port [3389]: " RDP_PORT
+        RDP_PORT=${RDP_PORT:-3389}
+        
+        if [ "$RDP_PORT" = "3389" ]; then
+            print_warning "RDP using default port 3389"
+            read -p "  Would you like to use a different port? (y/n) [n]: " CHANGE_RDP
+            CHANGE_RDP=${CHANGE_RDP:-n}
+            
+            if [ "$CHANGE_RDP" = "y" ] || [ "$CHANGE_RDP" = "Y" ]; then
+                read -p "  Enter new RDP port: " RDP_PORT
+            fi
+        fi
+        
+        ufw allow "$RDP_PORT/tcp" comment 'RDP' >/dev/null 2>&1
+        print_success "Allowed RDP on port $RDP_PORT"
+    fi
+    
+    echo ""
+    
+    # =========================================================================
+    # Nginx and Rotom
+    # =========================================================================
+    print_info "Configuring Nginx and Rotom ports..."
+    
+    # Allow Nginx Full (HTTP + HTTPS)
+    ufw allow 'Nginx Full' >/dev/null 2>&1
+    print_success "Allowed Nginx Full (ports 80, 443)"
+    
+    # Allow Rotom device port
+    ufw allow 7070/tcp comment 'Rotom Devices' >/dev/null 2>&1
+    print_success "Allowed Rotom devices on port 7070"
+    
+    echo ""
+    
+    # =========================================================================
+    # Common Ports
+    # =========================================================================
+    print_info "Additional commonly used ports"
+    echo ""
+    echo "  Would you like to open any of these common ports?"
+    echo ""
+    
+    read -p "  Allow DNS (53)? (y/n) [n]: " ALLOW_DNS
+    if [ "$ALLOW_DNS" = "y" ] || [ "$ALLOW_DNS" = "Y" ]; then
+        ufw allow 53 comment 'DNS' >/dev/null 2>&1
+        print_success "Allowed DNS (port 53)"
+    fi
+    
+    read -p "  Allow FTP (21)? (y/n) [n]: " ALLOW_FTP
+    if [ "$ALLOW_FTP" = "y" ] || [ "$ALLOW_FTP" = "Y" ]; then
+        ufw allow 21/tcp comment 'FTP' >/dev/null 2>&1
+        print_success "Allowed FTP (port 21)"
+    fi
+    
+    read -p "  Allow SMTP (25, 587)? (y/n) [n]: " ALLOW_SMTP
+    if [ "$ALLOW_SMTP" = "y" ] || [ "$ALLOW_SMTP" = "Y" ]; then
+        ufw allow 25/tcp comment 'SMTP' >/dev/null 2>&1
+        ufw allow 587/tcp comment 'SMTP Submission' >/dev/null 2>&1
+        print_success "Allowed SMTP (ports 25, 587)"
+    fi
+    
+    read -p "  Allow IMAP/POP3 (143, 993, 110, 995)? (y/n) [n]: " ALLOW_MAIL
+    if [ "$ALLOW_MAIL" = "y" ] || [ "$ALLOW_MAIL" = "Y" ]; then
+        ufw allow 143/tcp comment 'IMAP' >/dev/null 2>&1
+        ufw allow 993/tcp comment 'IMAPS' >/dev/null 2>&1
+        ufw allow 110/tcp comment 'POP3' >/dev/null 2>&1
+        ufw allow 995/tcp comment 'POP3S' >/dev/null 2>&1
+        print_success "Allowed IMAP/POP3 (ports 143, 993, 110, 995)"
+    fi
+    
+    echo ""
+    
+    # =========================================================================
+    # Enable UFW if needed
+    # =========================================================================
+    if [ "$UFW_WILL_ENABLE" = true ]; then
+        print_info "Enabling UFW firewall..."
+        echo "y" | ufw enable >/dev/null 2>&1
+        print_success "UFW firewall enabled"
+    fi
+    
+    # Restart SSH if port was changed
+    if [ "$RESTART_SSH" = true ]; then
+        print_info "Restarting SSH service..."
+        systemctl restart sshd
+        print_success "SSH service restarted on port $SSH_PORT"
+    fi
+    
+    # Show UFW status
+    echo ""
+    print_info "Current UFW rules:"
+    ufw status numbered
+    
+    FIREWALL_CONFIGURED=true
+}
+
+# Secure Docker Compose ports (bind to localhost only)
+secure_docker_ports() {
+    echo ""
+    print_info "Docker Port Security"
+    echo ""
+    
+    echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "  ${YELLOW}║  IMPORTANT: Docker bypasses UFW firewall rules!               ║${NC}"
+    echo -e "  ${YELLOW}║  Exposed Docker ports are accessible even with UFW enabled.   ║${NC}"
+    echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    print_info "To properly secure your services, Docker ports should be bound to"
+    print_info "localhost (127.0.0.1) only, forcing all traffic through nginx."
+    echo ""
+    print_info "This will change docker-compose.yaml ports from:"
+    echo "    - 6001:8080    → 127.0.0.1:6001:8080"
+    echo ""
+    print_info "Benefits:"
+    echo "  • Services only accessible via nginx (with SSL and auth)"
+    echo "  • Closes UFW holes created by Docker"
+    echo "  • Hides actual ports from external access"
+    echo "  • Only port 7070 remains externally accessible for devices"
+    echo ""
+    
+    read -p "Would you like to secure Docker ports now? (y/n) [y]: " SECURE_DOCKER
+    SECURE_DOCKER=${SECURE_DOCKER:-y}
+    
+    if [ "$SECURE_DOCKER" = "y" ] || [ "$SECURE_DOCKER" = "Y" ]; then
+        COMPOSE_FILE="docker-compose.yaml"
+        
+        if [ ! -f "$COMPOSE_FILE" ]; then
+            # Try common locations
+            if [ -f "../docker-compose.yaml" ]; then
+                COMPOSE_FILE="../docker-compose.yaml"
+            elif [ -f "../../docker-compose.yaml" ]; then
+                COMPOSE_FILE="../../docker-compose.yaml"
+            else
+                print_error "docker-compose.yaml not found"
+                print_info "Please run this from the Aegis directory or manually edit docker-compose.yaml"
+                return
+            fi
+        fi
+        
+        print_info "Backing up docker-compose.yaml..."
+        cp "$COMPOSE_FILE" "${COMPOSE_FILE}.backup.$(date +%Y%m%d_%H%M%S)"
+        
+        print_info "Securing Docker ports..."
+        
+        # Bind web service ports to localhost only (except 7070 for devices)
+        # Match patterns like "- 6001:8080" or "- "6001:8080"" and convert to "127.0.0.1:port:port"
+        
+        # Port 6001 - ReactMap
+        sed -i 's/- "\{0,1\}6001:8080"\{0,1\}/- "127.0.0.1:6001:8080"/' "$COMPOSE_FILE"
+        
+        # Port 6002 - Admin
+        sed -i 's/- "\{0,1\}6002:7273"\{0,1\}/- "127.0.0.1:6002:7273"/' "$COMPOSE_FILE"
+        
+        # Port 6003 - Rotom Web
+        sed -i 's/- "\{0,1\}6003:7072"\{0,1\}/- "127.0.0.1:6003:7072"/' "$COMPOSE_FILE"
+        
+        # Port 6004 - Koji
+        sed -i 's/- "\{0,1\}6004:8080"\{0,1\}/- "127.0.0.1:6004:8080"/' "$COMPOSE_FILE"
+        
+        # Port 6005 - phpMyAdmin
+        sed -i 's/- "\{0,1\}6005:80"\{0,1\}/- "127.0.0.1:6005:80"/' "$COMPOSE_FILE"
+        
+        # Port 6006 - Grafana
+        sed -i 's/- "\{0,1\}6006:3000"\{0,1\}/- "127.0.0.1:6006:3000"/' "$COMPOSE_FILE"
+        
+        # Port 6007 - Poracle
+        sed -i 's/- "\{0,1\}6007:3030"\{0,1\}/- "127.0.0.1:6007:3030"/' "$COMPOSE_FILE"
+        
+        # Keep port 7070 externally accessible for devices
+        # (Don't modify 7070)
+        
+        print_success "Docker ports secured to localhost only"
+        print_success "Port 7070 remains externally accessible for devices"
+        echo ""
+        print_warning "You need to restart Docker containers for changes to take effect:"
+        echo "    cd $(dirname $COMPOSE_FILE) && docker compose down && docker compose up -d"
+        
+        DOCKER_PORTS_SECURED=true
+    else
+        print_info "Skipping Docker port security"
+        DOCKER_PORTS_SECURED=false
+    fi
+}
+
 # Print summary
 print_summary() {
     echo ""
@@ -2054,10 +2381,32 @@ print_summary() {
         echo ""
     fi
     
+    if [ "$FIREWALL_CONFIGURED" = true ]; then
+        print_info "UFW Firewall:"
+        echo "  Status:       sudo ufw status"
+        echo "  Status (num): sudo ufw status numbered"
+        echo "  Allow port:   sudo ufw allow <port>/tcp"
+        echo "  Delete rule:  sudo ufw delete <rule_number>"
+        echo ""
+    fi
+    
+    if [ "$DOCKER_PORTS_SECURED" = true ]; then
+        print_info "Docker Port Security:"
+        echo "  All service ports now bound to 127.0.0.1 (localhost only)"
+        echo "  Traffic must go through Nginx (with SSL/auth)"
+        echo "  Only port 7070 accessible externally for device connections"
+        echo ""
+        print_warning "Restart Docker containers for port changes to take effect:"
+        echo "  cd $(pwd) && docker compose down && docker compose up -d"
+        echo ""
+    fi
+    
     print_warning "SECURITY REMINDER:"
     echo "  - Change default passwords for Grafana (admin/admin)"
     echo "  - Keep your basic auth password secure"
-    echo "  - Consider using a firewall (ufw) to restrict access"
+    if [ "$FIREWALL_CONFIGURED" != true ]; then
+        echo "  - Consider using a firewall (ufw) to restrict access"
+    fi
     echo "  - Only expose necessary ports to the internet"
     if [ "$FAIL2BAN_INSTALLED" = true ]; then
         echo "  - Monitor Fail2Ban logs: /var/log/fail2ban.log"
@@ -2076,11 +2425,11 @@ main() {
     echo ""
     
     # Step 1: Check root
-    print_info "Step 1/9: Checking permissions..."
+    print_info "Step 1/11: Checking permissions..."
     check_root
     
     # Step 2: Detect/install webserver
-    print_info "Step 2/9: Detecting web server..."
+    print_info "Step 2/11: Detecting web server..."
     detect_webserver
     
     # Pre-flight check: Fix any broken nginx configuration
@@ -2155,27 +2504,27 @@ main() {
     fi
     
     # Step 3: Get configuration from user
-    print_info "Step 3/9: Gathering configuration..."
+    print_info "Step 3/11: Gathering configuration..."
     get_user_config
     
     # Step 4: Authelia setup (optional)
-    print_info "Step 4/9: Authentication setup..."
+    print_info "Step 4/11: Authentication setup..."
     setup_authelia
     if [ "$AUTHELIA_ENABLED" != true ]; then
         setup_basic_auth
     fi
     
     # Step 5: Create nginx configs
-    print_info "Step 5/9: Creating Nginx configurations..."
+    print_info "Step 5/11: Creating Nginx configurations..."
     create_nginx_configs
     create_symlinks
     
     # Step 6: Test and apply nginx config
-    print_info "Step 6/9: Testing and applying Nginx configuration..."
+    print_info "Step 6/11: Testing and applying Nginx configuration..."
     test_and_reload_nginx
     
     # Step 7: Rotom device port (optional)
-    print_info "Step 7/9: Rotom device port configuration..."
+    print_info "Step 7/11: Rotom device port configuration..."
     setup_rotom_device_port
     
     # Only test again if rotom setup made changes
@@ -2185,12 +2534,20 @@ main() {
     fi
     
     # Step 8: SSL setup (optional)
-    print_info "Step 8/9: SSL certificate setup..."
+    print_info "Step 8/11: SSL certificate setup..."
     setup_ssl
     
     # Step 9: Fail2Ban setup (optional)
-    print_info "Step 9/9: Fail2Ban security setup..."
+    print_info "Step 9/11: Fail2Ban security setup..."
     setup_fail2ban
+    
+    # Step 10: Firewall setup (UFW)
+    print_info "Step 10/11: Firewall configuration..."
+    setup_firewall
+    
+    # Step 11: Secure Docker ports
+    print_info "Step 11/11: Docker port security..."
+    secure_docker_ports
     
     # Done - print summary
     print_summary

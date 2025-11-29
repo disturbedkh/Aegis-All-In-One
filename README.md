@@ -137,19 +137,28 @@ If you plan to access your setup from outside localhost or expose it to the inte
 sudo bash ./nginx-setup.sh
 ```
 
-This script provides:
+This comprehensive security script provides:
 
-- **Nginx Reverse Proxy** - Proper domain-based access to all services
+- **Nginx Reverse Proxy** - Domain-based access with subdomain or path-based routing
 - **SSL/TLS Certificates** - Free Let's Encrypt certificates via Certbot
 - **Basic Authentication** - Password protection for sensitive services
 - **Authelia SSO** (Optional) - Single Sign-On with Two-Factor Authentication
 - **Fail2Ban Protection** - Brute-force and bot protection
+- **UFW Firewall** - Automatic firewall configuration with SSH/VNC/RDP port management
+- **Docker Port Security** - Binds Docker ports to localhost, forcing traffic through Nginx
 
-The script will guide you through:
-1. Domain/subdomain configuration
-2. SSL certificate setup
-3. Authentication options (Basic Auth or Authelia 2FA)
-4. Fail2Ban jail configuration
+The script guides you through 11 setup steps:
+1. Permission checks
+2. Web server detection
+3. Domain/subdomain configuration
+4. Authentication setup (Basic Auth or Authelia 2FA)
+5. Nginx configuration creation
+6. Configuration testing
+7. Rotom device port setup (WebSocket proxy option)
+8. SSL certificate setup
+9. Fail2Ban configuration
+10. UFW firewall setup (SSH port hardening, common ports)
+11. Docker port security (closes Docker firewall holes)
 
 **For production use, this step is highly recommended!**
 
