@@ -2,6 +2,7 @@
 
 # Aegis All-in-One Nginx Reverse Proxy Setup Script
 # This script sets up nginx reverse proxies for all Aegis services with optional SSL
+# Includes Fail2Ban configuration for brute-force and bot protection
 
 set -e
 
@@ -23,6 +24,236 @@ check_root() {
     if [ "$EUID" -ne 0 ]; then
         print_error "Please run this script as root (e.g., sudo bash nginx-setup.sh)"
         exit 1
+    fi
+}
+
+# Check and install fail2ban
+setup_fail2ban() {
+    echo ""
+    print_info "=== Fail2Ban Setup ==="
+    
+    # Check if fail2ban is installed
+    if command -v fail2ban-client &> /dev/null; then
+        print_success "Fail2Ban is already installed"
+        FAIL2BAN_INSTALLED=true
+    else
+        print_warning "Fail2Ban is not installed"
+        read -p "Would you like to install Fail2Ban for brute-force protection? (y/n) [y]: " INSTALL_F2B
+        INSTALL_F2B=${INSTALL_F2B:-y}
+        
+        if [ "$INSTALL_F2B" = "y" ] || [ "$INSTALL_F2B" = "Y" ]; then
+            install_fail2ban
+            FAIL2BAN_INSTALLED=true
+        else
+            print_warning "Skipping Fail2Ban installation"
+            FAIL2BAN_INSTALLED=false
+            return
+        fi
+    fi
+    
+    # Configure fail2ban for nginx
+    if [ "$FAIL2BAN_INSTALLED" = true ]; then
+        read -p "Would you like to configure Fail2Ban jails for Nginx protection? (y/n) [y]: " CONFIGURE_F2B
+        CONFIGURE_F2B=${CONFIGURE_F2B:-y}
+        
+        if [ "$CONFIGURE_F2B" = "y" ] || [ "$CONFIGURE_F2B" = "Y" ]; then
+            configure_fail2ban_jails
+        fi
+    fi
+}
+
+# Install fail2ban
+install_fail2ban() {
+    print_info "Installing Fail2Ban..."
+    
+    if command -v apt-get &> /dev/null; then
+        apt-get update -y
+        apt-get install -y fail2ban
+    elif command -v yum &> /dev/null; then
+        yum install -y epel-release
+        yum install -y fail2ban
+    elif command -v dnf &> /dev/null; then
+        dnf install -y fail2ban
+    elif command -v pacman &> /dev/null; then
+        pacman -Sy --noconfirm fail2ban
+    else
+        print_error "Could not detect package manager. Please install Fail2Ban manually."
+        return
+    fi
+    
+    # Enable and start fail2ban
+    systemctl enable fail2ban
+    systemctl start fail2ban
+    
+    print_success "Fail2Ban installed and started"
+}
+
+# Configure fail2ban jails for nginx
+configure_fail2ban_jails() {
+    print_info "Configuring Fail2Ban jails for Nginx..."
+    
+    # Get ban settings from user
+    read -p "Enter ban time in seconds [3600] (1 hour): " BAN_TIME
+    BAN_TIME=${BAN_TIME:-3600}
+    
+    read -p "Enter find time in seconds [600] (10 minutes): " FIND_TIME
+    FIND_TIME=${FIND_TIME:-600}
+    
+    read -p "Enter max retry attempts before ban [5]: " MAX_RETRY
+    MAX_RETRY=${MAX_RETRY:-5}
+    
+    # Create custom filter for nginx bad requests
+    print_info "Creating Nginx filters..."
+    
+    # Filter for nginx authentication failures
+    cat > /etc/fail2ban/filter.d/nginx-http-auth.conf << 'EOF'
+# Fail2Ban filter for nginx basic auth failures
+[Definition]
+failregex = ^ \[error\] \d+#\d+: \*\d+ user ".*":? (password mismatch|was not found in ".*"), client: <HOST>, server: \S+, request: "\S+ \S+ HTTP/\d+\.\d+", host: "\S+"
+            ^ \[error\] \d+#\d+: \*\d+ no user/password was provided for basic authentication, client: <HOST>, server: \S+, request: "\S+ \S+ HTTP/\d+\.\d+", host: "\S+"
+ignoreregex =
+EOF
+
+    # Filter for nginx forbidden/denied requests
+    cat > /etc/fail2ban/filter.d/nginx-forbidden.conf << 'EOF'
+# Fail2Ban filter for nginx forbidden requests
+[Definition]
+failregex = ^ \[error\] \d+#\d+: \*\d+ access forbidden by rule, client: <HOST>
+            ^ \[error\] \d+#\d+: \*\d+ directory index of ".*" is forbidden, client: <HOST>
+ignoreregex =
+EOF
+
+    # Filter for nginx bad bots and scanners
+    cat > /etc/fail2ban/filter.d/nginx-badbots.conf << 'EOF'
+# Fail2Ban filter for bad bots and vulnerability scanners
+[Definition]
+failregex = ^<HOST> -.*"(GET|POST|HEAD).*HTTP.*" (404|444|403|400) .*".*(?i)(nikto|sqlmap|nmap|masscan|zgrab|curl|wget|python-requests|go-http-client|libwww|lwp-trivial|HTTrack|harvest|extract|grab|miner).*"$
+            ^<HOST> -.*"(GET|POST|HEAD).*(wp-login|wp-admin|xmlrpc|\.env|\.git|phpmyadmin|admin|shell|eval).*HTTP.*"
+            ^<HOST> -.*".*(?:SELECT|UNION|INSERT|DROP|UPDATE|DELETE|WHERE|FROM).*"
+ignoreregex =
+EOF
+
+    # Filter for nginx limit req (rate limiting)
+    cat > /etc/fail2ban/filter.d/nginx-limit-req.conf << 'EOF'
+# Fail2Ban filter for nginx rate limit violations
+[Definition]
+failregex = limiting requests, excess:.* by zone.*client: <HOST>
+ignoreregex =
+EOF
+
+    # Filter for nginx botsearch (common attack patterns)
+    cat > /etc/fail2ban/filter.d/nginx-botsearch.conf << 'EOF'
+# Fail2Ban filter for common attack URL patterns
+[Definition]
+failregex = ^<HOST> - .* "(GET|POST|HEAD) /(cgi-bin|scripts|admin|wp-content|wp-includes)/.*" (404|403|400)
+            ^<HOST> - .* "(GET|POST|HEAD) /\.(env|git|svn|htaccess|htpasswd).*" (404|403|400)
+            ^<HOST> - .* "(GET|POST|HEAD) /(phpmyadmin|pma|mysql|myadmin|phpMyAdmin)/.*" (404|403|400)
+            ^<HOST> - .* "(GET|POST|HEAD) /.*\.(asp|aspx|jsp|cgi|pl).*" (404|403|400)
+ignoreregex =
+EOF
+
+    # Create jail.local configuration
+    print_info "Creating Fail2Ban jail configuration..."
+    
+    cat > /etc/fail2ban/jail.local << EOF
+# Fail2Ban Local Configuration for Aegis
+# Generated by nginx-setup.sh
+
+[DEFAULT]
+# Ban settings
+bantime = ${BAN_TIME}
+findtime = ${FIND_TIME}
+maxretry = ${MAX_RETRY}
+
+# Action to take (ban IP using iptables/nftables)
+banaction = iptables-multiport
+banaction_allports = iptables-allports
+
+# Ignore local IPs
+ignoreip = 127.0.0.1/8 ::1 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16
+
+# Backend
+backend = systemd
+
+#
+# JAILS
+#
+
+# SSH Protection (if sshd is running)
+[sshd]
+enabled = true
+port = ssh
+filter = sshd
+logpath = /var/log/auth.log
+maxretry = 3
+
+# Nginx HTTP Basic Auth Protection
+[nginx-http-auth]
+enabled = true
+port = http,https
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 3
+
+# Nginx Forbidden Requests
+[nginx-forbidden]
+enabled = true
+port = http,https
+filter = nginx-forbidden
+logpath = /var/log/nginx/error.log
+maxretry = 5
+
+# Nginx Bad Bots & Scanners
+[nginx-badbots]
+enabled = true
+port = http,https
+filter = nginx-badbots
+logpath = /var/log/nginx/access.log
+maxretry = 2
+bantime = 86400
+
+# Nginx Botsearch (common attack patterns)
+[nginx-botsearch]
+enabled = true
+port = http,https
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 5
+
+# Nginx Rate Limit Violations
+[nginx-limit-req]
+enabled = true
+port = http,https
+filter = nginx-limit-req
+logpath = /var/log/nginx/error.log
+maxretry = 10
+
+# Recidive - ban repeat offenders for longer
+[recidive]
+enabled = true
+logpath = /var/log/fail2ban.log
+banaction = iptables-allports
+bantime = 604800
+findtime = 86400
+maxretry = 3
+EOF
+
+    # Restart fail2ban to apply changes
+    print_info "Restarting Fail2Ban..."
+    systemctl restart fail2ban
+    
+    # Wait a moment for fail2ban to start
+    sleep 2
+    
+    # Check status
+    if systemctl is-active --quiet fail2ban; then
+        print_success "Fail2Ban configured and running"
+        
+        # Show active jails
+        print_info "Active Fail2Ban jails:"
+        fail2ban-client status 2>/dev/null | grep "Jail list" || echo "  (checking jails...)"
+    else
+        print_error "Fail2Ban failed to start. Check: journalctl -u fail2ban"
     fi
 }
 
@@ -524,11 +755,29 @@ print_summary() {
         echo ""
     fi
     
+    if [ "$FAIL2BAN_INSTALLED" = true ]; then
+        print_info "Fail2Ban Protection:"
+        echo "  Status:       sudo fail2ban-client status"
+        echo "  Check jail:   sudo fail2ban-client status nginx-http-auth"
+        echo "  Unban IP:     sudo fail2ban-client set <jail> unbanip <IP>"
+        echo "  Banned IPs:   sudo fail2ban-client status <jail>"
+        echo ""
+        echo "  Active jails: sshd, nginx-http-auth, nginx-forbidden,"
+        echo "                nginx-badbots, nginx-botsearch, nginx-limit-req,"
+        echo "                recidive (repeat offender protection)"
+        echo ""
+        echo "  Ban settings: ${BAN_TIME}s ban, ${MAX_RETRY} attempts in ${FIND_TIME}s"
+        echo ""
+    fi
+    
     print_warning "SECURITY REMINDER:"
     echo "  - Change default passwords for Grafana (admin/admin)"
     echo "  - Keep your basic auth password secure"
     echo "  - Consider using a firewall (ufw) to restrict access"
     echo "  - Only expose necessary ports to the internet"
+    if [ "$FAIL2BAN_INSTALLED" = true ]; then
+        echo "  - Monitor Fail2Ban logs: /var/log/fail2ban.log"
+    fi
     echo ""
 }
 
@@ -550,6 +799,7 @@ main() {
     setup_rotom_device_port
     test_and_reload_nginx
     setup_ssl
+    setup_fail2ban
     print_summary
 }
 
