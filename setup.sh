@@ -5,12 +5,13 @@
 # =============================================================================
 # This script handles:
 #   1. Checking/installing Docker and Docker Compose
-#   2. Detecting system resources (RAM, CPU, Storage)
-#   3. Optimizing MariaDB configuration for your hardware
-#   4. Copying default config files
-#   5. Generating/setting secure passwords and tokens
-#   6. Installing MariaDB (optional)
-#   7. Creating required databases
+#   2. Checking/installing Google Chrome (specific version for compatibility)
+#   3. Detecting system resources (RAM, CPU, Storage)
+#   4. Optimizing MariaDB configuration for your hardware
+#   5. Copying default config files
+#   6. Generating/setting secure passwords and tokens
+#   7. Installing MariaDB (optional)
+#   8. Creating required databases
 # =============================================================================
 
 # Colors for output
@@ -52,10 +53,14 @@ fi
 # Track if user needs to re-login for docker group
 NEEDS_RELOGIN=false
 
+# Required Chrome version for compatibility with scanning tools
+REQUIRED_CHROME_VERSION="125.0.6422.141"
+CHROME_DEB_URL="https://github.com/NDViet/google-chrome-stable/releases/download/125.0.6422.141-1/google-chrome-stable_125.0.6422.141-1_amd64.deb"
+
 # =============================================================================
 # Step 1: Check/Install Docker and Docker Compose
 # =============================================================================
-echo "[1/7] Checking Docker installation..."
+echo "[1/8] Checking Docker installation..."
 echo ""
 
 # Function to detect package manager
@@ -333,9 +338,189 @@ fi
 echo ""
 
 # =============================================================================
-# Step 2: Detect System Resources
+# Step 2: Check/Install Google Chrome (Specific Version)
 # =============================================================================
-echo "[2/7] Detecting system resources..."
+echo "[2/8] Checking Google Chrome installation..."
+echo ""
+
+# Function to get Chrome version
+get_chrome_version() {
+    if command -v google-chrome &> /dev/null; then
+        google-chrome --version 2>/dev/null | awk '{print $3}'
+    elif command -v google-chrome-stable &> /dev/null; then
+        google-chrome-stable --version 2>/dev/null | awk '{print $3}'
+    elif [ -f /usr/bin/google-chrome ]; then
+        /usr/bin/google-chrome --version 2>/dev/null | awk '{print $3}'
+    else
+        echo ""
+    fi
+}
+
+# Function to install specific Chrome version
+install_chrome_version() {
+    print_info "Installing Google Chrome version $REQUIRED_CHROME_VERSION..."
+    
+    detect_package_manager
+    
+    if [ "$PKG_MANAGER" != "apt" ]; then
+        print_warning "Chrome installation is only supported on Debian/Ubuntu systems."
+        print_info "Please install Chrome $REQUIRED_CHROME_VERSION manually."
+        return 1
+    fi
+    
+    # Install dependencies
+    apt-get update -y
+    apt-get install -y wget fonts-liberation libasound2 libatk-bridge2.0-0 libatk1.0-0 \
+        libatspi2.0-0 libcups2 libdbus-1-3 libdrm2 libgbm1 libgtk-3-0 libnspr4 \
+        libnss3 libwayland-client0 libxcomposite1 libxdamage1 libxfixes3 \
+        libxkbcommon0 libxrandr2 xdg-utils 2>/dev/null || true
+    
+    # Download Chrome .deb
+    CHROME_DEB="/tmp/chrome.deb"
+    print_info "Downloading Chrome from: $CHROME_DEB_URL"
+    
+    if wget -q -O "$CHROME_DEB" "$CHROME_DEB_URL"; then
+        # Install the .deb package
+        if dpkg -i "$CHROME_DEB" 2>/dev/null; then
+            print_success "Chrome $REQUIRED_CHROME_VERSION installed successfully!"
+            rm -f "$CHROME_DEB"
+            return 0
+        else
+            # Fix broken dependencies
+            apt-get install -f -y
+            if dpkg -i "$CHROME_DEB"; then
+                print_success "Chrome $REQUIRED_CHROME_VERSION installed successfully!"
+                rm -f "$CHROME_DEB"
+                return 0
+            else
+                print_error "Failed to install Chrome package."
+                rm -f "$CHROME_DEB"
+                return 1
+            fi
+        fi
+    else
+        print_error "Failed to download Chrome package."
+        print_info "URL: $CHROME_DEB_URL"
+        return 1
+    fi
+}
+
+# Function to disable Chrome auto-updates
+disable_chrome_updates() {
+    print_info "Disabling Chrome auto-updates to maintain version compatibility..."
+    
+    # Method 1: Create repository override file
+    cat > /etc/apt/preferences.d/google-chrome << EOF
+# Prevent Google Chrome from being updated
+# Required version: $REQUIRED_CHROME_VERSION for scanner compatibility
+Package: google-chrome-stable
+Pin: version $REQUIRED_CHROME_VERSION*
+Pin-Priority: 1001
+EOF
+    
+    # Method 2: Remove Google Chrome repo if it exists
+    if [ -f /etc/apt/sources.list.d/google-chrome.list ]; then
+        mv /etc/apt/sources.list.d/google-chrome.list /etc/apt/sources.list.d/google-chrome.list.disabled 2>/dev/null || true
+        print_info "Disabled Google Chrome repository."
+    fi
+    
+    # Method 3: Hold the package
+    if command -v apt-mark &> /dev/null; then
+        apt-mark hold google-chrome-stable 2>/dev/null || true
+    fi
+    
+    print_success "Chrome auto-updates disabled."
+    print_info "Chrome will stay at version $REQUIRED_CHROME_VERSION"
+}
+
+# Check current Chrome version
+CURRENT_CHROME_VERSION=$(get_chrome_version)
+CHROME_INSTALLED=false
+CHROME_CORRECT_VERSION=false
+
+if [ -n "$CURRENT_CHROME_VERSION" ]; then
+    CHROME_INSTALLED=true
+    print_success "Google Chrome is installed (version: $CURRENT_CHROME_VERSION)"
+    
+    # Compare versions (just the major.minor.build.patch)
+    if [ "$CURRENT_CHROME_VERSION" = "$REQUIRED_CHROME_VERSION" ]; then
+        CHROME_CORRECT_VERSION=true
+        print_success "Chrome version matches required version!"
+    else
+        print_warning "Chrome version mismatch!"
+        print_warning "  Installed: $CURRENT_CHROME_VERSION"
+        print_warning "  Required:  $REQUIRED_CHROME_VERSION"
+    fi
+else
+    print_warning "Google Chrome is NOT installed."
+fi
+
+echo ""
+
+# Display Chrome status summary
+echo "  ┌─────────────────────────────────────────────────────────┐"
+echo "  │              GOOGLE CHROME STATUS                       │"
+echo "  ├─────────────────────────────────────────────────────────┤"
+if [ "$CHROME_INSTALLED" = true ]; then
+    echo -e "  │  Chrome Installed:     ${GREEN}YES${NC}                            │"
+    printf "  │  Current Version:      %-30s │\n" "$CURRENT_CHROME_VERSION"
+else
+    echo -e "  │  Chrome Installed:     ${RED}NO${NC}                             │"
+    echo "  │  Current Version:      N/A                            │"
+fi
+printf "  │  Required Version:     %-30s │\n" "$REQUIRED_CHROME_VERSION"
+if [ "$CHROME_CORRECT_VERSION" = true ]; then
+    echo -e "  │  Version Match:        ${GREEN}YES${NC}                            │"
+else
+    echo -e "  │  Version Match:        ${RED}NO${NC}                             │"
+fi
+echo "  └─────────────────────────────────────────────────────────┘"
+echo ""
+
+# Handle Chrome installation/update
+if [ "$CHROME_CORRECT_VERSION" = false ]; then
+    echo "  Google Chrome $REQUIRED_CHROME_VERSION is required for scanner compatibility."
+    echo "  This specific version ensures ChromeDriver compatibility with scanning tools."
+    echo ""
+    
+    if [ "$CHROME_INSTALLED" = true ]; then
+        read -p "  Replace current Chrome with required version? (y/n) [y]: " INSTALL_CHROME
+    else
+        read -p "  Install Google Chrome $REQUIRED_CHROME_VERSION? (y/n) [y]: " INSTALL_CHROME
+    fi
+    INSTALL_CHROME=${INSTALL_CHROME:-y}
+    
+    if [ "$INSTALL_CHROME" = "y" ] || [ "$INSTALL_CHROME" = "Y" ]; then
+        # Remove existing Chrome if present
+        if [ "$CHROME_INSTALLED" = true ]; then
+            print_info "Removing current Chrome installation..."
+            apt-get remove -y google-chrome-stable 2>/dev/null || true
+        fi
+        
+        if install_chrome_version; then
+            CHROME_INSTALLED=true
+            CHROME_CORRECT_VERSION=true
+            disable_chrome_updates
+        else
+            print_warning "Chrome installation failed. You may need to install manually."
+            print_info "Download URL: $CHROME_DEB_URL"
+        fi
+    else
+        print_warning "Skipping Chrome installation."
+        print_warning "Scanner tools may not work correctly without Chrome $REQUIRED_CHROME_VERSION"
+    fi
+else
+    # Chrome is correct version, ensure updates are disabled
+    print_info "Ensuring Chrome updates are disabled..."
+    disable_chrome_updates
+fi
+
+echo ""
+
+# =============================================================================
+# Step 3: Detect System Resources
+# =============================================================================
+echo "[3/8] Detecting system resources..."
 echo ""
 
 # Detect RAM (in MB)
@@ -407,9 +592,9 @@ print_success "Storage type: $STORAGE_NAME"
 echo ""
 
 # =============================================================================
-# Step 3: Calculate Optimal MariaDB Settings
+# Step 4: Calculate Optimal MariaDB Settings
 # =============================================================================
-echo "[3/7] Calculating optimal MariaDB settings..."
+echo "[4/8] Calculating optimal MariaDB settings..."
 echo ""
 
 # Calculate InnoDB Buffer Pool Size
@@ -564,9 +749,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 4: Copy default config files
+# Step 5: Copy default config files
 # =============================================================================
-echo "[4/7] Copying default config files..."
+echo "[5/8] Copying default config files..."
 
 cp env-default .env
 cp reactmap/local-default.json reactmap/local.json
@@ -578,9 +763,9 @@ print_success "Config files copied."
 echo ""
 
 # =============================================================================
-# Step 5: Generate/prompt for secrets and passwords
+# Step 6: Generate/prompt for secrets and passwords
 # =============================================================================
-echo "[5/7] Configuring secrets and passwords..."
+echo "[6/8] Configuring secrets and passwords..."
 echo "      (Press enter to auto-generate random values)"
 echo ""
 
@@ -667,9 +852,9 @@ print_success "Secrets applied to all config files."
 echo ""
 
 # =============================================================================
-# Step 6: MariaDB installation (optional)
+# Step 7: MariaDB installation (optional)
 # =============================================================================
-echo "[6/7] Database setup..."
+echo "[7/8] Database setup..."
 
 if ! command -v mysql &> /dev/null; then
   read -p "      MariaDB not found. Install it now? (y/n): " INSTALL_CHOICE
@@ -678,7 +863,7 @@ if ! command -v mysql &> /dev/null; then
     detect_package_manager
     case $PKG_MANAGER in
         apt)
-            apt update -y
+    apt update -y
             apt install -y mariadb-server
             ;;
         dnf|yum)
@@ -699,11 +884,11 @@ if ! command -v mysql &> /dev/null; then
     esac
     
     if [ "$SKIP_DB_SETUP" != "true" ]; then
-        # Set root password on fresh install
+    # Set root password on fresh install
         mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;" 2>/dev/null
-        if [ $? -eq 0 ]; then
+    if [ $? -eq 0 ]; then
           print_success "MariaDB installed and root password set."
-        else
+    else
           print_warning "Could not set root password. You may need to configure MariaDB manually."
         fi
     fi
@@ -717,11 +902,11 @@ else
 fi
 
 # =============================================================================
-# Step 7: Create databases
+# Step 8: Create databases
 # =============================================================================
 if [ "$SKIP_DB_SETUP" != "true" ]; then
   echo ""
-  echo "[7/7] Creating databases..."
+  echo "[8/8] Creating databases..."
 
   read -p "      DB root username (default: root): " ROOT_USER
   [ -z "$ROOT_USER" ] && ROOT_USER="root"
@@ -751,7 +936,7 @@ if [ "$SKIP_DB_SETUP" != "true" ]; then
   fi
 else
   echo ""
-  echo "[7/7] Skipped database creation (using Docker's MariaDB)."
+  echo "[8/8] Skipped database creation (using Docker's MariaDB)."
   print_info "Docker's MariaDB will create databases on first run."
 fi
 
@@ -769,9 +954,14 @@ echo "  ├── CPU: ${CPU_CORES} cores detected"
 echo "  ├── Storage: ${STORAGE_NAME}"
 echo "  ├── MariaDB buffer pool: ${BUFFER_POOL_SIZE}"
 if [ "$DOCKER_INSTALLED" = true ]; then
-echo "  └── Docker: Installed and configured"
+echo "  ├── Docker: Installed and configured"
 else
-echo "  └── Docker: Not installed"
+echo "  ├── Docker: Not installed"
+fi
+if [ "$CHROME_CORRECT_VERSION" = true ]; then
+echo "  └── Chrome: $REQUIRED_CHROME_VERSION (updates disabled)"
+else
+echo "  └── Chrome: Not installed or wrong version"
 fi
 echo ""
 echo "  Generated Credentials (save these!):"
@@ -794,8 +984,8 @@ if [ "$NEEDS_RELOGIN" = true ]; then
     echo ""
 else
     echo "  Next steps:"
-    echo "  1. Review config files for any manual changes needed"
-    echo "  2. Run: docker compose up -d --force-recreate --build"
+echo "  1. Review config files for any manual changes needed"
+echo "  2. Run: docker compose up -d --force-recreate --build"
     echo "  3. Access services at http://localhost:6001-6007"
     echo ""
 fi
