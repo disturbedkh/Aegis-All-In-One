@@ -1389,52 +1389,92 @@ setup_rotom_device_port() {
             fi
         fi
         
-        # Check if stream module is available
+        # Check if stream module is ACTUALLY available (not just compile flags)
+        # We need to find the actual .so file or confirm it works
         STREAM_AVAILABLE=false
-        if nginx -V 2>&1 | grep -q "with-stream"; then
-            STREAM_AVAILABLE=true
+        STREAM_MODULE_FILE=""
+        
+        # Search for the stream module .so file
+        for path in \
+            "/usr/lib/nginx/modules/ngx_stream_module.so" \
+            "/usr/share/nginx/modules/ngx_stream_module.so" \
+            "/usr/lib64/nginx/modules/ngx_stream_module.so" \
+            "/usr/local/nginx/modules/ngx_stream_module.so"; do
+            if [ -f "$path" ]; then
+                STREAM_MODULE_FILE="$path"
+                STREAM_AVAILABLE=true
+                break
+            fi
+        done
+        
+        # Also search with find
+        if [ -z "$STREAM_MODULE_FILE" ]; then
+            STREAM_MODULE_FILE=$(find /usr /lib -name "ngx_stream_module.so" 2>/dev/null | head -1)
+            if [ -n "$STREAM_MODULE_FILE" ]; then
+                STREAM_AVAILABLE=true
+            fi
         fi
         
-        # Check for stream module in modules-enabled (Ubuntu/Debian)
-        if [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ] || \
-           [ -f "/usr/share/nginx/modules/ngx_stream_module.so" ] || \
-           [ -f "/usr/lib/nginx/modules/ngx_stream_module.so" ]; then
-            STREAM_AVAILABLE=true
+        # Check modules-enabled
+        if [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
+            if grep -q "ngx_stream_module" /etc/nginx/modules-enabled/50-mod-stream.conf 2>/dev/null; then
+                STREAM_AVAILABLE=true
+                if [ -z "$STREAM_MODULE_FILE" ]; then
+                    STREAM_MODULE_FILE=$(grep -oP 'load_module\s+\K[^;]+' /etc/nginx/modules-enabled/50-mod-stream.conf 2>/dev/null | head -1)
+                fi
+            fi
         fi
         
         if [ "$STREAM_AVAILABLE" = false ]; then
-            print_warning "Nginx stream module is not available."
+            print_warning "Nginx stream module is NOT installed."
+            print_info "The stream module .so file was not found on this system."
+            echo ""
             
-            # Try to install stream module
+            # Offer to install stream module
             if command -v apt-get &> /dev/null; then
-                read -p "Would you like to install the nginx stream module? (y/n) [y]: " INSTALL_STREAM
+                read -p "Would you like to install the nginx stream module now? (y/n) [y]: " INSTALL_STREAM
                 INSTALL_STREAM=${INSTALL_STREAM:-y}
                 
                 if [ "$INSTALL_STREAM" = "y" ] || [ "$INSTALL_STREAM" = "Y" ]; then
                     print_info "Installing nginx stream module..."
                     apt-get update -y
                     
-                    # Try libnginx-mod-stream first (newer), then nginx-extras (older)
+                    # Try libnginx-mod-stream first (for nginx from Ubuntu repos)
                     if apt-get install -y libnginx-mod-stream 2>/dev/null; then
                         print_success "Stream module installed (libnginx-mod-stream)"
                         STREAM_AVAILABLE=true
-                    elif apt-get install -y nginx-extras 2>/dev/null; then
-                        print_success "Stream module installed (nginx-extras)"
-                        STREAM_AVAILABLE=true
+                        # Find the newly installed module
+                        STREAM_MODULE_FILE=$(find /usr /lib -name "ngx_stream_module.so" 2>/dev/null | head -1)
                     else
-                        print_error "Could not install stream module."
+                        print_warning "libnginx-mod-stream not available, trying nginx-extras..."
+                        if apt-get install -y nginx-extras 2>/dev/null; then
+                            print_success "Stream module installed (nginx-extras)"
+                            STREAM_AVAILABLE=true
+                            STREAM_MODULE_FILE=$(find /usr /lib -name "ngx_stream_module.so" 2>/dev/null | head -1)
+                        else
+                            print_error "Could not install stream module."
+                            print_info "You may need to install a different nginx package or compile nginx with stream support."
+                        fi
                     fi
+                fi
+            elif command -v yum &> /dev/null || command -v dnf &> /dev/null; then
+                PKG_MGR=$(command -v dnf || command -v yum)
+                read -p "Would you like to install nginx-mod-stream? (y/n) [y]: " INSTALL_STREAM
+                INSTALL_STREAM=${INSTALL_STREAM:-y}
+                if [ "$INSTALL_STREAM" = "y" ] || [ "$INSTALL_STREAM" = "Y" ]; then
+                    $PKG_MGR install -y nginx-mod-stream && STREAM_AVAILABLE=true
+                    STREAM_MODULE_FILE=$(find /usr /lib -name "ngx_stream_module.so" 2>/dev/null | head -1)
                 fi
             fi
             
             if [ "$STREAM_AVAILABLE" = false ]; then
-                print_warning "Stream module not available. Skipping stream config."
+                print_warning "Stream module not available. Skipping stream proxy setup."
                 print_info "Devices should connect directly to port 7070 on this server."
                 print_info "Make sure port 7070 is open in your firewall."
                 return
             fi
         else
-            print_success "Stream module is available"
+            print_success "Stream module is available at: $STREAM_MODULE_FILE"
         fi
         
         # Find the stream module .so file
