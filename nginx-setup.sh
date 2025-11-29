@@ -1406,6 +1406,26 @@ setup_rotom_device_port() {
             print_success "Stream module is available"
         fi
         
+        # Ensure the stream module is loaded in nginx.conf
+        # This is required even if the module is installed
+        STREAM_MODULE_PATH=""
+        if [ -f "/usr/lib/nginx/modules/ngx_stream_module.so" ]; then
+            STREAM_MODULE_PATH="/usr/lib/nginx/modules/ngx_stream_module.so"
+        elif [ -f "/usr/share/nginx/modules/ngx_stream_module.so" ]; then
+            STREAM_MODULE_PATH="/usr/share/nginx/modules/ngx_stream_module.so"
+        fi
+        
+        if [ -n "$STREAM_MODULE_PATH" ]; then
+            # Check if load_module directive exists for stream
+            if ! grep -q "ngx_stream_module" /etc/nginx/nginx.conf && \
+               ! [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
+                print_info "Adding load_module directive for stream module..."
+                # Add load_module at the very top of nginx.conf (before any other directives)
+                sed -i "1i load_module $STREAM_MODULE_PATH;" /etc/nginx/nginx.conf
+                print_success "Stream module load directive added"
+            fi
+        fi
+        
         # Create stream config directory
         mkdir -p /etc/nginx/stream.d
         
@@ -1429,7 +1449,16 @@ EOF
         # Backup nginx.conf
         cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
         
-        # Check if stream block already exists in nginx.conf
+        # First, clean up any incorrectly placed stream blocks from previous runs
+        # Remove stream blocks that might be inside http{} block
+        print_info "Checking for incorrectly placed stream configurations..."
+        
+        # Remove any stream-related lines that might have been added incorrectly
+        sed -i '/# Stream configuration for TCP proxying/d' /etc/nginx/nginx.conf
+        sed -i '/include \/etc\/nginx\/nginx-stream.conf/d' /etc/nginx/nginx.conf
+        
+        # Check if stream block already exists at ROOT level (not inside http{})
+        # A properly placed stream block should start at column 0
         if grep -q "^stream[[:space:]]*{" /etc/nginx/nginx.conf; then
             print_info "Stream block already exists in nginx.conf"
             # Check if our include is there
@@ -1440,38 +1469,37 @@ EOF
             fi
         else
             # Need to add stream block at root level (OUTSIDE http block)
-            # The safest way is to add it at the very end of the file
-            # But we need to make sure we're not inside any block
-            
             print_info "Adding stream block to nginx.conf..."
             
-            # Check the structure of nginx.conf
-            # Count opening and closing braces to find the end of the last block
+            # The stream block must be at root level, AFTER the http{} block closes
+            # We'll add it to a separate file and include it, which is safer
             
-            # Create a temporary file with the stream block
-            STREAM_BLOCK='
+            # Create a separate stream configuration file
+            cat > "/etc/nginx/nginx-stream.conf" << 'STREAMEOF'
 # Stream configuration for TCP proxying (Rotom devices)
 # Added by Aegis All-in-One nginx-setup.sh
+# This file is included at the end of nginx.conf
+
 stream {
     include /etc/nginx/stream.d/*.conf;
 }
-'
-            # Remove any existing partial stream config we may have added before
-            sed -i '/# Stream configuration for TCP proxying/d' /etc/nginx/nginx.conf
-            sed -i '/include \/etc\/nginx\/nginx-stream.conf/d' /etc/nginx/nginx.conf
+STREAMEOF
             
-            # The safest approach: add the stream block at the very end
-            # nginx.conf typically ends with the http block closing
-            # We need to add the stream block AFTER that
+            # Remove any existing include for our stream config
+            sed -i '/include.*nginx-stream\.conf/d' /etc/nginx/nginx.conf
             
-            # First, let's check if the file ends properly
-            LAST_CHAR=$(tail -c 1 /etc/nginx/nginx.conf)
+            # Find where the http block ends and add include after it
+            # We need to add the include at the very end of the file (after http{} closes)
             
-            # Add newlines and the stream block
+            # First ensure the file ends with a newline
+            sed -i -e '$a\' /etc/nginx/nginx.conf
+            
+            # Add the include at the end
             echo "" >> /etc/nginx/nginx.conf
-            echo "$STREAM_BLOCK" >> /etc/nginx/nginx.conf
+            echo "# Include stream configuration (must be at root level, outside http{})" >> /etc/nginx/nginx.conf
+            echo "include /etc/nginx/nginx-stream.conf;" >> /etc/nginx/nginx.conf
             
-            print_success "Stream block added to nginx.conf"
+            print_success "Stream configuration added to nginx.conf"
         fi
         
         # Test the configuration
@@ -1501,6 +1529,7 @@ stream {
             
             # Clean up stream config
             rm -f /etc/nginx/stream.d/rotom-devices.conf
+            rm -f /etc/nginx/nginx-stream.conf
             
             print_warning "Stream proxy setup failed. Devices should connect directly to port 7070."
             return
