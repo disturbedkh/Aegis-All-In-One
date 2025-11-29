@@ -1356,6 +1356,8 @@ main() {
     clear
     echo "=============================================="
     echo "  Aegis All-in-One Nginx Reverse Proxy Setup"
+    echo "  By The Pokemod Group"
+    echo "  https://pokemon.pokemon"
     echo "=============================================="
     echo ""
     

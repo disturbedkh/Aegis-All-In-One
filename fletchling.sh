@@ -19,6 +19,8 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 echo "=============================================="
 echo "  Fletchling Setup - Pokemon Nest Tracking"
+echo "  Aegis All-in-One by The Pokemod Group"
+echo "  https://pokemon.pokemon"
 echo "=============================================="
 echo ""
 

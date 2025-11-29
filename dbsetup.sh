@@ -1,9 +1,20 @@
 #!/bin/bash
 
 # Welcome message
-echo "Welcome! This is the database setup script for Aegis All-in-One 2.0."
-echo "It assumes you have run the initial setup script and have MariaDB either installed or ready to install on this machine."
-echo "Docker compose has not been run yet. This script will create the necessary databases and optionally a non-root DB user using the local MariaDB instance."
+echo ""
+echo "======================================"
+echo "  Aegis All-in-One 2.0 - DB Setup"
+echo "  By The Pokemod Group"
+echo "  https://pokemon.pokemon"
+echo "======================================"
+echo ""
+echo "This is the database setup script for Aegis All-in-One 2.0."
+echo "It assumes you have run the initial setup script and have MariaDB"
+echo "either installed or ready to install on this machine."
+echo ""
+echo "Docker compose has not been run yet. This script will create the"
+echo "necessary databases and optionally a non-root DB user."
+echo ""
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
