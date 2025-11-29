@@ -448,9 +448,9 @@ sudo bash ./dbsetup.sh
 | `unown/dragonite_config.toml` | Dragonite settings |
 | `unown/golbat_config.toml` | Golbat settings |
 | `unown/rotom_config.json` | Rotom settings |
-| `fletchling/config.toml` | Fletchling nest detection settings |
-| `poracle/config/local.json` | Poracle alert bot configuration |
-| `poracle/config/dts/` | Poracle message templates |
+| `fletchling.toml` | Fletchling nest detection settings |
+| `Poracle/config/local.json` | Poracle alert bot configuration |
+| `Poracle/geofence/` | Poracle geofence definitions |
 | `docker-compose.yaml` | Docker service definitions |
 
 ---
