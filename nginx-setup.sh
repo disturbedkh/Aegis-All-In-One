@@ -1437,15 +1437,42 @@ setup_rotom_device_port() {
             print_success "Stream module is available"
         fi
         
-        # Ensure the stream module is actually loaded and working
-        # Even if the module file exists, it may not be loaded in nginx
+        # Find the stream module .so file
+        # Check common locations and also search for it
         STREAM_MODULE_PATH=""
-        if [ -f "/usr/lib/nginx/modules/ngx_stream_module.so" ]; then
-            STREAM_MODULE_PATH="/usr/lib/nginx/modules/ngx_stream_module.so"
-        elif [ -f "/usr/share/nginx/modules/ngx_stream_module.so" ]; then
-            STREAM_MODULE_PATH="/usr/share/nginx/modules/ngx_stream_module.so"
-        elif [ -f "/usr/lib64/nginx/modules/ngx_stream_module.so" ]; then
-            STREAM_MODULE_PATH="/usr/lib64/nginx/modules/ngx_stream_module.so"
+        
+        # Check common paths first
+        for path in \
+            "/usr/lib/nginx/modules/ngx_stream_module.so" \
+            "/usr/share/nginx/modules/ngx_stream_module.so" \
+            "/usr/lib64/nginx/modules/ngx_stream_module.so" \
+            "/usr/local/nginx/modules/ngx_stream_module.so" \
+            "/opt/nginx/modules/ngx_stream_module.so"; do
+            if [ -f "$path" ]; then
+                STREAM_MODULE_PATH="$path"
+                break
+            fi
+        done
+        
+        # If not found, search for it
+        if [ -z "$STREAM_MODULE_PATH" ]; then
+            print_info "Searching for stream module..."
+            FOUND_MODULE=$(find /usr -name "ngx_stream_module.so" 2>/dev/null | head -1)
+            if [ -n "$FOUND_MODULE" ]; then
+                STREAM_MODULE_PATH="$FOUND_MODULE"
+                print_success "Found stream module at: $STREAM_MODULE_PATH"
+            fi
+        fi
+        
+        # Check if it's referenced in modules-enabled
+        if [ -z "$STREAM_MODULE_PATH" ] && [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
+            # Extract the path from the modules-enabled file
+            STREAM_MODULE_PATH=$(grep -oP 'load_module\s+\K[^;]+' /etc/nginx/modules-enabled/50-mod-stream.conf 2>/dev/null | head -1)
+            if [ -n "$STREAM_MODULE_PATH" ] && [ -f "$STREAM_MODULE_PATH" ]; then
+                print_success "Found stream module path from modules-enabled: $STREAM_MODULE_PATH"
+            else
+                STREAM_MODULE_PATH=""
+            fi
         fi
         
         # ALWAYS try to add load_module if the .so file exists
