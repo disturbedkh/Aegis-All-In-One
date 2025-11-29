@@ -68,10 +68,8 @@ cp unown/rotom_config-default.json unown/rotom_config.json
 ```
 
 ### 3. Run the setup scripts
-Switch to root user or use sudo and run
 ```
-
-./setup.sh && ./dbsetup.sh
+sudo bash ./setup.sh
 ```
 This will prompt you to create all needed environmental and config variables and import them into relavent configs and the docker compose file.
 
