@@ -1756,6 +1756,52 @@ main() {
     print_info "Step 2/9: Detecting web server..."
     detect_webserver
     
+    # Pre-flight check: Fix any broken nginx configuration
+    if command -v nginx &> /dev/null; then
+        if nginx -t 2>&1 | grep -q "unknown directive.*stream"; then
+            echo ""
+            echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${YELLOW}║     BROKEN NGINX CONFIGURATION DETECTED - AUTO-FIXING         ║${NC}"
+            echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            print_warning "Found incorrectly placed 'stream' block in nginx.conf"
+            print_info "This was likely caused by a previous setup attempt."
+            print_info "Automatically removing the broken stream configuration..."
+            echo ""
+            
+            # Backup first
+            cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
+            print_success "Backup created"
+            
+            # Use awk to remove the stream block (handles multi-line with nested braces)
+            awk '
+                /stream[[:space:]]*\{/ { in_stream=1; brace_count=1; next }
+                in_stream && /\{/ { brace_count++ }
+                in_stream && /\}/ { brace_count--; if(brace_count==0) { in_stream=0; next } }
+                !in_stream { print }
+            ' /etc/nginx/nginx.conf > /etc/nginx/nginx.conf.tmp
+            mv /etc/nginx/nginx.conf.tmp /etc/nginx/nginx.conf
+            
+            # Also remove any leftover stream-related lines
+            sed -i '/include.*stream/d' /etc/nginx/nginx.conf
+            sed -i '/# Stream configuration/d' /etc/nginx/nginx.conf
+            sed -i '/# Include stream configuration/d' /etc/nginx/nginx.conf
+            sed -i '/include.*nginx-stream/d' /etc/nginx/nginx.conf
+            
+            # Clean up stream config files
+            rm -f /etc/nginx/nginx-stream.conf
+            rm -f /etc/nginx/stream.d/rotom-devices.conf 2>/dev/null
+            
+            # Test if fix worked
+            if nginx -t 2>&1 | grep -q "test is successful"; then
+                print_success "Nginx configuration fixed successfully!"
+            else
+                print_warning "Config may still have other issues, but stream error is resolved."
+            fi
+            echo ""
+        fi
+    fi
+    
     # Step 3: Get configuration from user
     print_info "Step 3/9: Gathering configuration..."
     get_user_config
