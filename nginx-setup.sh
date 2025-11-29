@@ -1123,20 +1123,27 @@ create_symlinks() {
 test_and_reload_nginx() {
     print_info "Testing Nginx configuration..."
     
-    # Capture nginx -t output
-    NGINX_TEST_OUTPUT=$(nginx -t 2>&1)
+    # Run nginx -t and capture output (show output in real-time too)
+    nginx -t
     NGINX_TEST_EXIT=$?
+    
+    echo ""
     
     if [ $NGINX_TEST_EXIT -eq 0 ]; then
         print_success "Nginx configuration is valid"
         print_info "Reloading Nginx..."
-        systemctl reload nginx
-        print_success "Nginx reloaded successfully"
+        
+        if systemctl reload nginx; then
+            print_success "Nginx reloaded successfully"
+        else
+            print_warning "Nginx reload returned non-zero exit code"
+        fi
     else
         print_error "Nginx configuration test failed!"
         echo ""
-        echo "$NGINX_TEST_OUTPUT"
-        echo ""
+        
+        # Run again to capture output for analysis
+        NGINX_TEST_OUTPUT=$(nginx -t 2>&1)
         
         # Check for common issues and provide guidance
         if echo "$NGINX_TEST_OUTPUT" | grep -q "conflicting server name"; then
@@ -1164,10 +1171,13 @@ test_and_reload_nginx() {
         echo ""
         read -p "Would you like to continue anyway (may cause issues)? (y/n) [n]: " CONTINUE_ANYWAY
         if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
+            print_error "Setup aborted due to nginx configuration errors."
             exit 1
         fi
         print_warning "Continuing despite nginx test failure..."
     fi
+    
+    echo ""
 }
 
 # Setup SSL with Certbot
@@ -1576,20 +1586,53 @@ main() {
     echo "=============================================="
     echo ""
     
+    # Step 1: Check root
+    print_info "Step 1/9: Checking permissions..."
     check_root
+    
+    # Step 2: Detect/install webserver
+    print_info "Step 2/9: Detecting web server..."
     detect_webserver
+    
+    # Step 3: Get configuration from user
+    print_info "Step 3/9: Gathering configuration..."
     get_user_config
+    
+    # Step 4: Authelia setup (optional)
+    print_info "Step 4/9: Authentication setup..."
     setup_authelia
     if [ "$AUTHELIA_ENABLED" != true ]; then
         setup_basic_auth
     fi
+    
+    # Step 5: Create nginx configs
+    print_info "Step 5/9: Creating Nginx configurations..."
     create_nginx_configs
     create_symlinks
+    
+    # Step 6: Test and apply nginx config
+    print_info "Step 6/9: Testing and applying Nginx configuration..."
     test_and_reload_nginx
+    
+    # Step 7: Rotom device port (optional)
+    print_info "Step 7/9: Rotom device port configuration..."
     setup_rotom_device_port
-    test_and_reload_nginx
+    
+    # Only test again if rotom setup made changes
+    if [ "$SETUP_ROTOM_STREAM" = "y" ] || [ "$SETUP_ROTOM_STREAM" = "Y" ]; then
+        print_info "Re-testing Nginx after stream configuration..."
+        test_and_reload_nginx
+    fi
+    
+    # Step 8: SSL setup (optional)
+    print_info "Step 8/9: SSL certificate setup..."
     setup_ssl
+    
+    # Step 9: Fail2Ban setup (optional)
+    print_info "Step 9/9: Fail2Ban security setup..."
     setup_fail2ban
+    
+    # Done - print summary
     print_summary
 }
 
