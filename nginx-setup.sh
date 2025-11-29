@@ -1358,6 +1358,37 @@ setup_rotom_device_port() {
     if [ "$SETUP_ROTOM_STREAM" = "y" ] || [ "$SETUP_ROTOM_STREAM" = "Y" ]; then
         print_info "Setting up stream proxy for Rotom device connections..."
         
+        # PRE-CHECK: Fix any existing broken stream configuration
+        if nginx -t 2>&1 | grep -q "unknown directive.*stream"; then
+            print_warning "Detected existing broken stream configuration in nginx.conf"
+            print_info "Attempting to fix by removing incorrectly placed stream block..."
+            
+            # Backup first
+            cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
+            
+            # Remove any stream blocks (they're in the wrong place or module not loaded)
+            # Use a temporary file approach for safer multi-line removal
+            awk '
+                /stream[[:space:]]*\{/ { in_stream=1; brace_count=1; next }
+                in_stream && /\{/ { brace_count++ }
+                in_stream && /\}/ { brace_count--; if(brace_count==0) { in_stream=0; next } }
+                !in_stream { print }
+            ' /etc/nginx/nginx.conf > /etc/nginx/nginx.conf.tmp
+            mv /etc/nginx/nginx.conf.tmp /etc/nginx/nginx.conf
+            
+            # Also remove any leftover stream-related lines
+            sed -i '/include.*stream/d' /etc/nginx/nginx.conf
+            sed -i '/# Stream configuration/d' /etc/nginx/nginx.conf
+            sed -i '/# Include stream configuration/d' /etc/nginx/nginx.conf
+            
+            # Test if fix worked
+            if nginx -t 2>&1 | grep -q "test is successful"; then
+                print_success "Fixed broken nginx configuration"
+            else
+                print_warning "Config still has issues, but continuing with stream setup..."
+            fi
+        fi
+        
         # Check if stream module is available
         STREAM_AVAILABLE=false
         if nginx -V 2>&1 | grep -q "with-stream"; then
@@ -1450,12 +1481,50 @@ EOF
         cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
         
         # First, clean up any incorrectly placed stream blocks from previous runs
-        # Remove stream blocks that might be inside http{} block
         print_info "Checking for incorrectly placed stream configurations..."
+        
+        # Check if there's a stream block that's causing errors (not at root level)
+        # The stream block at root level should have NO leading whitespace
+        if grep -q "[[:space:]]stream[[:space:]]*{" /etc/nginx/nginx.conf || \
+           grep -q "^[[:space:]]\+stream" /etc/nginx/nginx.conf; then
+            print_warning "Found incorrectly indented stream block - removing it..."
+            # Remove indented stream blocks (these are inside http{} block)
+            # This is a multi-line removal - remove from "stream {" to its closing "}"
+            # Using perl for multi-line regex
+            if command -v perl &> /dev/null; then
+                perl -i -0pe 's/\n\s+stream\s*\{[^}]*\}//gs' /etc/nginx/nginx.conf
+            else
+                # Fallback: remove lines containing stream directive that are indented
+                sed -i '/^[[:space:]]\+stream[[:space:]]*{/d' /etc/nginx/nginx.conf
+                sed -i '/^[[:space:]]\+include.*stream/d' /etc/nginx/nginx.conf
+            fi
+            print_success "Removed incorrectly placed stream block"
+        fi
+        
+        # Also check for stream block WITHOUT proper closing (broken config)
+        # If stream { exists but the config is broken, remove the whole stream section
+        if grep -q "stream[[:space:]]*{" /etc/nginx/nginx.conf; then
+            # Test if nginx config is valid
+            if ! nginx -t 2>&1 | grep -q "test is successful"; then
+                if nginx -t 2>&1 | grep -q "unknown directive.*stream"; then
+                    print_warning "Stream block is causing errors - removing it..."
+                    # Remove all stream-related content
+                    sed -i '/stream[[:space:]]*{/,/^}/d' /etc/nginx/nginx.conf
+                    # Also try removing just the stream lines
+                    sed -i '/^stream/d' /etc/nginx/nginx.conf
+                    sed -i '/stream\.d/d' /etc/nginx/nginx.conf
+                    print_success "Removed broken stream configuration"
+                fi
+            fi
+        fi
         
         # Remove any stream-related lines that might have been added incorrectly
         sed -i '/# Stream configuration for TCP proxying/d' /etc/nginx/nginx.conf
         sed -i '/include \/etc\/nginx\/nginx-stream.conf/d' /etc/nginx/nginx.conf
+        sed -i '/# Include stream configuration/d' /etc/nginx/nginx.conf
+        
+        # Clean up the separate stream config file if it exists
+        rm -f /etc/nginx/nginx-stream.conf
         
         # Check if stream block already exists at ROOT level (not inside http{})
         # A properly placed stream block should start at column 0
