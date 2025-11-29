@@ -1437,24 +1437,59 @@ setup_rotom_device_port() {
             print_success "Stream module is available"
         fi
         
-        # Ensure the stream module is loaded in nginx.conf
-        # This is required even if the module is installed
+        # Ensure the stream module is actually loaded and working
+        # Even if the module file exists, it may not be loaded in nginx
         STREAM_MODULE_PATH=""
         if [ -f "/usr/lib/nginx/modules/ngx_stream_module.so" ]; then
             STREAM_MODULE_PATH="/usr/lib/nginx/modules/ngx_stream_module.so"
         elif [ -f "/usr/share/nginx/modules/ngx_stream_module.so" ]; then
             STREAM_MODULE_PATH="/usr/share/nginx/modules/ngx_stream_module.so"
+        elif [ -f "/usr/lib64/nginx/modules/ngx_stream_module.so" ]; then
+            STREAM_MODULE_PATH="/usr/lib64/nginx/modules/ngx_stream_module.so"
         fi
         
-        if [ -n "$STREAM_MODULE_PATH" ]; then
-            # Check if load_module directive exists for stream
-            if ! grep -q "ngx_stream_module" /etc/nginx/nginx.conf && \
-               ! [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
-                print_info "Adding load_module directive for stream module..."
-                # Add load_module at the very top of nginx.conf (before any other directives)
-                sed -i "1i load_module $STREAM_MODULE_PATH;" /etc/nginx/nginx.conf
-                print_success "Stream module load directive added"
+        # Check if load_module is already present for stream
+        LOAD_MODULE_PRESENT=false
+        if grep -q "load_module.*ngx_stream_module" /etc/nginx/nginx.conf 2>/dev/null; then
+            LOAD_MODULE_PRESENT=true
+        elif [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
+            LOAD_MODULE_PRESENT=true
+        fi
+        
+        # If module file exists but load_module isn't present, add it
+        if [ -n "$STREAM_MODULE_PATH" ] && [ "$LOAD_MODULE_PRESENT" = false ]; then
+            print_info "Adding load_module directive for stream module..."
+            
+            # Add load_module at the very top of nginx.conf (must be before any other directives)
+            # First, remove any existing (possibly broken) load_module lines for stream
+            sed -i '/load_module.*stream/d' /etc/nginx/nginx.conf
+            
+            # Add the load_module directive at line 1
+            sed -i "1i load_module $STREAM_MODULE_PATH;" /etc/nginx/nginx.conf
+            print_success "Added: load_module $STREAM_MODULE_PATH;"
+            
+            # Also create a modules-enabled file as a backup method
+            if [ -d "/etc/nginx/modules-enabled" ]; then
+                echo "load_module $STREAM_MODULE_PATH;" > /etc/nginx/modules-enabled/50-mod-stream.conf
+                print_success "Also created /etc/nginx/modules-enabled/50-mod-stream.conf"
             fi
+        elif [ "$LOAD_MODULE_PRESENT" = true ]; then
+            print_success "Stream module load directive already present"
+        elif [ -z "$STREAM_MODULE_PATH" ]; then
+            # Module might be compiled in (not dynamic)
+            if nginx -V 2>&1 | grep -q -- "--with-stream"; then
+                print_success "Stream module is compiled into nginx (static)"
+            else
+                print_error "Stream module .so file not found and not compiled in."
+                print_info "Try: sudo apt install libnginx-mod-stream"
+                return
+            fi
+        fi
+        
+        # Verify nginx config is still valid after adding load_module
+        if ! nginx -t 2>&1 | grep -q "test is successful"; then
+            print_warning "Nginx config test failed after adding load_module"
+            print_info "There may be other configuration issues to resolve"
         fi
         
         # Create stream config directory
