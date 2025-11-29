@@ -1,0 +1,282 @@
+services:
+  # This docker-compose file is provided as an example to run most elementary services
+  # You can add more services as you need them. For example, if you want to run a reverse proxy
+  # you can add it here and point it to the services you want to expose to the internet
+
+  # Main database to handle everything
+  # Container default port is 3306 if you need to expose it (you shouldn't)
+  # environment section is only needed on first ever start. After that it can
+  # be safely removed as the database already exists. Same applies to the first
+  # entry in the volumes section. It is only needed on first ever start to create the databases and
+  # grant the default user access to them.
+
+  database:
+    image: mariadb:latest
+    command: --character-set-server=utf8mb4 --collation-server=utf8mb4_unicode_ci --default-authentication-plugin=mysql_native_password --binlog-expire-logs-seconds=86400
+    container_name: database
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_DATABASE: golbat
+      MYSQL_USER: dbuser
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+    volumes:
+      - ./init:/docker-entrypoint-initdb.d
+      - ./mysql_data/mariadb.cnf:/etc/mysql/mariadb.cnf
+      - ./mysql_data:/var/lib/mysql
+      - /etc/localtime:/etc/localtime:ro
+
+  # Reactmap - Map fronted
+  # Default container port 8080. We expose it through port 6001 but with a
+  # reverse proxy you can remove the ports section and give access to the
+  # internet through the reverse proxy (pointing directly to the container port)
+
+  reactmap:
+    image: ghcr.io/watwowmap/reactmap:main
+    container_name: reactmap
+    command: sh -c "yarn start"
+    restart: unless-stopped
+    depends_on:
+      - database
+    volumes:
+      - ./reactmap/local.json:/home/node/server/src/configs/local.json
+      - ./reactmap/env:/home/node/.env
+    ports:
+      - 6001:8080
+
+  # Dragonite Scanner
+  # Default container port is 7272 which is not exposed. It is only used
+  # internally by other containers
+
+  dragonite:
+    image: ghcr.io/unownhash/dragonite-public:latest
+    #image: ghcr.io/unownhash/dragonite-public:testing
+    container_name: dragonite
+    restart: unless-stopped
+    depends_on:
+      - golbat
+    volumes:
+      - ./unown/dragonite_config.toml:/dragonite/config.toml
+      - ./unown/logs:/dragonite/logs
+
+  # Dragonite Admin UX
+  # Default container port is 7273 which can be exposed to 6002 (or not if
+  # you use a reverse proxy).
+
+  admin:
+    image: ghcr.io/unownhash/dragonite-public-admin:latest
+    container_name: admin
+    restart: unless-stopped
+    depends_on:
+      - dragonite
+    environment:
+      ADMIN_GENERAL_HOST: 0.0.0.0
+      ADMIN_GENERAL_PORT: 7273
+      ADMIN_GENERAL_USERNAME: admin
+      ADMIN_GENERAL_PASSWORD: ${DRAGONITE_PASSWORD}
+      ADMIN_DRAGONITE_API_ENDPOINT: http://dragonite:7272
+      ADMIN_DRAGONITE_API_SECRET: ${DRAGONITE_API_SECRET}
+      ADMIN_GOLBAT_API_ENDPOINT: http://golbat:9001
+      ADMIN_GOLBAT_API_SECRET: ${GOLBAT_API_SECRET}
+    ports:
+      - 6002:7273
+
+  # Golbat Data Parser
+  # Default ports are 9001 and 50001. There's no need to expose them
+  # as they are only used internally by other containers
+
+  golbat:
+    image: ghcr.io/unownhash/golbat:main
+    container_name: golbat
+    restart: unless-stopped
+    depends_on:
+      - database
+    volumes:
+      - ./unown/golbat_config.toml:/golbat/config.toml
+      - ./unown/golbat_cache:/golbat/cache
+      - ./unown/logs:/golbat/logs
+
+  # Rotom Device Manager
+  # Default container ports are 7070,7071,7072. We will only expose
+  # 7070 so aegis devices can connect to it and 7072 (port 6003) for the web interface if
+  # you want to access it directly. If you use a reverse proxy you can remove
+  # the second port.
+
+  rotom:
+    image: ghcr.io/unownhash/rotom:main
+    #image: ghcr.io/the-pokemod-group/rotom:main
+    container_name: rotom
+    restart: unless-stopped
+    volumes:
+      - ./unown/rotom_config.json:/rotom/config/local.json
+      - ./unown/logs:/rotom/logs
+      - ./unown/rotom_jobs:/rotom/jobs
+    ports:
+      - 7070:7070
+      - 6003:7072
+
+  # Koji Geofence and Map Management service
+  # Default container port 8080. As above services, remove the port section if you will
+  # use a reverse proxy. Exposed port is 6004
+
+  koji:
+    image: ghcr.io/turtiesocks/koji:main
+    container_name: koji
+    command: "koji"
+    restart: unless-stopped
+    depends_on:
+      - database
+    environment:
+      SCANNER_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/golbat"
+      KOJI_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/koji"
+      CONTROLLER_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/dragonite"
+      KOJI_SECRET: ${KOJI_SECRET}
+    ports:
+      - 6004:8080
+
+  # PhpMyAdmin to access all our databases through a web interface
+  # Default container port is 80. By default we expose it to 6005
+  # however, if you use a reverse proxy and want external access, you
+  # can remove the ports section to give access to the internet through
+  # the reverse proxy
+
+  pma:
+    image: phpmyadmin:latest
+    container_name: pma
+    restart: unless-stopped
+    depends_on:
+      - database
+    environment:
+      PMA_HOST: database
+      UPLOAD_LIMIT: 600M
+    ports:
+      - 6005:80
+
+  # VictoriaMetrics Agent to scrape data from all services and send them to victoria metrics
+  # default container port is 8429 but we don't need to expose it at all for a local setup
+
+  vmagent:
+    image: victoriametrics/vmagent
+    container_name: vmagent
+    restart: unless-stopped
+    working_dir: /vmagentdata
+    depends_on:
+      - victoriametrics
+    volumes:
+      - ./vmagent/data:/vmagentdata
+      - ./vmagent/prometheus.yml:/etc/prometheus/prometheus.yml
+    command:
+      - "--promscrape.config=/etc/prometheus/prometheus.yml"
+      - "--remoteWrite.url=http://victoriametrics:8428/api/v1/write"
+
+  # VictoriaMetrics package to store all statistical data that we collect and to be used as a source for Grafana
+  # default port is 8428 but we don't need to expose it.
+
+  victoriametrics:
+    image: victoriametrics/victoria-metrics
+    container_name: victoriametrics
+    restart: unless-stopped
+    depends_on:
+      - dragonite
+      - rotom
+      - golbat
+    volumes:
+      - ./victoriametrics/data:/storage
+    command:
+      - "--storageDataPath=/storage"
+      - "--httpListenAddr=:8428"
+      - "--maxLabelsPerTimeseries=30"
+
+  # Grafana Package for beautiful stats
+  # Default port of the container is 3000. We will expose it through port 6006 but it should be removed if you use a reverse proxy
+  # The default user and password are admin/admin. You should change them as soon as you log in.
+
+  grafana:
+    image: grafana/grafana:latest
+    env_file:
+      - .env
+    environment:
+      # On Linux, automatically override with real user if the variables exist in the host environment
+      UID: ${UID:-1000}
+      GID: ${GID:-1000}
+    container_name: grafana
+    restart: unless-stopped
+    user: "$UID:$GID"
+    depends_on:
+      - victoriametrics
+    volumes:
+      - ./grafana:/var/lib/grafana
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - 6006:3000
+
+  # Xilriws Anti-Bot Bypass by the Unown Team.
+  # This Requires you enable `remote_auth_url` under [general] section in your `dragonite_config.toml`.
+  xilriws:
+    container_name: xilriws
+    image: ghcr.io/unownhash/xilriws:main
+    restart: unless-stopped
+    ports:
+      - "5090:5090"
+    volumes:
+      - ./unown/proxies.txt:/xilriws/proxies.txt
+
+  # PoracleJS - Discord/Telegram Pokemon Alarm Notification Service
+  # Default container port is 3030 for webhook receiver
+  # Configure your Discord bot token in ./Poracle/config/local.json
+  # More info: https://github.com/KartulUdus/PoracleJS
+  
+  poracle:
+    image: ghcr.io/kartuludus/poraclejs:develop
+    container_name: poracle
+    restart: unless-stopped
+    depends_on:
+      - database
+    volumes:
+      - ./Poracle/config:/usr/src/app/config
+      - ./Poracle/logs:/usr/src/app/logs
+      - ./Poracle/backups:/usr/src/app/backups
+      - ./Poracle/geofence:/usr/src/app/geofence
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - 6007:3030
+    environment:
+      - NODE_ENV=production
+
+# Uncomment below instructions to enable fletchling - a container for finding and saving nests for reactmap/golbat.
+# You MUST create a project in koji admin WITH geofences AND edit fletchling.toml with your project name
+# You also MUST run ./docker-osm-importer.sh 'AreaName' to get parks from OSM for said area during your first run!
+# More info https://github.com/UnownHash/Fletchling/blob/main/docs/IMPORTING.md and 
+# https://github.com/UnownHash/Fletchling/blob/main/README.md
+ # fletchling:
+   # image: ghcr.io/unownhash/fletchling:latest
+   # container_name: fletchling
+   # restart: unless-stopped
+   # volumes:
+     # - ./fletchling.toml:/fletchling/configs/fletchling.toml
+     # - ./fletchling:/fletchling/logs
+     # - /etc/timezone:/etc/timezone:ro
+     # - /etc/localtime:/etc/localtime:ro
+   # ports:
+     # - "9042:9042"
+   # healthcheck:
+     # test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9042/status"]
+     # interval: 60s
+     # timeout: 30s
+     # retries: 3
+     # start_period: 30s
+     
+ # fletchling-tools:
+   # image: ghcr.io/unownhash/fletchling:latest
+   # container_name: fletchling-tools
+   # restart: unless-stopped
+   # command: ./sleep
+   # volumes:
+     # - ./fletchling.toml:/fletchling/configs/fletchling.toml
+     # - ./fletchling:/fletchling/logs
+     # - /etc/timezone:/etc/timezone:ro
+     # - /etc/localtime:/etc/localtime:ro
+
+networks:
+  mapping_network:
+    driver: bridge

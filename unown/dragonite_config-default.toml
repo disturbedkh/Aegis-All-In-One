@@ -1,0 +1,82 @@
+[general]
+# seconds to sleep in-between PTC authing on one proxy
+login_delay = 0 
+# Ηave dragonite scroll through accounts which don't have a refresh token and fetch these in the background.
+# token_init_enabled = true
+
+# Whether raw worker stats are written
+stats = true
+
+# Host and Port used for the Dragonite API
+api_host = "0.0.0.0"
+api_port = 7272
+
+# Uses login proxy as you wish, e.g. Swirlix or Xilriws
+remote_auth_url = "http://xilriws:5090/api/v1/login-code"
+
+[auth.ptc]
+# to use this provider pls enable it
+enable = true
+# seconds to sleep in-between PTC authing on one proxy
+login_delay = 120
+# background initer to collect tokens of accounts without using them - this is false by default
+token_init_enabled=true
+remote_auth_url = "http://xilriws:5090/api/v1/login-code"
+# don't rely on remote auth and only use accounts with stored token
+token_refresh_only = true
+
+[auth.nk]
+# to use this provider pls enable it
+enable = false
+# seconds to sleep in-between NK authing on one proxy
+#login_delay = 20
+# background initer to collect tokens of accounts without using them - this is false by default
+token_init_enabled=true
+# don't rely on user-pass auth and only use accounts with stored token
+token_refresh_only = true
+
+[koji]
+url = "http://koji:8080"
+bearer_token = "SuperSecureKojiSecret"
+
+[prometheus]
+enabled = true
+
+[tuning]
+#recycle_gmo_limit = 4900
+#recycle_encounter_limit = 9900
+recycle_on_jail=false
+minimum_account_reuse_hours = 72
+#location_delay = 0
+#fort_location_delay = 0
+#scout_age_limit = 30
+
+#[accounts]
+#required_level = 30 # used for everything except leveling (quest can force level 31 at specific events)
+#leveling_level = 31 # used to stop leveling at certain level
+
+[rotom]
+endpoint = "ws://rotom:7071"
+
+[logging]
+# if you are going to run Blissey for stats you are going to need these true.
+save = false
+#debug = false
+#max_size = 500 # MB
+#max_age = 30 # days
+
+[processors]
+# Golbat Endpoint is singular - and will configure an endpoint for raw sending and API
+golbat_endpoint = "http://golbat:9001"
+golbat_raw_bearer = "SuperSecureGolbatRawSecret"
+golbat_api_secret = "SuperSecureGolbatApiSecret"
+# if this is present then dragonite will not send raws to the httpendpoint
+golbat_grpc_endpoint = "golbat:50001"
+
+[db.dragonite]
+host = "database"
+port = 3306
+user = "dbuser"
+password = "SuperSecuredbuserPassword"
+name = "dragonite"
+pool_size = 1

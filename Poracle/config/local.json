@@ -1,0 +1,92 @@
+{
+  "database": {
+    "client": "mysql",
+    "conn": {
+      "host": "database",
+      "port": 3306,
+      "user": "dbuser",
+      "password": "CHANGE_ME",
+      "database": "poracle"
+    }
+  },
+  "server": {
+    "host": "0.0.0.0",
+    "port": 3030
+  },
+  "general": {
+    "locale": "en",
+    "pokemon": true,
+    "pokestops": true,
+    "lures": true,
+    "pokestopLures": true,
+    "invasions": true,
+    "pokestopInvasions": true,
+    "gyms": true,
+    "raids": true,
+    "nests": true,
+    "quests": true,
+    "weather": false,
+    "greeting": true,
+    "alterPokemon": true,
+    "roleCheckDPokemon": false,
+    "monsterDefaults": {},
+    "raidDefaults": {},
+    "eggDefaults": {},
+    "questDefaults": {},
+    "lureDefaults": {},
+    "invasionDefaults": {},
+    "nestDefaults": {},
+    "gymDefaults": {},
+    "weatherDefaults": {}
+  },
+  "discord": {
+    "enabled": false,
+    "prefix": ["!"],
+    "token": ["YOUR_DISCORD_BOT_TOKEN"],
+    "channels": [],
+    "admins": [],
+    "limitSec": 0,
+    "limitAmount": 0,
+    "pokemonRole": [],
+    "pokestopRole": [],
+    "invasionRole": [],
+    "lureRole": [],
+    "questRole": [],
+    "gymRole": [],
+    "raidRole": [],
+    "eggRole": [],
+    "nestRole": [],
+    "weatherRole": []
+  },
+  "telegram": {
+    "enabled": false,
+    "token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "channels": [],
+    "admins": [],
+    "pokemonRole": [],
+    "pokestopRole": [],
+    "invasionRole": [],
+    "lureRole": [],
+    "questRole": [],
+    "gymRole": [],
+    "raidRole": [],
+    "eggRole": [],
+    "nestRole": [],
+    "weatherRole": []
+  },
+  "geocoding": {
+    "provider": "nominatim",
+    "providerURL": "https://nominatim.openstreetmap.org/",
+    "cacheDetail": "city"
+  },
+  "logging": {
+    "logLevel": "info"
+  },
+  "pvp": {
+    "pokemon": true,
+    "pokemon_best": true,
+    "pokemon_worst": true,
+    "pokemon_value": true
+  }
+}
+
