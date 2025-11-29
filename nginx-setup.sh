@@ -1575,35 +1575,29 @@ EOF
             # Need to add stream block at root level (OUTSIDE http block)
             print_info "Adding stream block to nginx.conf..."
             
-            # The stream block must be at root level, AFTER the http{} block closes
-            # We'll add it to a separate file and include it, which is safer
+            # DO NOT use include for stream - add the block directly to nginx.conf
+            # The stream directive must be at root level, and includes don't always work
             
-            # Create a separate stream configuration file
-            cat > "/etc/nginx/nginx-stream.conf" << 'STREAMEOF'
+            # Clean up any previous attempts
+            rm -f /etc/nginx/nginx-stream.conf
+            sed -i '/include.*nginx-stream/d' /etc/nginx/nginx.conf
+            
+            # First ensure the file ends with a newline
+            sed -i -e '$a\' /etc/nginx/nginx.conf
+            
+            # Add the stream block DIRECTLY at the end of nginx.conf
+            # This ensures it's at root level (after http{} block closes)
+            cat >> /etc/nginx/nginx.conf << 'STREAMEOF'
+
 # Stream configuration for TCP proxying (Rotom devices)
 # Added by Aegis All-in-One nginx-setup.sh
-# This file is included at the end of nginx.conf
-
+# This block must be at root level (same level as http{})
 stream {
     include /etc/nginx/stream.d/*.conf;
 }
 STREAMEOF
             
-            # Remove any existing include for our stream config
-            sed -i '/include.*nginx-stream\.conf/d' /etc/nginx/nginx.conf
-            
-            # Find where the http block ends and add include after it
-            # We need to add the include at the very end of the file (after http{} closes)
-            
-            # First ensure the file ends with a newline
-            sed -i -e '$a\' /etc/nginx/nginx.conf
-            
-            # Add the include at the end
-            echo "" >> /etc/nginx/nginx.conf
-            echo "# Include stream configuration (must be at root level, outside http{})" >> /etc/nginx/nginx.conf
-            echo "include /etc/nginx/nginx-stream.conf;" >> /etc/nginx/nginx.conf
-            
-            print_success "Stream configuration added to nginx.conf"
+            print_success "Stream block added directly to nginx.conf"
         fi
         
         # Test the configuration
@@ -1631,9 +1625,12 @@ STREAMEOF
                 print_success "Backup restored"
             fi
             
-            # Clean up stream config
+            # Clean up stream config files
             rm -f /etc/nginx/stream.d/rotom-devices.conf
             rm -f /etc/nginx/nginx-stream.conf
+            
+            # Also remove any stream block we may have added
+            sed -i '/# Stream configuration for TCP proxying/,/^}$/d' /etc/nginx/nginx.conf 2>/dev/null || true
             
             print_warning "Stream proxy setup failed. Devices should connect directly to port 7070."
             return
