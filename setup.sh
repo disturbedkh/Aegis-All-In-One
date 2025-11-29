@@ -4,12 +4,13 @@
 # Aegis All-in-One 2.0 - Initial Setup Script
 # =============================================================================
 # This script handles:
-#   1. Detecting system resources (RAM, CPU, Storage)
-#   2. Optimizing MariaDB configuration for your hardware
-#   3. Copying default config files
-#   4. Generating/setting secure passwords and tokens
-#   5. Installing MariaDB (optional)
-#   6. Creating required databases
+#   1. Checking/installing Docker and Docker Compose
+#   2. Detecting system resources (RAM, CPU, Storage)
+#   3. Optimizing MariaDB configuration for your hardware
+#   4. Copying default config files
+#   5. Generating/setting secure passwords and tokens
+#   6. Installing MariaDB (optional)
+#   7. Creating required databases
 # =============================================================================
 
 # Colors for output
@@ -48,10 +49,293 @@ else
   REAL_GROUP=$(id -gn)
 fi
 
+# Track if user needs to re-login for docker group
+NEEDS_RELOGIN=false
+
 # =============================================================================
-# Step 1: Detect System Resources
+# Step 1: Check/Install Docker and Docker Compose
 # =============================================================================
-echo "[1/6] Detecting system resources..."
+echo "[1/7] Checking Docker installation..."
+echo ""
+
+# Function to detect package manager
+detect_package_manager() {
+    if command -v apt-get &> /dev/null; then
+        PKG_MANAGER="apt"
+    elif command -v dnf &> /dev/null; then
+        PKG_MANAGER="dnf"
+    elif command -v yum &> /dev/null; then
+        PKG_MANAGER="yum"
+    elif command -v pacman &> /dev/null; then
+        PKG_MANAGER="pacman"
+    else
+        PKG_MANAGER="unknown"
+    fi
+}
+
+# Function to install Docker
+install_docker() {
+    print_info "Installing Docker..."
+    
+    detect_package_manager
+    
+    case $PKG_MANAGER in
+        apt)
+            # Remove old versions
+            apt-get remove -y docker docker-engine docker.io containerd runc 2>/dev/null || true
+            
+            # Install prerequisites
+            apt-get update -y
+            apt-get install -y ca-certificates curl gnupg lsb-release
+            
+            # Add Docker's official GPG key
+            install -m 0755 -d /etc/apt/keyrings
+            curl -fsSL https://download.docker.com/linux/$(. /etc/os-release && echo "$ID")/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg 2>/dev/null || \
+            curl -fsSL https://download.docker.com/linux/ubuntu/gpg | gpg --dearmor -o /etc/apt/keyrings/docker.gpg
+            chmod a+r /etc/apt/keyrings/docker.gpg
+            
+            # Set up repository
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/$(. /etc/os-release && echo "$ID") \
+              $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+              tee /etc/apt/sources.list.d/docker.list > /dev/null 2>/dev/null || \
+            echo \
+              "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.gpg] https://download.docker.com/linux/ubuntu \
+              $(lsb_release -cs) stable" | \
+              tee /etc/apt/sources.list.d/docker.list > /dev/null
+            
+            # Install Docker
+            apt-get update -y
+            apt-get install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        dnf|yum)
+            # Remove old versions
+            $PKG_MANAGER remove -y docker docker-client docker-client-latest docker-common docker-latest docker-latest-logrotate docker-logrotate docker-engine 2>/dev/null || true
+            
+            # Install prerequisites
+            $PKG_MANAGER install -y yum-utils
+            
+            # Add Docker repository
+            yum-config-manager --add-repo https://download.docker.com/linux/centos/docker-ce.repo 2>/dev/null || \
+            yum-config-manager --add-repo https://download.docker.com/linux/fedora/docker-ce.repo
+            
+            # Install Docker
+            $PKG_MANAGER install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+            ;;
+        pacman)
+            pacman -Sy --noconfirm docker docker-compose
+            ;;
+        *)
+            print_error "Unsupported package manager. Please install Docker manually."
+            print_info "Visit: https://docs.docker.com/engine/install/"
+            return 1
+            ;;
+    esac
+    
+    # Start and enable Docker
+    systemctl start docker
+    systemctl enable docker
+    
+    if systemctl is-active --quiet docker; then
+        print_success "Docker installed and started successfully!"
+        return 0
+    else
+        print_error "Docker installation failed. Please install manually."
+        return 1
+    fi
+}
+
+# Function to check if user is in docker group
+check_docker_group() {
+    local user=$1
+    if groups "$user" 2>/dev/null | grep -q '\bdocker\b'; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Function to add user to docker group
+add_user_to_docker_group() {
+    local user=$1
+    print_info "Adding user '$user' to docker group..."
+    
+    # Create docker group if it doesn't exist
+    if ! getent group docker > /dev/null 2>&1; then
+        groupadd docker
+    fi
+    
+    # Add user to docker group
+    usermod -aG docker "$user"
+    
+    if [ $? -eq 0 ]; then
+        print_success "User '$user' added to docker group."
+        return 0
+    else
+        print_error "Failed to add user to docker group."
+        return 1
+    fi
+}
+
+# Check if Docker is installed
+DOCKER_INSTALLED=false
+DOCKER_COMPOSE_AVAILABLE=false
+
+if command -v docker &> /dev/null; then
+    DOCKER_INSTALLED=true
+    DOCKER_VERSION=$(docker --version 2>/dev/null | awk '{print $3}' | tr -d ',')
+    print_success "Docker is installed (version: $DOCKER_VERSION)"
+else
+    print_warning "Docker is NOT installed."
+fi
+
+# Check if Docker Compose is available (either plugin or standalone)
+if docker compose version &> /dev/null; then
+    DOCKER_COMPOSE_AVAILABLE=true
+    COMPOSE_VERSION=$(docker compose version --short 2>/dev/null)
+    print_success "Docker Compose plugin is available (version: $COMPOSE_VERSION)"
+elif command -v docker-compose &> /dev/null; then
+    DOCKER_COMPOSE_AVAILABLE=true
+    COMPOSE_VERSION=$(docker-compose --version 2>/dev/null | awk '{print $4}' | tr -d ',')
+    print_success "Docker Compose standalone is available (version: $COMPOSE_VERSION)"
+    print_warning "Note: Consider upgrading to Docker Compose plugin (docker compose) for better compatibility."
+else
+    print_warning "Docker Compose is NOT available."
+fi
+
+# Check if Docker daemon is running
+DOCKER_RUNNING=false
+if [ "$DOCKER_INSTALLED" = true ]; then
+    if systemctl is-active --quiet docker 2>/dev/null || docker info &> /dev/null; then
+        DOCKER_RUNNING=true
+        print_success "Docker daemon is running."
+    else
+        print_warning "Docker is installed but the daemon is not running."
+    fi
+fi
+
+# Check if real user can use Docker (is in docker group)
+DOCKER_ACCESSIBLE=false
+if [ "$DOCKER_INSTALLED" = true ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    if check_docker_group "$REAL_USER"; then
+        DOCKER_ACCESSIBLE=true
+        print_success "User '$REAL_USER' has Docker access (in docker group)."
+    else
+        print_warning "User '$REAL_USER' is NOT in the docker group."
+        print_warning "They won't be able to run Docker commands without sudo."
+    fi
+elif [ "$REAL_USER" = "root" ]; then
+    DOCKER_ACCESSIBLE=true
+fi
+
+echo ""
+
+# Display Docker status summary
+echo "  ┌─────────────────────────────────────────┐"
+echo "  │           DOCKER STATUS SUMMARY         │"
+echo "  ├─────────────────────────────────────────┤"
+if [ "$DOCKER_INSTALLED" = true ]; then
+    echo -e "  │  Docker Installed:    ${GREEN}YES${NC}               │"
+else
+    echo -e "  │  Docker Installed:    ${RED}NO${NC}                │"
+fi
+if [ "$DOCKER_COMPOSE_AVAILABLE" = true ]; then
+    echo -e "  │  Docker Compose:      ${GREEN}YES${NC}               │"
+else
+    echo -e "  │  Docker Compose:      ${RED}NO${NC}                │"
+fi
+if [ "$DOCKER_RUNNING" = true ]; then
+    echo -e "  │  Docker Running:      ${GREEN}YES${NC}               │"
+else
+    echo -e "  │  Docker Running:      ${RED}NO${NC}                │"
+fi
+if [ "$DOCKER_ACCESSIBLE" = true ]; then
+    echo -e "  │  User Access:         ${GREEN}YES${NC}               │"
+else
+    echo -e "  │  User Access:         ${RED}NO${NC}                │"
+fi
+echo "  └─────────────────────────────────────────┘"
+echo ""
+
+# Install Docker if needed
+if [ "$DOCKER_INSTALLED" = false ]; then
+    read -p "  Docker is required. Install Docker now? (y/n) [y]: " INSTALL_DOCKER
+    INSTALL_DOCKER=${INSTALL_DOCKER:-y}
+    
+    if [ "$INSTALL_DOCKER" = "y" ] || [ "$INSTALL_DOCKER" = "Y" ]; then
+        if install_docker; then
+            DOCKER_INSTALLED=true
+            DOCKER_RUNNING=true
+            DOCKER_COMPOSE_AVAILABLE=true
+        else
+            print_error "Docker installation failed. Cannot continue."
+            print_info "Please install Docker manually: https://docs.docker.com/engine/install/"
+            exit 1
+        fi
+    else
+        print_error "Docker is required for Aegis. Cannot continue without Docker."
+        exit 1
+    fi
+fi
+
+# Start Docker if not running
+if [ "$DOCKER_INSTALLED" = true ] && [ "$DOCKER_RUNNING" = false ]; then
+    print_info "Starting Docker daemon..."
+    systemctl start docker
+    if systemctl is-active --quiet docker; then
+        DOCKER_RUNNING=true
+        print_success "Docker daemon started."
+    else
+        print_error "Failed to start Docker daemon."
+        print_info "Try: sudo systemctl start docker"
+    fi
+fi
+
+# Enable Docker to start on boot
+if [ "$DOCKER_INSTALLED" = true ]; then
+    if ! systemctl is-enabled --quiet docker 2>/dev/null; then
+        print_info "Enabling Docker to start on boot..."
+        systemctl enable docker
+        print_success "Docker will start automatically on boot."
+    fi
+fi
+
+# Add user to docker group if needed
+if [ "$DOCKER_INSTALLED" = true ] && [ "$DOCKER_ACCESSIBLE" = false ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    echo ""
+    read -p "  Add user '$REAL_USER' to docker group? (y/n) [y]: " ADD_TO_GROUP
+    ADD_TO_GROUP=${ADD_TO_GROUP:-y}
+    
+    if [ "$ADD_TO_GROUP" = "y" ] || [ "$ADD_TO_GROUP" = "Y" ]; then
+        if add_user_to_docker_group "$REAL_USER"; then
+            DOCKER_ACCESSIBLE=true
+            NEEDS_RELOGIN=true
+            print_warning "User '$REAL_USER' needs to log out and back in for group changes to take effect."
+        fi
+    else
+        print_warning "User '$REAL_USER' will need to use 'sudo' for Docker commands."
+    fi
+fi
+
+# Verify Docker Compose after potential installation
+if [ "$DOCKER_COMPOSE_AVAILABLE" = false ] && [ "$DOCKER_INSTALLED" = true ]; then
+    # Check again after Docker installation
+    if docker compose version &> /dev/null; then
+        DOCKER_COMPOSE_AVAILABLE=true
+        print_success "Docker Compose plugin is now available."
+    else
+        print_warning "Docker Compose is still not available."
+        print_info "You may need to install it separately."
+        print_info "Visit: https://docs.docker.com/compose/install/"
+    fi
+fi
+
+echo ""
+
+# =============================================================================
+# Step 2: Detect System Resources
+# =============================================================================
+echo "[2/7] Detecting system resources..."
 echo ""
 
 # Detect RAM (in MB)
@@ -123,9 +407,9 @@ print_success "Storage type: $STORAGE_NAME"
 echo ""
 
 # =============================================================================
-# Step 2: Calculate Optimal MariaDB Settings
+# Step 3: Calculate Optimal MariaDB Settings
 # =============================================================================
-echo "[2/6] Calculating optimal MariaDB settings..."
+echo "[3/7] Calculating optimal MariaDB settings..."
 echo ""
 
 # Calculate InnoDB Buffer Pool Size
@@ -280,9 +564,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: Copy default config files
+# Step 4: Copy default config files
 # =============================================================================
-echo "[3/6] Copying default config files..."
+echo "[4/7] Copying default config files..."
 
 cp env-default .env
 cp reactmap/local-default.json reactmap/local.json
@@ -294,9 +578,9 @@ print_success "Config files copied."
 echo ""
 
 # =============================================================================
-# Step 4: Generate/prompt for secrets and passwords
+# Step 5: Generate/prompt for secrets and passwords
 # =============================================================================
-echo "[4/6] Configuring secrets and passwords..."
+echo "[5/7] Configuring secrets and passwords..."
 echo "      (Press enter to auto-generate random values)"
 echo ""
 
@@ -383,27 +667,49 @@ print_success "Secrets applied to all config files."
 echo ""
 
 # =============================================================================
-# Step 5: MariaDB installation (optional)
+# Step 6: MariaDB installation (optional)
 # =============================================================================
-echo "[5/6] Database setup..."
+echo "[6/7] Database setup..."
 
 if ! command -v mysql &> /dev/null; then
   read -p "      MariaDB not found. Install it now? (y/n): " INSTALL_CHOICE
   if [ "$INSTALL_CHOICE" = "y" ] || [ "$INSTALL_CHOICE" = "Y" ]; then
     print_info "Installing MariaDB..."
-    apt update -y
-    apt install mariadb-server -y
-    # Set root password on fresh install
-    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;"
-    if [ $? -eq 0 ]; then
-      print_success "MariaDB installed and root password set."
-    else
-      print_error "Error setting root password. Please check installation."
-      exit 1
+    detect_package_manager
+    case $PKG_MANAGER in
+        apt)
+            apt update -y
+            apt install -y mariadb-server
+            ;;
+        dnf|yum)
+            $PKG_MANAGER install -y mariadb-server
+            systemctl start mariadb
+            systemctl enable mariadb
+            ;;
+        pacman)
+            pacman -Sy --noconfirm mariadb
+            mariadb-install-db --user=mysql --basedir=/usr --datadir=/var/lib/mysql
+            systemctl start mariadb
+            systemctl enable mariadb
+            ;;
+        *)
+            print_error "Unsupported package manager. Please install MariaDB manually."
+            SKIP_DB_SETUP=true
+            ;;
+    esac
+    
+    if [ "$SKIP_DB_SETUP" != "true" ]; then
+        # Set root password on fresh install
+        mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;" 2>/dev/null
+        if [ $? -eq 0 ]; then
+          print_success "MariaDB installed and root password set."
+        else
+          print_warning "Could not set root password. You may need to configure MariaDB manually."
+        fi
     fi
   else
     print_info "Skipping MariaDB installation."
-    print_info "You will need to set up databases manually or use Docker's MariaDB."
+    print_info "Docker's MariaDB container will be used instead."
     SKIP_DB_SETUP=true
   fi
 else
@@ -411,11 +717,11 @@ else
 fi
 
 # =============================================================================
-# Step 6: Create databases
+# Step 7: Create databases
 # =============================================================================
 if [ "$SKIP_DB_SETUP" != "true" ]; then
   echo ""
-  echo "[6/6] Creating databases..."
+  echo "[7/7] Creating databases..."
 
   read -p "      DB root username (default: root): " ROOT_USER
   [ -z "$ROOT_USER" ] && ROOT_USER="root"
@@ -435,18 +741,17 @@ if [ "$SKIP_DB_SETUP" != "true" ]; then
   SQL+="FLUSH PRIVILEGES; "
 
   # Execute SQL
-  echo "$SQL" | mysql -u"$ROOT_USER" -p"$MYSQL_ROOT_PASSWORD" -h localhost
+  echo "$SQL" | mysql -u"$ROOT_USER" -p"$MYSQL_ROOT_PASSWORD" -h localhost 2>/dev/null
 
   if [ $? -eq 0 ]; then
     print_success "Databases created: ${DBS[*]}"
     print_success "DB user '$DB_USER' created with full privileges."
   else
-    print_error "Error creating databases. Check credentials and try again."
-    exit 1
+    print_warning "Could not create databases. Docker's MariaDB will handle this on first run."
   fi
 else
   echo ""
-  echo "[6/6] Skipped database creation (MariaDB not installed locally)."
+  echo "[7/7] Skipped database creation (using Docker's MariaDB)."
   print_info "Docker's MariaDB will create databases on first run."
 fi
 
@@ -462,7 +767,12 @@ echo "  System Configuration Applied:"
 echo "  ├── RAM: ${TOTAL_RAM_GB}GB detected"
 echo "  ├── CPU: ${CPU_CORES} cores detected"
 echo "  ├── Storage: ${STORAGE_NAME}"
-echo "  └── MariaDB buffer pool: ${BUFFER_POOL_SIZE}"
+echo "  ├── MariaDB buffer pool: ${BUFFER_POOL_SIZE}"
+if [ "$DOCKER_INSTALLED" = true ]; then
+echo "  └── Docker: Installed and configured"
+else
+echo "  └── Docker: Not installed"
+fi
 echo ""
 echo "  Generated Credentials (save these!):"
 echo "  ├── DB User: $DB_USER"
@@ -470,10 +780,25 @@ echo "  ├── DB Password: $DB_PASSWORD"
 echo "  ├── MySQL Root Password: $MYSQL_ROOT_PASSWORD"
 echo "  └── Rotom Auth Bearer: $ROTOM_AUTH_BEARER"
 echo ""
-echo "  Next steps:"
-echo "  1. Review config files for any manual changes needed"
-echo "  2. Run: docker compose up -d --force-recreate --build"
-echo "  3. Access services at http://localhost:6001-6007"
-echo ""
+
+if [ "$NEEDS_RELOGIN" = true ]; then
+    echo ""
+    print_warning "═══════════════════════════════════════════════════════════════"
+    print_warning "  IMPORTANT: Log out and log back in for Docker access!"
+    print_warning "  User '$REAL_USER' was added to the docker group."
+    print_warning "  Group changes require a new login session to take effect."
+    print_warning "═══════════════════════════════════════════════════════════════"
+    echo ""
+    echo "  After logging back in, run:"
+    echo "    docker compose up -d --force-recreate --build"
+    echo ""
+else
+    echo "  Next steps:"
+    echo "  1. Review config files for any manual changes needed"
+    echo "  2. Run: docker compose up -d --force-recreate --build"
+    echo "  3. Access services at http://localhost:6001-6007"
+    echo ""
+fi
+
 print_warning "IMPORTANT: Save the credentials above! They won't be shown again."
 echo ""
