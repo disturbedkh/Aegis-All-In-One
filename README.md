@@ -95,7 +95,23 @@ Point your browser to the following addresses. Replace localhost with your serve
 
 On some occasions one or more of these ports may already be assigned to other services which largely depends on each specific machine. If you're presented with a **_"port already in use"_** error, please change the corresponding container port in the `docker-compose.yaml` file.
 
-### 5. (Optional) Setup Fletchling for Pokemon Nests
+### 5. (Optional) Setup Poracle for Discord/Telegram Alerts
+
+If you want Pokemon spawn, raid, and quest alerts sent to Discord or Telegram:
+
+```
+sudo bash ./poracle.sh
+```
+
+The script will guide you through:
+- Creating a Discord or Telegram bot
+- Configuring bot tokens and admin users
+- Selecting which notification types to enable
+- Setting up webhooks from Golbat
+
+More info: https://github.com/KartulUdus/PoracleJS
+
+### 6. (Optional) Setup Fletchling for Pokemon Nests
 
 If you want Pokemon nests displayed on ReactMap, you'll need to setup Fletchling:
 
@@ -113,7 +129,7 @@ The script will:
 
 More info: https://github.com/UnownHash/Fletchling
 
-### 6. (Recommended) Secure Your Setup for External Access
+### 7. (Recommended) Secure Your Setup for External Access
 
 If you plan to access your setup from outside localhost or expose it to the internet, run the nginx security setup script:
 
@@ -137,7 +153,7 @@ The script will guide you through:
 
 **For production use, this step is highly recommended!**
 
-### 7. Validate Your Configuration
+### 8. Validate Your Configuration
 
 Run the configuration checker to ensure everything is properly set up:
 
@@ -152,7 +168,7 @@ This script validates:
 - Docker containers are running
 - Required files exist
 
-### 8. Working with Grafana
+### 9. Working with Grafana
 
 Albeit not critical to normal operation, it's always nice and informative to have some kind of performance metrics of your setup. In order to get a glimpse of what you can get with it, you should import our custom example dashboard that's inside the grafana folder (based on Dragonite's default prometheus dashboard but with some other metrics).
 
@@ -164,7 +180,7 @@ Albeit not critical to normal operation, it's always nice and informative to hav
 
 That's it. If you want more dashboards, you can find them at Unown#'s github.
 
-### 9. What now?
+### 10. What now?
 
 Now comes the fun part. Start reading and learning how all of this works. We recommend you to head over to:
 
@@ -180,7 +196,7 @@ In general terms, you will need to:
 4. Add at least one Aegis Device (should be autodetected by Rotom once you configure the ATV and Aegis properly)
 5. Map away
 
-### 10. Aegis Device Configuration
+### 11. Aegis Device Configuration
 
 This is typically unnecessary, because filling in the details in the app is usually sufficient.
 
