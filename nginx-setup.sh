@@ -1044,21 +1044,68 @@ create_nginx_configs() {
     done
     
     if [ ${#EXISTING_CONFIGS[@]} -gt 0 ]; then
-        print_warning "Found existing nginx configs that may conflict:"
+        echo ""
+        echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${YELLOW}║           CONFLICTING NGINX CONFIGS DETECTED                   ║${NC}"
+        echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        print_warning "Found existing nginx configs that may conflict with Aegis:"
+        echo ""
         for conf in "${EXISTING_CONFIGS[@]}"; do
-            echo "  - $conf"
+            echo -e "  ${RED}→${NC} $conf"
         done
         echo ""
-        read -p "These configs contain references to ${BASE_DOMAIN}. Continue anyway? (y/n) [n]: " CONTINUE_SETUP
-        CONTINUE_SETUP=${CONTINUE_SETUP:-n}
+        print_info "These configs contain references to '${BASE_DOMAIN}' and may cause:"
+        echo "  • 'conflicting server name' errors"
+        echo "  • nginx failing to start or reload"
+        echo "  • SSL certificate issues"
+        echo ""
         
-        if [ "$CONTINUE_SETUP" != "y" ] && [ "$CONTINUE_SETUP" != "Y" ]; then
-            print_error "Setup cancelled. Please review and remove conflicting configs first."
-            print_info "You can disable configs by removing symlinks from /etc/nginx/sites-enabled/"
-            exit 1
+        read -p "Would you like to remove these conflicting configs? (y/n) [y]: " REMOVE_CONFLICTS
+        REMOVE_CONFLICTS=${REMOVE_CONFLICTS:-y}
+        
+        if [ "$REMOVE_CONFLICTS" = "y" ] || [ "$REMOVE_CONFLICTS" = "Y" ]; then
+            print_info "Removing conflicting configs..."
+            for conf in "${EXISTING_CONFIGS[@]}"; do
+                # Remove from sites-enabled (symlink)
+                conf_name=$(basename "$conf")
+                if [ -L "/etc/nginx/sites-enabled/$conf_name" ]; then
+                    rm -f "/etc/nginx/sites-enabled/$conf_name"
+                    print_success "Disabled: /etc/nginx/sites-enabled/$conf_name"
+                fi
+                # Remove the actual config file
+                if [ -f "$conf" ]; then
+                    rm -f "$conf"
+                    print_success "Removed: $conf"
+                fi
+            done
+            echo ""
+        else
+            echo ""
+            echo -e "${RED}╔════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}║                         WARNING                                ║${NC}"
+            echo -e "${RED}╚════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            print_error "Conflicting configs were NOT removed!"
+            print_warning "This may cause nginx to fail with 'conflicting server name' errors."
+            print_warning "You may need to manually resolve conflicts after setup."
+            echo ""
+            print_info "To fix manually later, remove or rename these files:"
+            for conf in "${EXISTING_CONFIGS[@]}"; do
+                echo "  rm $conf"
+            done
+            echo ""
+            
+            read -p "Continue with setup anyway? (y/n) [n]: " CONTINUE_SETUP
+            CONTINUE_SETUP=${CONTINUE_SETUP:-n}
+            
+            if [ "$CONTINUE_SETUP" != "y" ] && [ "$CONTINUE_SETUP" != "Y" ]; then
+                print_error "Setup cancelled. Please remove conflicting configs and try again."
+                exit 1
+            fi
+            
+            print_warning "Continuing despite conflicts..."
         fi
-        
-        print_warning "Continuing... You may need to manually resolve conflicts after setup."
     fi
     
     # Clean up any existing Aegis configs to prevent duplicates
