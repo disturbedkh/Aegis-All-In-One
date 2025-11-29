@@ -1732,26 +1732,27 @@ EOF
             fi
         fi
         
-        # ALWAYS try to add load_module if the .so file exists
-        # Even with --with-stream flag, nginx often needs explicit module loading
-        if [ -n "$STREAM_MODULE_PATH" ]; then
-            # Check if load_module is already present
+        # Check if module is already loaded via modules-enabled (installed by package)
+        # This is the preferred method - don't add duplicate load_module
+        if [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
+            print_success "Stream module already configured via modules-enabled"
+            # Remove any duplicate load_module from nginx.conf to avoid "already loaded" error
+            if grep -q "load_module.*ngx_stream_module" /etc/nginx/nginx.conf 2>/dev/null; then
+                print_info "Removing duplicate load_module from nginx.conf..."
+                sed -i '/load_module.*ngx_stream_module/d' /etc/nginx/nginx.conf
+                print_success "Removed duplicate load_module directive"
+            fi
+        elif [ -n "$STREAM_MODULE_PATH" ]; then
+            # Module file exists but not configured via modules-enabled
+            # Check if load_module is already in nginx.conf
             if ! grep -q "load_module.*ngx_stream_module" /etc/nginx/nginx.conf 2>/dev/null; then
                 print_info "Adding load_module directive for stream module..."
-                
-                # Remove any existing (possibly broken) load_module lines for stream
-                sed -i '/load_module.*stream/d' /etc/nginx/nginx.conf
                 
                 # Add the load_module directive at line 1 (must be first)
                 sed -i "1i load_module $STREAM_MODULE_PATH;" /etc/nginx/nginx.conf
                 print_success "Added: load_module $STREAM_MODULE_PATH;"
             else
-                print_success "Stream module load directive already present"
-            fi
-            
-            # Also create modules-enabled file as backup
-            if [ -d "/etc/nginx/modules-enabled" ] && [ ! -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ]; then
-                echo "load_module $STREAM_MODULE_PATH;" > /etc/nginx/modules-enabled/50-mod-stream.conf
+                print_success "Stream module load directive already present in nginx.conf"
             fi
         else
             # No .so file found - check if stream is truly compiled in statically
@@ -2084,6 +2085,31 @@ main() {
     
     # Pre-flight check: Fix any broken nginx configuration
     if command -v nginx &> /dev/null; then
+        # Check for "module already loaded" error (duplicate load_module)
+        if nginx -t 2>&1 | grep -q "already loaded"; then
+            echo ""
+            echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${YELLOW}║     DUPLICATE MODULE LOAD DETECTED - AUTO-FIXING               ║${NC}"
+            echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            print_warning "Module is being loaded twice (modules-enabled + nginx.conf)"
+            print_info "Removing duplicate load_module directive from nginx.conf..."
+            
+            # Backup
+            cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
+            
+            # Remove duplicate load_module lines from nginx.conf
+            sed -i '/^load_module.*ngx_stream_module/d' /etc/nginx/nginx.conf
+            
+            if nginx -t 2>&1 | grep -q "test is successful"; then
+                print_success "Fixed duplicate module load error"
+                systemctl reload nginx 2>/dev/null || true
+            else
+                print_warning "Other issues remain, continuing..."
+            fi
+            echo ""
+        fi
+        
         if nginx -t 2>&1 | grep -q "unknown directive.*stream"; then
             echo ""
             echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════╗${NC}"
