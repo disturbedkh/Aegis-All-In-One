@@ -1,4 +1,4 @@
-# Aegis All-in-One Mapping Solution
+# Aegis AIO 2.0
 
 > A complete, beginner-friendly Docker stack for Pokémon mapping using Aegis and the Unown# ecosystem.
 
@@ -36,6 +36,9 @@ This repository provides a complete, pre-configured Docker stack that brings tog
 | **Rotom** | Device manager & communication hub |
 | **ReactMap** | Beautiful web-based map frontend |
 | **Koji** | Geofence & area management |
+| **Xilriws** | Pokemon GO API proxy & request handler |
+| **Fletchling** | Pokemon nest detection & tracking |
+| **Poracle** | Discord & Telegram alert notifications |
 | **Grafana** | Performance monitoring & statistics |
 | **MariaDB** | Database for all services |
 
