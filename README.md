@@ -56,18 +56,7 @@ sudo systemctl restart docker
 git clone https://github.com/The-Pokemod-Group/Aegis-All-In-One.git
 ```
 
-### 2. Copy the configuration files
-
-```
-cd Aegis-All-In-One
-cp env-default .env
-cp reactmap/local-default.json reactmap/local.json
-cp unown/dragonite_config-default.toml unown/dragonite_config.toml
-cp unown/golbat_config-default.toml unown/golbat_config.toml
-cp unown/rotom_config-default.json unown/rotom_config.json
-```
-
-### 3. Run the setup scripts
+### 2. Run the setup scripts
 ```
 sudo bash ./setup.sh
 ```
