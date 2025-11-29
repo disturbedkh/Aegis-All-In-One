@@ -82,10 +82,10 @@ Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/T
 
 ### System Requirements
 
-- **Operating System**: Linux (Ubuntu 20.04+ or Debian 11+ recommended)
-- **RAM**: Minimum 4GB, 8GB+ recommended
-- **Storage**: 20GB+ free space (SSD recommended for database performance)
-- **CPU**: 2+ cores recommended
+- **Operating System**: Linux (Ubuntu 22.04+ or Debian 12+ recommended)
+- **RAM**: 16GB or greater
+- **Storage**: 50GB+ free space (SSD strongly recommended for database performance)
+- **CPU**: 8+ cores recommended
 
 > ⚠️ **Note**: While Docker runs on Windows/macOS, this AIO is designed and tested for Linux only.
 
@@ -94,7 +94,11 @@ Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/T
 1. **Docker Engine** (version 20.10+)
 2. **Docker Compose Plugin** (v2)
 
-### Install Docker (if needed)
+> 💡 **Tip**: The setup script (`setup.sh`) can automatically install Docker and Docker Compose for you if they're not already installed.
+
+### Install Docker Manually (Optional)
+
+If you prefer to install Docker before running the setup script:
 
 ```bash
 # Ubuntu/Debian
@@ -444,6 +448,9 @@ sudo bash ./dbsetup.sh
 | `unown/dragonite_config.toml` | Dragonite settings |
 | `unown/golbat_config.toml` | Golbat settings |
 | `unown/rotom_config.json` | Rotom settings |
+| `fletchling/config.toml` | Fletchling nest detection settings |
+| `poracle/config/local.json` | Poracle alert bot configuration |
+| `poracle/config/dts/` | Poracle message templates |
 | `docker-compose.yaml` | Docker service definitions |
 
 ---
