@@ -2,7 +2,7 @@
 
 # Welcome message
 echo "Welcome! This is the database setup script for Aegis All-in-One 2.0."
-echo "It assumes you have run the initial setup script and have set up MariaDB locally on this machine."
+echo "It assumes you have run the initial setup script and have MariaDB either installed or ready to install on this machine."
 echo "Docker compose has not been run yet. This script will create the necessary databases and optionally a non-root DB user using the local MariaDB instance."
 
 # Check if running as root
@@ -24,6 +24,29 @@ source .env
 if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
   echo "Error: MYSQL_ROOT_PASSWORD not found in .env. Please ensure it is set in .env (you may need to edit it manually if not generated)."
   exit 1
+fi
+
+# Check if MariaDB is installed
+if ! command -v mysql &> /dev/null; then
+  read -p "MariaDB is not installed. Do you want to install it now using apt-get? (y/n): " INSTALL_CHOICE
+  if [ "$INSTALL_CHOICE" = "y" ] || [ "$INSTALL_CHOICE" = "Y" ]; then
+    apt update -y
+    apt install mariadb-server -y
+    # After fresh install, set root password using the one from .env
+    # Assume root username is 'root' and initial access without password
+    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;"
+    if [ $? -eq 0 ]; then
+      echo "MariaDB installed and root password set successfully."
+    else
+      echo "Error setting root password. Please check installation."
+      exit 1
+    fi
+  else
+    echo "Installation skipped. Please install MariaDB manually and rerun the script."
+    exit 1
+  fi
+else
+  echo "MariaDB is already installed."
 fi
 
 # Prompt for root DB username
