@@ -67,19 +67,12 @@ cp unown/golbat_config-default.toml unown/golbat_config.toml
 cp unown/rotom_config-default.json unown/rotom_config.json
 ```
 
-### 3. Edit the configuration files
+### 3. Run the setup scripts
 
-Despite that you can immediately start the stack with the default passwords and secrets defined, we strongly urge you to change them to your liking.
+---
 
-If you do, pay special attention to the secrets inside the .env file and make sure apiKeys and passwords match in the following places:
-
-- .env
-- reactmap/local.json
-- unown/dragonite_config.toml
-- unown/golbat_config.toml
-- unown/rotom_config.json (AuthBearer for Aegis Devices)
-
-You can run everything with the default passwords but obviously, it's not recommended.
+setup.sh
+---
 
 After recent Pokemon-Trainer-Club (PTC) changes, you are required to use some sort of login proxy to bypass the Imperva Anti-Bot protection placed on PTC login.
 The Unown# team has introduced two new tools for that; Swirlix and Xilriws. At the time of this being written Swirlix is not working for everyone, therefore we are using Xilriws!
@@ -106,16 +99,6 @@ docker compose up -d --force-recreate --build
 ```
 
 (\*) You might need to run the above command with sudo if your local user doesn't have permissions over the docker service
-
-If you get an error in form of `The "UID" variable is not set. Defaulting to a blank string.` it means your shell isn't exporting the UID/GUID variables that are needed for grafana. You can overcome this by starting the stack with:
-
-```
-UID=${UID} GID=${GID} docker compose up -d --force-recreate --build
-```
-
-(\*) You might need to run the above command with sudo if your local user doesn't have permissions over the docker service
-
-Another option would be to comment out the grafana section if you don't need it.
 
 You should check each running container for errors after first start in the form of:
 
