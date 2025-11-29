@@ -155,35 +155,35 @@ fi
 echo ""
 print_info "Checking docker-compose.yaml for Fletchling service..."
 
-if grep -q "# fletchling:" docker-compose.yaml; then
+if grep -q "^# fletchling:" docker-compose.yaml; then
     read -p "Fletchling is commented out in docker-compose.yaml. Enable it? (y/n) [y]: " ENABLE_FLETCHLING
     ENABLE_FLETCHLING=${ENABLE_FLETCHLING:-y}
     
     if [ "$ENABLE_FLETCHLING" = "y" ] || [ "$ENABLE_FLETCHLING" = "Y" ]; then
         print_info "Enabling Fletchling in docker-compose.yaml..."
         
-        # Uncomment fletchling service
-        sed -i 's/# fletchling:/fletchling:/g' docker-compose.yaml
-        sed -i 's/#   image: ghcr.io\/unownhash\/fletchling:latest/  image: ghcr.io\/unownhash\/fletchling:latest/g' docker-compose.yaml
-        sed -i 's/#   container_name: fletchling/  container_name: fletchling/g' docker-compose.yaml
-        sed -i 's/#   restart: unless-stopped/  restart: unless-stopped/g' docker-compose.yaml
-        sed -i 's/#   volumes:/  volumes:/g' docker-compose.yaml
-        sed -i 's/#     - .\/fletchling.toml:\/fletchling\/configs\/fletchling.toml/    - .\/fletchling.toml:\/fletchling\/configs\/fletchling.toml/g' docker-compose.yaml
-        sed -i 's/#     - .\/fletchling:\/fletchling\/logs/    - .\/fletchling:\/fletchling\/logs/g' docker-compose.yaml
-        sed -i 's/#     - \/etc\/timezone:\/etc\/timezone:ro/    - \/etc\/timezone:\/etc\/timezone:ro/g' docker-compose.yaml
-        sed -i 's/#     - \/etc\/localtime:\/etc\/localtime:ro/    - \/etc\/localtime:\/etc\/localtime:ro/g' docker-compose.yaml
-        sed -i 's/#   ports:/  ports:/g' docker-compose.yaml
-        sed -i 's/#     - "9042:9042"/    - "9042:9042"/g' docker-compose.yaml
-        sed -i 's/#   healthcheck:/  healthcheck:/g' docker-compose.yaml
-        sed -i 's/#     test: \["CMD", "wget"/    test: \["CMD", "wget"/g' docker-compose.yaml
-        sed -i 's/#     interval: 60s/    interval: 60s/g' docker-compose.yaml
-        sed -i 's/#     timeout: 30s/    timeout: 30s/g' docker-compose.yaml
-        sed -i 's/#     retries: 3/    retries: 3/g' docker-compose.yaml
-        sed -i 's/#     start_period: 30s/    start_period: 30s/g' docker-compose.yaml
+        # Uncomment fletchling service (new format without leading space)
+        sed -i 's/^# fletchling:/fletchling:/g' docker-compose.yaml
+        sed -i 's/^  # image: ghcr.io\/unownhash\/fletchling:latest/  image: ghcr.io\/unownhash\/fletchling:latest/g' docker-compose.yaml
+        sed -i 's/^  # container_name: fletchling/  container_name: fletchling/g' docker-compose.yaml
+        sed -i 's/^  # restart: unless-stopped/  restart: unless-stopped/g' docker-compose.yaml
+        sed -i 's/^  # volumes:/  volumes:/g' docker-compose.yaml
+        sed -i 's/^    # - .\/fletchling.toml/    - .\/fletchling.toml/g' docker-compose.yaml
+        sed -i 's/^    # - .\/fletchling:/    - .\/fletchling:/g' docker-compose.yaml
+        sed -i 's/^    # - \/etc\/timezone/    - \/etc\/timezone/g' docker-compose.yaml
+        sed -i 's/^    # - \/etc\/localtime/    - \/etc\/localtime/g' docker-compose.yaml
+        sed -i 's/^  # ports:/  ports:/g' docker-compose.yaml
+        sed -i 's/^    # - "9042:9042"/    - "9042:9042"/g' docker-compose.yaml
+        sed -i 's/^  # healthcheck:/  healthcheck:/g' docker-compose.yaml
+        sed -i 's/^    # test:/    test:/g' docker-compose.yaml
+        sed -i 's/^    # interval:/    interval:/g' docker-compose.yaml
+        sed -i 's/^    # timeout:/    timeout:/g' docker-compose.yaml
+        sed -i 's/^    # retries:/    retries:/g' docker-compose.yaml
+        sed -i 's/^    # start_period:/    start_period:/g' docker-compose.yaml
         
         # Uncomment fletchling-tools service
-        sed -i 's/# fletchling-tools:/fletchling-tools:/g' docker-compose.yaml
-        sed -i 's/#   command: .\/sleep/  command: .\/sleep/g' docker-compose.yaml
+        sed -i 's/^# fletchling-tools:/fletchling-tools:/g' docker-compose.yaml
+        sed -i 's/^  # command: .\/sleep/  command: .\/sleep/g' docker-compose.yaml
         
         print_success "Fletchling services enabled in docker-compose.yaml"
     fi

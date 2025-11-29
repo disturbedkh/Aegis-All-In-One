@@ -18,7 +18,7 @@ services:
     environment:
       MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
       MYSQL_DATABASE: golbat
-      MYSQL_USER: dbuser
+      MYSQL_USER: ${MYSQL_USER:-dbuser}
       MYSQL_PASSWORD: ${MYSQL_PASSWORD}
     volumes:
       - ./init:/docker-entrypoint-initdb.d
@@ -248,35 +248,31 @@ services:
 # You also MUST run ./docker-osm-importer.sh 'AreaName' to get parks from OSM for said area during your first run!
 # More info https://github.com/UnownHash/Fletchling/blob/main/docs/IMPORTING.md and 
 # https://github.com/UnownHash/Fletchling/blob/main/README.md
- # fletchling:
-   # image: ghcr.io/unownhash/fletchling:latest
-   # container_name: fletchling
-   # restart: unless-stopped
-   # volumes:
-     # - ./fletchling.toml:/fletchling/configs/fletchling.toml
-     # - ./fletchling:/fletchling/logs
-     # - /etc/timezone:/etc/timezone:ro
-     # - /etc/localtime:/etc/localtime:ro
-   # ports:
-     # - "9042:9042"
-   # healthcheck:
-     # test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9042/status"]
-     # interval: 60s
-     # timeout: 30s
-     # retries: 3
-     # start_period: 30s
+# fletchling:
+  # image: ghcr.io/unownhash/fletchling:latest
+  # container_name: fletchling
+  # restart: unless-stopped
+  # volumes:
+    # - ./fletchling.toml:/fletchling/configs/fletchling.toml
+    # - ./fletchling:/fletchling/logs
+    # - /etc/timezone:/etc/timezone:ro
+    # - /etc/localtime:/etc/localtime:ro
+  # ports:
+    # - "9042:9042"
+  # healthcheck:
+    # test: ["CMD", "wget", "--no-verbose", "--tries=1", "--spider", "http://localhost:9042/status"]
+    # interval: 60s
+    # timeout: 30s
+    # retries: 3
+    # start_period: 30s
      
- # fletchling-tools:
-   # image: ghcr.io/unownhash/fletchling:latest
-   # container_name: fletchling-tools
-   # restart: unless-stopped
-   # command: ./sleep
-   # volumes:
-     # - ./fletchling.toml:/fletchling/configs/fletchling.toml
-     # - ./fletchling:/fletchling/logs
-     # - /etc/timezone:/etc/timezone:ro
-     # - /etc/localtime:/etc/localtime:ro
-
-networks:
-  mapping_network:
-    driver: bridge
+# fletchling-tools:
+  # image: ghcr.io/unownhash/fletchling:latest
+  # container_name: fletchling-tools
+  # restart: unless-stopped
+  # command: ./sleep
+  # volumes:
+    # - ./fletchling.toml:/fletchling/configs/fletchling.toml
+    # - ./fletchling:/fletchling/logs
+    # - /etc/timezone:/etc/timezone:ro
+    # - /etc/localtime:/etc/localtime:ro

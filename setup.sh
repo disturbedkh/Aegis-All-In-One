@@ -819,9 +819,10 @@ print_info "Applying secrets to config files..."
 
 # DB password (must be done before DB user)
 sed -i "s/SuperSecuredbuserPassword/${DB_PASSWORD}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+sed -i "s/CHANGE_ME/${DB_PASSWORD}/g" Poracle/config/local.json
 
 # DB user
-sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json Poracle/config/local.json
 
 # MySQL root password
 sed -i "s/V3ryS3cUr3MYSQL_ROOT_P4ssw0rd/${MYSQL_ROOT_PASSWORD}/g" .env
@@ -846,6 +847,7 @@ sed -i "s/SuperSecureDragoniteApiSecret/${DRAGONITE_API_SECRET}/g" .env
 
 # Restore file ownership to the original user (not root)
 chown "$REAL_USER:$REAL_GROUP" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+chown "$REAL_USER:$REAL_GROUP" Poracle/config/local.json 2>/dev/null || true
 chown "$REAL_USER:$REAL_GROUP" mysql_data/mariadb.cnf 2>/dev/null || true
 
 print_success "Secrets applied to all config files."

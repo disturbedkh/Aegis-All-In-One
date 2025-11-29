@@ -1,5 +1,7 @@
-# create databases
-# Give the user dbuser all privileges on the databases
+# Create databases for Aegis All-in-One
+# Give the user 'dbuser' all privileges on the databases
+# NOTE: If you change MYSQL_USER in .env, you must also update this file!
+# The username here must match MYSQL_USER in your .env file.
 
 CREATE DATABASE IF NOT EXISTS `golbat`;
 GRANT ALL ON `golbat`.* TO 'dbuser'@'%';

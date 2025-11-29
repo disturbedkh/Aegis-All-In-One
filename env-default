@@ -1,8 +1,10 @@
 UID=1000
 GID=1000
 MYSQL_ROOT_PASSWORD=V3ryS3cUr3MYSQL_ROOT_P4ssw0rd
+MYSQL_USER=dbuser
 MYSQL_PASSWORD=SuperSecuredbuserPassword
 KOJI_SECRET=SuperSecureKojiSecret
 DRAGONITE_PASSWORD=SuperSecureDragoniteAdminPassword
 DRAGONITE_API_SECRET=SuperSecureDragoniteApiSecret
 GOLBAT_API_SECRET=SuperSecureGolbatApiSecret
+GOLBAT_RAW_SECRET=SuperSecureGolbatRawSecret
