@@ -1013,12 +1013,57 @@ create_nginx_configs() {
     # Check if nginx.conf includes sites-enabled
     if ! grep -q "sites-enabled" /etc/nginx/nginx.conf; then
         print_warning "Adding sites-enabled include to nginx.conf..."
-        # Add include directive before the last closing brace
+        # Add include directive inside http block
         sed -i '/http {/a \    include /etc/nginx/sites-enabled/*;' /etc/nginx/nginx.conf
     fi
     
     # Remove default site if exists
     rm -f /etc/nginx/sites-enabled/default
+    
+    # Check for existing configs that might conflict
+    print_info "Checking for existing nginx configurations..."
+    EXISTING_CONFIGS=()
+    
+    # Check sites-available and sites-enabled for any configs with our subdomains
+    for conf_dir in /etc/nginx/sites-available /etc/nginx/sites-enabled /etc/nginx/conf.d; do
+        if [ -d "$conf_dir" ]; then
+            for conf in "$conf_dir"/*; do
+                if [ -f "$conf" ]; then
+                    # Check if config contains any of our subdomains
+                    if grep -q "${BASE_DOMAIN}" "$conf" 2>/dev/null; then
+                        conf_name=$(basename "$conf")
+                        # Skip if it's an aegis config we created
+                        if [[ "$conf_name" != aegis-* ]]; then
+                            EXISTING_CONFIGS+=("$conf")
+                        fi
+                    fi
+                fi
+            done
+        fi
+    done
+    
+    if [ ${#EXISTING_CONFIGS[@]} -gt 0 ]; then
+        print_warning "Found existing nginx configs that may conflict:"
+        for conf in "${EXISTING_CONFIGS[@]}"; do
+            echo "  - $conf"
+        done
+        echo ""
+        read -p "These configs contain references to ${BASE_DOMAIN}. Continue anyway? (y/n) [n]: " CONTINUE_SETUP
+        CONTINUE_SETUP=${CONTINUE_SETUP:-n}
+        
+        if [ "$CONTINUE_SETUP" != "y" ] && [ "$CONTINUE_SETUP" != "Y" ]; then
+            print_error "Setup cancelled. Please review and remove conflicting configs first."
+            print_info "You can disable configs by removing symlinks from /etc/nginx/sites-enabled/"
+            exit 1
+        fi
+        
+        print_warning "Continuing... You may need to manually resolve conflicts after setup."
+    fi
+    
+    # Clean up any existing Aegis configs to prevent duplicates
+    print_info "Removing any existing Aegis configurations..."
+    rm -f /etc/nginx/sites-available/aegis-*
+    rm -f /etc/nginx/sites-enabled/aegis-*
     
     # Generate configs based on whether Authelia is enabled
     if [ "$AUTHELIA_ENABLED" = true ]; then
@@ -1078,14 +1123,50 @@ create_symlinks() {
 test_and_reload_nginx() {
     print_info "Testing Nginx configuration..."
     
-    if nginx -t; then
+    # Capture nginx -t output
+    NGINX_TEST_OUTPUT=$(nginx -t 2>&1)
+    NGINX_TEST_EXIT=$?
+    
+    if [ $NGINX_TEST_EXIT -eq 0 ]; then
         print_success "Nginx configuration is valid"
         print_info "Reloading Nginx..."
         systemctl reload nginx
         print_success "Nginx reloaded successfully"
     else
-        print_error "Nginx configuration test failed. Please check the configs."
-        exit 1
+        print_error "Nginx configuration test failed!"
+        echo ""
+        echo "$NGINX_TEST_OUTPUT"
+        echo ""
+        
+        # Check for common issues and provide guidance
+        if echo "$NGINX_TEST_OUTPUT" | grep -q "conflicting server name"; then
+            print_warning "Duplicate server names detected!"
+            print_info "You may have existing nginx configs for these domains."
+            print_info "Check these locations for conflicting configs:"
+            echo "  - /etc/nginx/sites-enabled/"
+            echo "  - /etc/nginx/conf.d/"
+            echo ""
+            print_info "Remove or rename conflicting configs, then run: nginx -t && systemctl reload nginx"
+        fi
+        
+        if echo "$NGINX_TEST_OUTPUT" | grep -q "unknown directive.*stream"; then
+            print_warning "Stream directive error detected!"
+            print_info "The 'stream' block may be in the wrong location in nginx.conf"
+            print_info "The stream block must be at ROOT level, not inside http{} block."
+            echo ""
+            print_info "Edit /etc/nginx/nginx.conf and ensure stream{} is at the same level as http{}"
+            echo ""
+            print_info "Or remove the stream config if you don't need TCP proxying:"
+            echo "  rm /etc/nginx/stream.d/rotom-devices.conf"
+            echo "  # Remove 'stream { ... }' block from /etc/nginx/nginx.conf"
+        fi
+        
+        echo ""
+        read -p "Would you like to continue anyway (may cause issues)? (y/n) [n]: " CONTINUE_ANYWAY
+        if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
+            exit 1
+        fi
+        print_warning "Continuing despite nginx test failure..."
     fi
 }
 
@@ -1192,6 +1273,11 @@ setup_ssl() {
 setup_rotom_device_port() {
     echo ""
     print_info "Rotom requires port 7070 for device connections."
+    print_info "Note: For most setups, devices connect directly to port 7070 (no nginx proxy needed)."
+    print_info "Stream proxy is only needed if you want nginx to handle the TCP connections."
+    echo ""
+    print_warning "The nginx 'stream' module is required for TCP proxying and may not be installed."
+    echo ""
     read -p "Would you like to configure nginx stream proxy for Rotom devices on port 7070? (y/n) [n]: " SETUP_ROTOM_STREAM
     SETUP_ROTOM_STREAM=${SETUP_ROTOM_STREAM:-n}
     
@@ -1199,21 +1285,63 @@ setup_rotom_device_port() {
         print_info "Setting up stream proxy for Rotom device connections..."
         
         # Check if stream module is available
-        if ! nginx -V 2>&1 | grep -q "with-stream"; then
-            print_warning "Nginx stream module may not be available. Skipping stream config."
-            print_info "Devices should connect directly to port 7070 on this server."
-            return
+        STREAM_AVAILABLE=false
+        if nginx -V 2>&1 | grep -q "with-stream"; then
+            STREAM_AVAILABLE=true
         fi
         
-        # Create stream config
+        # Check for stream module in modules-enabled (Ubuntu/Debian)
+        if [ -f "/etc/nginx/modules-enabled/50-mod-stream.conf" ] || \
+           [ -f "/usr/share/nginx/modules/ngx_stream_module.so" ] || \
+           [ -f "/usr/lib/nginx/modules/ngx_stream_module.so" ]; then
+            STREAM_AVAILABLE=true
+        fi
+        
+        if [ "$STREAM_AVAILABLE" = false ]; then
+            print_warning "Nginx stream module is not available."
+            
+            # Try to install stream module
+            if command -v apt-get &> /dev/null; then
+                read -p "Would you like to install the nginx stream module? (y/n) [y]: " INSTALL_STREAM
+                INSTALL_STREAM=${INSTALL_STREAM:-y}
+                
+                if [ "$INSTALL_STREAM" = "y" ] || [ "$INSTALL_STREAM" = "Y" ]; then
+                    print_info "Installing nginx stream module..."
+                    apt-get update -y
+                    
+                    # Try libnginx-mod-stream first (newer), then nginx-extras (older)
+                    if apt-get install -y libnginx-mod-stream 2>/dev/null; then
+                        print_success "Stream module installed (libnginx-mod-stream)"
+                        STREAM_AVAILABLE=true
+                    elif apt-get install -y nginx-extras 2>/dev/null; then
+                        print_success "Stream module installed (nginx-extras)"
+                        STREAM_AVAILABLE=true
+                    else
+                        print_error "Could not install stream module."
+                    fi
+                fi
+            fi
+            
+            if [ "$STREAM_AVAILABLE" = false ]; then
+                print_warning "Stream module not available. Skipping stream config."
+                print_info "Devices should connect directly to port 7070 on this server."
+                print_info "Make sure port 7070 is open in your firewall."
+                return
+            fi
+        else
+            print_success "Stream module is available"
+        fi
+        
+        # Create stream config directory
         mkdir -p /etc/nginx/stream.d
         
-        cat > "/etc/nginx/stream.d/rotom-devices.conf" << EOF
+        # Create stream config file
+        cat > "/etc/nginx/stream.d/rotom-devices.conf" << 'EOF'
 # Stream proxy for Rotom device connections
 # This allows devices to connect via nginx on port 7070
 
 upstream rotom_devices {
-    server 127.0.0.1:7070;
+    server 127.0.0.1:17070;
 }
 
 server {
@@ -1224,13 +1352,100 @@ server {
 }
 EOF
         
-        # Add stream include to nginx.conf if not present
-        if ! grep -q "stream.d" /etc/nginx/nginx.conf; then
+        # Backup nginx.conf
+        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d_%H%M%S)
+        
+        # Check if stream block already exists in nginx.conf
+        if grep -q "^stream[[:space:]]*{" /etc/nginx/nginx.conf; then
+            print_info "Stream block already exists in nginx.conf"
+            # Check if our include is there
+            if ! grep -q "stream.d" /etc/nginx/nginx.conf; then
+                # Add include inside existing stream block
+                sed -i '/^stream[[:space:]]*{/a\    include /etc/nginx/stream.d/*.conf;' /etc/nginx/nginx.conf
+                print_success "Added stream.d include to existing stream block"
+            fi
+        else
+            # Need to add stream block at root level (OUTSIDE http block)
+            # The safest way is to add it at the very end of the file
+            # But we need to make sure we're not inside any block
+            
+            print_info "Adding stream block to nginx.conf..."
+            
+            # Check the structure of nginx.conf
+            # Count opening and closing braces to find the end of the last block
+            
+            # Create a temporary file with the stream block
+            STREAM_BLOCK='
+# Stream configuration for TCP proxying (Rotom devices)
+# Added by Aegis All-in-One nginx-setup.sh
+stream {
+    include /etc/nginx/stream.d/*.conf;
+}
+'
+            # Remove any existing partial stream config we may have added before
+            sed -i '/# Stream configuration for TCP proxying/d' /etc/nginx/nginx.conf
+            sed -i '/include \/etc\/nginx\/nginx-stream.conf/d' /etc/nginx/nginx.conf
+            
+            # The safest approach: add the stream block at the very end
+            # nginx.conf typically ends with the http block closing
+            # We need to add the stream block AFTER that
+            
+            # First, let's check if the file ends properly
+            LAST_CHAR=$(tail -c 1 /etc/nginx/nginx.conf)
+            
+            # Add newlines and the stream block
             echo "" >> /etc/nginx/nginx.conf
-            echo "stream {" >> /etc/nginx/nginx.conf
-            echo "    include /etc/nginx/stream.d/*.conf;" >> /etc/nginx/nginx.conf
-            echo "}" >> /etc/nginx/nginx.conf
+            echo "$STREAM_BLOCK" >> /etc/nginx/nginx.conf
+            
+            print_success "Stream block added to nginx.conf"
         fi
+        
+        # Test the configuration
+        print_info "Testing nginx configuration..."
+        if nginx -t 2>&1; then
+            print_success "Nginx configuration is valid"
+        else
+            print_error "Nginx configuration test failed!"
+            echo ""
+            print_info "The stream block may have been added incorrectly."
+            print_info "You may need to manually edit /etc/nginx/nginx.conf"
+            echo ""
+            print_info "The stream block should be at the ROOT level, like this:"
+            echo ""
+            echo "  events { ... }"
+            echo "  http { ... }"
+            echo "  stream {"
+            echo "      include /etc/nginx/stream.d/*.conf;"
+            echo "  }"
+            echo ""
+            print_info "Restoring backup..."
+            LATEST_BACKUP=$(ls -t /etc/nginx/nginx.conf.backup.* 2>/dev/null | head -1)
+            if [ -n "$LATEST_BACKUP" ]; then
+                cp "$LATEST_BACKUP" /etc/nginx/nginx.conf
+                print_success "Backup restored"
+            fi
+            
+            # Clean up stream config
+            rm -f /etc/nginx/stream.d/rotom-devices.conf
+            
+            print_warning "Stream proxy setup failed. Devices should connect directly to port 7070."
+            return
+        fi
+        
+        # Instructions for docker-compose
+        echo ""
+        print_warning "IMPORTANT: Update docker-compose.yaml to use a different internal port:"
+        echo ""
+        echo "  Change this line in the 'rotom' service:"
+        echo "    ports:"
+        echo "      - 7070:7070"
+        echo ""
+        echo "  To:"
+        echo "    ports:"
+        echo "      - 17070:7070"
+        echo ""
+        print_info "This allows nginx to listen on 7070 and forward to Docker on 17070."
+        echo ""
         
         print_success "Stream proxy configured for Rotom devices on port 7070"
     else
