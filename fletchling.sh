@@ -67,8 +67,17 @@ if [ ! -f ".env" ]; then
     exit 1
 fi
 
-# Source .env
-source .env
+# Source .env (skip UID/GID which are readonly bash variables)
+set +e  # Temporarily allow errors
+while IFS='=' read -r key value; do
+    # Skip comments, empty lines, and readonly variables (UID, GID)
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [[ -z "$key" ]] && continue
+    [[ "$key" == "UID" ]] && continue
+    [[ "$key" == "GID" ]] && continue
+    export "$key=$value"
+done < .env
+set -e
 
 # Check for required environment variables
 if [ -z "$MYSQL_ROOT_PASSWORD" ]; then

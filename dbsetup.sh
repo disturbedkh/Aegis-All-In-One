@@ -28,8 +28,14 @@ if [ ! -f ".env" ]; then
   exit 1
 fi
 
-# Source .env
-source .env
+# Source .env (skip UID/GID which are readonly bash variables)
+while IFS='=' read -r key value; do
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [[ -z "$key" ]] && continue
+    [[ "$key" == "UID" ]] && continue
+    [[ "$key" == "GID" ]] && continue
+    export "$key=$value"
+done < .env
 
 # Check for MYSQL_ROOT_PASSWORD
 if [ -z "$MYSQL_ROOT_PASSWORD" ]; then

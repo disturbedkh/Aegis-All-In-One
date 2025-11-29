@@ -127,8 +127,15 @@ fi
 
 print_success "Found .env file"
 
-# Source .env for database password
-source .env
+# Source .env for database password (skip UID/GID which are readonly bash variables)
+while IFS='=' read -r key value; do
+    # Skip comments, empty lines, and readonly variables (UID, GID)
+    [[ "$key" =~ ^#.*$ ]] && continue
+    [[ -z "$key" ]] && continue
+    [[ "$key" == "UID" ]] && continue
+    [[ "$key" == "GID" ]] && continue
+    export "$key=$value"
+done < .env
 
 # Check for Poracle config
 CONFIG_FILE="Poracle/config/local.json"

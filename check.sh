@@ -126,7 +126,14 @@ print_header "Checking Environment Variables"
 if [ ! -f ".env" ]; then
     print_fail ".env file not found! Run setup.sh first."
 else
-    source .env
+    # Source .env (skip UID/GID which are readonly bash variables)
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^#.*$ ]] && continue
+        [[ -z "$key" ]] && continue
+        [[ "$key" == "UID" ]] && continue
+        [[ "$key" == "GID" ]] && continue
+        export "$key=$value"
+    done < .env
     
     # Required env variables
     ENV_VARS=(
