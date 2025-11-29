@@ -87,7 +87,9 @@ Point your browser to the following addresses. Replace localhost with your serve
 | Koji | http://localhost:6004 | Geofence & Area Management |
 | phpMyAdmin | http://localhost:6005 | Database Management |
 | Grafana | http://localhost:6006 | Statistics & Monitoring |
-| Poracle | http://localhost:6007 | Discord/Telegram Alerts |
+| Poracle* | http://localhost:6007 | Discord/Telegram Alerts (optional) |
+
+*Poracle is commented out by default. Uncomment in `docker-compose.yaml` if you want Discord/Telegram alerts.
 
 #### Special note
 

@@ -221,27 +221,26 @@ services:
     volumes:
       - ./unown/proxies.txt:/xilriws/proxies.txt
 
-  # PoracleJS - Discord/Telegram Pokemon Alarm Notification Service
-  # Default container port is 3030 for webhook receiver
-  # Configure your Discord bot token in ./Poracle/config/local.json
-  # More info: https://github.com/KartulUdus/PoracleJS
-  
-  poracle:
-    image: ghcr.io/kartuludus/poraclejs:develop
-    container_name: poracle
-    restart: unless-stopped
-    depends_on:
-      - database
-    volumes:
-      - ./Poracle/config:/usr/src/app/config
-      - ./Poracle/logs:/usr/src/app/logs
-      - ./Poracle/backups:/usr/src/app/backups
-      - ./Poracle/geofence:/usr/src/app/geofence
-      - /etc/localtime:/etc/localtime:ro
-    ports:
-      - 6007:3030
-    environment:
-      - NODE_ENV=production
+# Uncomment below to enable PoracleJS - Discord/Telegram Pokemon Alarm Notification Service
+# Default container port is 3030 for webhook receiver
+# Configure your Discord bot token in ./Poracle/config/local.json
+# More info: https://github.com/KartulUdus/PoracleJS
+# poracle:
+  # image: ghcr.io/kartuludus/poraclejs:develop
+  # container_name: poracle
+  # restart: unless-stopped
+  # depends_on:
+    # - database
+  # volumes:
+    # - ./Poracle/config:/usr/src/app/config
+    # - ./Poracle/logs:/usr/src/app/logs
+    # - ./Poracle/backups:/usr/src/app/backups
+    # - ./Poracle/geofence:/usr/src/app/geofence
+    # - /etc/localtime:/etc/localtime:ro
+  # ports:
+    # - 6007:3030
+  # environment:
+    # - NODE_ENV=production
 
 # Uncomment below instructions to enable fletchling - a container for finding and saving nests for reactmap/golbat.
 # You MUST create a project in koji admin WITH geofences AND edit fletchling.toml with your project name
