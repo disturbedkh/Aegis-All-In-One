@@ -1143,7 +1143,17 @@ test_and_reload_nginx() {
             print_warning "Nginx reload may have had issues, but continuing..."
         fi
     else
+        echo ""
+        echo -e "${RED}╔════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "${RED}║              NGINX SYNTAX ERROR DETECTED!                      ║${NC}"
+        echo -e "${RED}╚════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
         print_error "Nginx configuration test failed!"
+        echo ""
+        print_error "Error details:"
+        echo "$NGINX_TEST_OUTPUT" | grep -i "emerg\|error\|failed" | while read line; do
+            echo -e "  ${RED}→${NC} $line"
+        done
         echo ""
         
         # Check for common issues and provide guidance
@@ -1170,14 +1180,18 @@ test_and_reload_nginx() {
         fi
         
         echo ""
-        read -p "Would you like to continue to SSL setup anyway? (y/n) [y]: " CONTINUE_ANYWAY
-        CONTINUE_ANYWAY=${CONTINUE_ANYWAY:-y}
+        print_warning "SSL setup will likely fail if nginx config has errors!"
+        print_info "It is recommended to fix the errors above before continuing."
+        echo ""
+        read -p "Would you like to continue to SSL setup anyway? (y/n) [n]: " CONTINUE_ANYWAY
+        CONTINUE_ANYWAY=${CONTINUE_ANYWAY:-n}
         if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
             print_error "Setup aborted. Please fix nginx configuration errors first."
+            print_info "After fixing, run: sudo nginx -t && sudo systemctl reload nginx"
             exit 1
         fi
-        print_warning "Continuing to SSL setup despite nginx test issues..."
-        print_info "You may need to fix nginx config manually after SSL certificates are obtained."
+        print_warning "Continuing to SSL setup despite nginx syntax errors..."
+        print_warning "You will need to fix nginx config manually after SSL certificates are obtained."
     fi
     
     echo ""
