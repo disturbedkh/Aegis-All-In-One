@@ -132,6 +132,31 @@ EXCLUSION_PATTERNS=(
     # Log level indicators at start of line
     "^[0-9].*\| I \|"
     "^[0-9].*INFO"
+    # Grafana log format (level=info, level=warn are not errors)
+    "level=info"
+    "level=warn"
+    "level=debug"
+    # Grafana specific success messages
+    "Migration successfully"
+    "Executing migration"
+    "All modules healthy"
+    "HTTP Server Listen"
+    "Applying new configuration"
+    "Using.*store"
+    "Setting up remote"
+    "Database locked.*retrying"
+    "successfully executed"
+    # Golbat/Dragonite info patterns
+    "^\[Pokemon\]"
+    "^pokemon\]"
+    "Started background worker"
+    "Prometheus init"
+    "Starting.*Public"
+    "APICHECK.*is OK"
+    "Loaded [0-9]+ proxies"
+    # Koji patterns
+    "Listening on"
+    "Connected to"
 )
 
 # Startup window in seconds - errors within this window after container start are likely transient
