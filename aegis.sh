@@ -694,45 +694,95 @@ git_pull() {
     echo -e "Current branch: ${CYAN}$branch${NC}"
     echo ""
     
+    local had_changes=false
+    local stash_name="aegis-auto-stash-$(date +%Y%m%d-%H%M%S)"
+    
     # Check for local changes
     if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-        echo -e "${YELLOW}You have local changes.${NC}"
+        had_changes=true
+        
+        echo -e "${CYAN}━━━ Detected Local Configuration Changes ━━━${NC}"
         echo ""
-        git status --short
+        echo -e "${DIM}Modified files:${NC}"
+        git status --short | head -10
+        local changed_count=$(git status --short | wc -l)
+        [ "$changed_count" -gt 10 ] && echo -e "${DIM}  ... and $((changed_count - 10)) more${NC}"
         echo ""
-        read -p "Stash changes before pulling? (y/n) [y]: " stash
-        stash=${stash:-y}
-        if [ "$stash" = "y" ] || [ "$stash" = "Y" ]; then
-            echo ""
-            git stash
-            echo ""
+        
+        echo -e "${WHITE}These are your config customizations from setup.sh${NC}"
+        echo -e "${GREEN}✓ Don't worry - they will be automatically preserved!${NC}"
+        echo ""
+        
+        # Auto-stash with a named stash
+        echo -e "${CYAN}Temporarily saving your configs...${NC}"
+        git stash push -m "$stash_name" --quiet
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Configs saved${NC}"
         else
-            echo -e "${RED}Aborting pull to preserve local changes.${NC}"
+            echo -e "${RED}Failed to save configs. Aborting.${NC}"
             press_enter
             return
         fi
+        echo ""
     fi
 
-    echo "Pulling latest changes..."
+    echo -e "${CYAN}Pulling latest updates from GitHub...${NC}"
     echo ""
-    git pull origin $branch
+    git pull origin $branch 2>&1
+    local pull_result=$?
     
-    if [ $? -eq 0 ]; then
+    if [ $pull_result -eq 0 ]; then
         echo ""
-        echo -e "${GREEN}✓ Pull complete!${NC}"
+        echo -e "${GREEN}✓ Updates downloaded successfully!${NC}"
         
-        # Check if we stashed
-        if git stash list | grep -q "stash@{0}"; then
+        # Restore stashed changes if we had any
+        if [ "$had_changes" = true ]; then
             echo ""
-            read -p "Restore stashed changes? (y/n) [y]: " restore
-            restore=${restore:-y}
-            if [ "$restore" = "y" ] || [ "$restore" = "Y" ]; then
-                git stash pop
+            echo -e "${CYAN}Restoring your configs...${NC}"
+            
+            # Try to pop the stash
+            git stash pop --quiet 2>&1
+            local pop_result=$?
+            
+            if [ $pop_result -eq 0 ]; then
+                echo -e "${GREEN}✓ Your configs have been restored!${NC}"
+            else
+                # There might be conflicts - try to show helpful info
+                echo ""
+                echo -e "${YELLOW}⚠ Some configs may have conflicts with new updates.${NC}"
+                echo ""
+                echo "Your original configs are safely stored in git stash."
+                echo "To restore manually: ${CYAN}git stash pop${NC}"
+                echo ""
+                echo "If you see conflicts, you can either:"
+                echo "  1. Edit the conflicting files to merge changes"
+                echo "  2. Run setup.sh again to reconfigure"
+                echo "  3. Use ${CYAN}git checkout -- <file>${NC} to use new version"
             fi
         fi
+        
+        echo ""
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+        echo -e "${GREEN}${BOLD}Update complete!${NC}"
+        echo ""
+        echo "Tip: Run 'Update & Rebuild' (option u) to apply container updates"
     else
         echo ""
-        echo -e "${RED}Pull failed. Check for conflicts.${NC}"
+        echo -e "${RED}Pull failed!${NC}"
+        
+        # Restore stash if we had changes
+        if [ "$had_changes" = true ]; then
+            echo ""
+            echo -e "${CYAN}Restoring your configs...${NC}"
+            git stash pop --quiet 2>/dev/null
+            echo -e "${GREEN}✓ Configs restored${NC}"
+        fi
+        
+        echo ""
+        echo "Possible causes:"
+        echo "  • No internet connection"
+        echo "  • GitHub is unreachable"
+        echo "  • Branch conflict"
     fi
     
     press_enter
@@ -755,7 +805,7 @@ update_and_rebuild() {
     fi
 
     echo "This will:"
-    echo "  1. Pull latest changes from git"
+    echo "  1. Pull latest changes from git (your configs will be preserved)"
     echo "  2. Stop running containers"
     echo "  3. Rebuild containers with new images"
     echo "  4. Start the stack"
@@ -767,22 +817,42 @@ update_and_rebuild() {
     fi
 
     local branch=$(git branch --show-current 2>/dev/null)
+    local had_changes=false
+    local stash_name="aegis-update-$(date +%Y%m%d-%H%M%S)"
     
     # Step 1: Pull
     echo ""
     echo -e "${CYAN}Step 1/4: Pulling latest changes...${NC}"
     
+    # Check for local changes and auto-stash
     if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-        echo -e "${YELLOW}Stashing local changes...${NC}"
-        git stash
+        had_changes=true
+        echo -e "${DIM}Saving your config customizations...${NC}"
+        git stash push -m "$stash_name" --quiet
+        echo -e "${GREEN}✓ Configs saved${NC}"
     fi
     
-    git pull origin $branch
+    git pull origin $branch 2>&1
     
     if [ $? -ne 0 ]; then
         echo -e "${RED}Pull failed. Aborting.${NC}"
+        # Restore stash
+        if [ "$had_changes" = true ]; then
+            git stash pop --quiet 2>/dev/null
+        fi
         press_enter
         return
+    fi
+    
+    # Restore configs after pull
+    if [ "$had_changes" = true ]; then
+        echo -e "${DIM}Restoring your configs...${NC}"
+        git stash pop --quiet 2>/dev/null
+        if [ $? -eq 0 ]; then
+            echo -e "${GREEN}✓ Configs restored${NC}"
+        else
+            echo -e "${YELLOW}⚠ Some config conflicts - may need manual review${NC}"
+        fi
     fi
     
     # Step 2: Stop
