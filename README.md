@@ -853,7 +853,13 @@ sudo bash ./logs.sh --xilriws-monitor
 - Press Ctrl+C to exit
 
 **Auto-restart trigger:**
-The monitor specifically watches for the **"30 consecutive failures"** message that Xilriws outputs when it stops attempting to use proxies. This is the critical error that halts proxy operations.
+The monitor specifically watches for the critical error message from Xilriws:
+
+```
+30 consecutive failures in the browser! this is really bad
+```
+
+This message indicates Xilriws has stopped attempting to use proxies entirely and needs a restart to recover.
 
 When this message is detected in the logs:
 1. Displays a critical warning banner

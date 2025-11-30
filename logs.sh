@@ -1819,6 +1819,11 @@ restart_xilriws() {
     sleep 2
 }
 
+# Xilriws critical error pattern - from actual Xilriws logs
+# The exact message is: "30 consecutive failures in the browser! this is really bad"
+# Log format: "06:50:25.23 | C | Browser    | 30 consecutive failures in the browser! this is really bad"
+XILRIWS_CRITICAL_PATTERN="30 consecutive failures in the browser"
+
 # Xilriws live monitoring mode
 xilriws_live_monitor() {
     clear
@@ -1828,11 +1833,12 @@ xilriws_live_monitor() {
     draw_box_divider
     draw_box_line "  This mode monitors Xilriws logs in real-time and will:"
     draw_box_line "    • Display live statistics"
-    draw_box_line "    • Watch for '30 consecutive failures' message in logs"
-    draw_box_line "    • Auto-restart container when Xilriws stops trying proxies"
+    draw_box_line "    • Watch for the critical error message:"
+    draw_box_line "      '30 consecutive failures in the browser! this is really bad'"
+    draw_box_line "    • Auto-restart container when this message appears"
     draw_box_line ""
-    draw_box_line "  The '30 consecutive failures' message from Xilriws means it"
-    draw_box_line "  has stopped attempting to use proxies and needs a restart."
+    draw_box_line "  This message from Xilriws means it has stopped attempting"
+    draw_box_line "  to use proxies entirely and needs a restart to recover."
     draw_box_line ""
     draw_box_line "  Press Ctrl+C to exit monitoring mode"
     draw_box_bottom
@@ -1852,7 +1858,8 @@ xilriws_live_monitor() {
     local restart_count=0
     
     # Get initial count of the critical message to establish baseline
-    local initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
+    # Pattern: "30 consecutive failures in the browser! this is really bad"
+    local initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures in the browser" || echo "0")
     
     # Trap Ctrl+C
     trap 'echo ""; print_info "Monitoring stopped"; sleep 1; return' INT
@@ -1876,8 +1883,8 @@ xilriws_live_monitor() {
         local status_color="${GREEN}"
         [ "$status" != "running" ] && status_color="${RED}"
         
-        # Count "30 consecutive failures" messages in log
-        local current_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
+        # Count critical messages in log
+        local current_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures in the browser" || echo "0")
         local new_failures=$((current_failure_count - initial_failure_count))
         [ "$new_failures" -lt 0 ] && new_failures=0
         
@@ -1888,10 +1895,10 @@ xilriws_live_monitor() {
         # Show failure message detection status
         printf "${CYAN}║${NC}  "
         if [ "$new_failures" -gt 0 ]; then
-            printf "${RED}⚠ '30 consecutive failures' detected: $new_failures (since monitor start)${NC}"
-            printf "%*s" $((44 - ${#new_failures})) ""
+            printf "${RED}⚠ CRITICAL MESSAGE DETECTED: $new_failures times (since start)${NC}"
+            printf "%*s" $((42 - ${#new_failures})) ""
         else
-            printf "${GREEN}✓ No '30 consecutive failures' message detected${NC}%26s" ""
+            printf "${GREEN}✓ No critical failure message detected${NC}%35s" ""
         fi
         printf " ${CYAN}║${NC}\n"
         
@@ -1907,7 +1914,7 @@ xilriws_live_monitor() {
         printf "${CYAN}║${NC}    ${YELLOW}⚠ Total Errors:${NC}  %-55s ${CYAN}║${NC}\n" "$XILRIWS_TOTAL_ERRORS"
         
         draw_box_divider
-        draw_box_line "  WATCHING FOR: '30 consecutive failures' message"
+        draw_box_line "  WATCHING FOR: '30 consecutive failures in the browser!'"
         draw_box_divider
         
         # Get last 5 log entries
@@ -1915,7 +1922,9 @@ xilriws_live_monitor() {
         while IFS= read -r line; do
             # Truncate long lines and highlight the critical message
             local short_line="${line:0:72}"
-            if echo "$line" | grep -qi "30 consecutive failures"; then
+            if echo "$line" | grep -qi "30 consecutive failures in the browser"; then
+                printf "${CYAN}║${NC}  ${RED}${BOLD}%-73s${NC} ${CYAN}║${NC}\n" "$short_line"
+            elif echo "$line" | grep -qi "this is really bad"; then
                 printf "${CYAN}║${NC}  ${RED}${BOLD}%-73s${NC} ${CYAN}║${NC}\n" "$short_line"
             elif echo "$line" | grep -qiE "error|failed|banned"; then
                 printf "${CYAN}║${NC}  ${YELLOW}%-73s${NC} ${CYAN}║${NC}\n" "$short_line"
@@ -1926,21 +1935,24 @@ xilriws_live_monitor() {
         
         draw_box_bottom
         
-        # Check for the specific "30 consecutive failures" message in recent logs
-        # This is the critical message that means Xilriws has stopped trying
-        local recent_check=$(docker logs xilriws --tail 20 2>&1)
+        # Check for the specific critical message in recent logs
+        # Xilriws outputs: "30 consecutive failures in the browser! this is really bad"
+        # This message means Xilriws has stopped trying to use proxies
+        local recent_check=$(docker logs xilriws --tail 50 2>&1)
         
-        if echo "$recent_check" | grep -qi "30 consecutive failures"; then
+        if echo "$recent_check" | grep -qi "30 consecutive failures in the browser"; then
             # Make sure we haven't just restarted for this same occurrence
-            local latest_failure_line=$(echo "$recent_check" | grep -i "30 consecutive failures" | tail -1)
+            local latest_failure_line=$(echo "$recent_check" | grep -i "30 consecutive failures in the browser" | tail -1)
             
             if [ "$latest_failure_line" != "$last_restart_check" ]; then
                 echo ""
                 echo -e "  ${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
-                echo -e "  ${RED}║   ⚠️  CRITICAL: '30 CONSECUTIVE FAILURES' DETECTED IN LOGS! ⚠️     ║${NC}"
+                echo -e "  ${RED}║   ⚠️  CRITICAL XILRIWS ERROR DETECTED! ⚠️                           ║${NC}"
+                echo -e "  ${RED}║                                                                    ║${NC}"
+                echo -e "  ${RED}║   '30 consecutive failures in the browser! this is really bad'    ║${NC}"
                 echo -e "  ${RED}║                                                                    ║${NC}"
                 echo -e "  ${RED}║   Xilriws has stopped attempting to use proxies.                  ║${NC}"
-                echo -e "  ${RED}║   This is really bad! Auto-restarting container...                ║${NC}"
+                echo -e "  ${RED}║   Auto-restarting container to recover...                         ║${NC}"
                 echo -e "  ${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
                 echo ""
                 
@@ -1953,7 +1965,7 @@ xilriws_live_monitor() {
                     ((restart_count++))
                     # Reset baseline after restart
                     sleep 3
-                    initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
+                    initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures in the browser" || echo "0")
                 else
                     print_error "Failed to restart container!"
                 fi
