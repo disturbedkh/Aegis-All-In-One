@@ -483,8 +483,8 @@ show_main_menu() {
     echo ""
     echo -e "  ${CYAN}Setup & Configuration${NC}"
     echo "    1) Initial Setup          - First-time setup, passwords, configs"
-    echo "    2) Database Management    - DB setup, maintenance, user management"
-    echo "    3) Security Setup         - Nginx, SSL, firewall, authentication"
+    echo "    2) Database Setup & Management  - DB setup, maintenance, user management"
+    echo "    3) Security Setup & Management  - Nginx, SSL, firewall, authentication"
     echo ""
     echo -e "  ${CYAN}Monitoring & Maintenance${NC}"
     echo "    4) System Check           - Validate configs, check health"
@@ -549,7 +549,7 @@ show_help() {
     echo "   • Creates databases and users"
     echo ""
     
-    echo -e "${CYAN}2) Database Management (dbsetup.sh)${NC}"
+    echo -e "${CYAN}2) Database Setup & Management (dbsetup.sh)${NC}"
     echo "   Two modes: Setup and Maintenance"
     echo "   Setup Mode:"
     echo "   • Install/configure MariaDB"
@@ -563,7 +563,7 @@ show_help() {
     echo "   • Optimize and repair tables"
     echo ""
     
-    echo -e "${CYAN}3) Security Setup (nginx-setup.sh)${NC}"
+    echo -e "${CYAN}3) Security Setup & Management (nginx-setup.sh)${NC}"
     echo "   Secures your installation for external access:"
     echo "   • Nginx reverse proxy (subdomain or path routing)"
     echo "   • SSL certificates (Let's Encrypt)"
@@ -660,7 +660,7 @@ show_help() {
     echo "  • First time? Run option 1 (Initial Setup) first"
     echo "  • Having issues? Run option 4 (System Check)"
     echo "  • Logs filling up? Run option 5 (Log Manager)"
-    echo "  • Going public? Run option 3 (Security Setup)"
+    echo "  • Going public? Run option 3 (Security Setup & Management)"
     echo ""
     
     press_enter
@@ -2260,8 +2260,8 @@ main() {
         case $choice in
             # Setup & Configuration
             1) run_script "setup.sh" "Initial Setup" ;;
-            2) run_script "dbsetup.sh" "Database Management" ;;
-            3) run_script "nginx-setup.sh" "Security Setup" ;;
+            2) run_script "dbsetup.sh" "Database Setup & Management" ;;
+            3) run_script "nginx-setup.sh" "Security Setup & Management" ;;
             # Monitoring & Maintenance
             4) run_script "check.sh" "System Check" ;;
             5) run_script "logs.sh" "Log Manager" ;;
