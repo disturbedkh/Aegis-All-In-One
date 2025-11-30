@@ -243,6 +243,15 @@ check_all_ports() {
     done
     echo ""
     
+    # Check if nginx is using any ports
+    local nginx_on_ports=false
+    for detail in "${port_details[@]}"; do
+        if [[ "$detail" == *"nginx"* ]]; then
+            nginx_on_ports=true
+            break
+        fi
+    done
+    
     echo "  Options:"
     echo "    1) Attempt to stop processes using these ports"
     echo "    2) Stop existing Docker containers (docker compose down)"
@@ -250,11 +259,14 @@ check_all_ports() {
     echo "    4) Remove/purge old Docker containers"
     echo "    5) Clean Docker networks"
     echo "    6) Full Docker cleanup (containers + networks + volumes)"
+    if [ "$nginx_on_ports" = true ]; then
+    echo -e "    ${YELLOW}n) Fix Nginx port conflicts (nginx detected on ports)${NC}"
+    fi
     echo "    7) Show detailed process information"
     echo "    8) Continue anyway (may cause startup failures)"
     echo "    9) Exit and resolve manually"
     echo ""
-    read -p "  Select option [1-9, default: 2]: " PORT_ACTION
+    read -p "  Select option [1-9${nginx_on_ports:+, n}, default: 2]: " PORT_ACTION
     PORT_ACTION=${PORT_ACTION:-2}
     
     case $PORT_ACTION in
@@ -486,6 +498,157 @@ check_all_ports() {
                             print_success "Custom networks removed."
                         fi
                     fi
+                    ;;
+            esac
+            
+            sleep 1
+            check_all_ports
+            return $?
+            ;;
+        n|N)
+            echo ""
+            print_info "Nginx Port Conflict Resolution"
+            echo ""
+            
+            # Find which ports nginx is using
+            echo "  ${CYAN}Nginx processes detected on these ports:${NC}"
+            echo "  ─────────────────────────────────────────────────────────────────"
+            for port in "${ports_in_use[@]}"; do
+                local proc=$(get_port_process "$port")
+                if [[ "$proc" == *"nginx"* ]]; then
+                    echo "    Port $port: ${STACK_PORTS[$port]}"
+                fi
+            done
+            echo ""
+            
+            # Check nginx configuration
+            echo "  ${CYAN}Checking Nginx configuration...${NC}"
+            if [ -d "/etc/nginx/sites-enabled" ]; then
+                local aegis_configs=$(grep -l -r "7070\|6001\|6002\|6003\|6004\|6005\|6006\|5090" /etc/nginx/sites-enabled/ 2>/dev/null || true)
+                if [ -n "$aegis_configs" ]; then
+                    echo "  Found Aegis-related Nginx configs:"
+                    for config in $aegis_configs; do
+                        echo "    • $config"
+                    done
+                    echo ""
+                fi
+            fi
+            
+            echo "  Options:"
+            echo "    1) Stop Nginx service"
+            echo "    2) Restart Nginx service"
+            echo "    3) Disable Aegis Nginx sites (move to sites-available)"
+            echo "    4) Remove Aegis Nginx site configurations"
+            echo "    5) View Nginx configuration for Aegis ports"
+            echo "    6) Reload Nginx (apply config changes)"
+            echo "    0) Back to previous menu"
+            echo ""
+            read -p "  Select option [0-6]: " NGINX_OPTION
+            
+            case $NGINX_OPTION in
+                1)
+                    echo ""
+                    print_info "Stopping Nginx..."
+                    systemctl stop nginx 2>/dev/null || service nginx stop 2>/dev/null || killall nginx 2>/dev/null || true
+                    sleep 2
+                    if ! pgrep -x nginx > /dev/null; then
+                        print_success "Nginx stopped."
+                    else
+                        print_warning "Nginx may still be running. Try: sudo systemctl stop nginx"
+                    fi
+                    ;;
+                2)
+                    echo ""
+                    print_info "Restarting Nginx..."
+                    systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || true
+                    print_success "Nginx restart command sent."
+                    ;;
+                3)
+                    echo ""
+                    print_info "Disabling Aegis Nginx sites..."
+                    # Common Aegis nginx config names
+                    local sites=("aegis" "aegis-reactmap" "aegis-admin" "aegis-rotom" "aegis-koji" "aegis-grafana" "aegis-pma" "rotom" "reactmap")
+                    for site in "${sites[@]}"; do
+                        if [ -f "/etc/nginx/sites-enabled/$site" ]; then
+                            print_info "Disabling: $site"
+                            mv "/etc/nginx/sites-enabled/$site" "/etc/nginx/sites-available/" 2>/dev/null || true
+                        fi
+                    done
+                    # Also check for any config listening on our ports
+                    if [ -d "/etc/nginx/sites-enabled" ]; then
+                        for config in /etc/nginx/sites-enabled/*; do
+                            if [ -f "$config" ] && grep -q "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006" "$config" 2>/dev/null; then
+                                local basename=$(basename "$config")
+                                print_info "Disabling: $basename (uses Aegis ports)"
+                                mv "$config" "/etc/nginx/sites-available/" 2>/dev/null || true
+                            fi
+                        done
+                    fi
+                    print_info "Reloading Nginx..."
+                    systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+                    print_success "Aegis Nginx sites disabled. Configs moved to /etc/nginx/sites-available/"
+                    ;;
+                4)
+                    echo ""
+                    print_warning "This will DELETE Aegis-related Nginx configurations!"
+                    read -p "  Are you sure? (y/n) [n]: " CONFIRM
+                    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                        local sites=("aegis" "aegis-reactmap" "aegis-admin" "aegis-rotom" "aegis-koji" "aegis-grafana" "aegis-pma" "rotom" "reactmap")
+                        for site in "${sites[@]}"; do
+                            rm -f "/etc/nginx/sites-enabled/$site" 2>/dev/null || true
+                            rm -f "/etc/nginx/sites-available/$site" 2>/dev/null || true
+                        done
+                        # Remove any config with Aegis ports
+                        if [ -d "/etc/nginx/sites-enabled" ]; then
+                            for config in /etc/nginx/sites-enabled/* /etc/nginx/sites-available/*; do
+                                if [ -f "$config" ] && grep -q "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006" "$config" 2>/dev/null; then
+                                    print_info "Removing: $config"
+                                    rm -f "$config" 2>/dev/null || true
+                                fi
+                            done
+                        fi
+                        print_info "Reloading Nginx..."
+                        systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+                        print_success "Aegis Nginx configurations removed."
+                    fi
+                    ;;
+                5)
+                    echo ""
+                    print_info "Nginx configurations using Aegis ports:"
+                    echo ""
+                    if [ -d "/etc/nginx/sites-enabled" ]; then
+                        for config in /etc/nginx/sites-enabled/*; do
+                            if [ -f "$config" ]; then
+                                local matches=$(grep -n "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006\|proxy_pass.*600\|proxy_pass.*7070" "$config" 2>/dev/null || true)
+                                if [ -n "$matches" ]; then
+                                    echo "  ${CYAN}=== $config ===${NC}"
+                                    echo "$matches" | sed 's/^/    /'
+                                    echo ""
+                                fi
+                            fi
+                        done
+                    fi
+                    if [ -d "/etc/nginx/sites-available" ]; then
+                        echo "  ${DIM}Also in sites-available:${NC}"
+                        for config in /etc/nginx/sites-available/*; do
+                            if [ -f "$config" ]; then
+                                local matches=$(grep -l "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006" "$config" 2>/dev/null || true)
+                                if [ -n "$matches" ]; then
+                                    echo "    $(basename $config)"
+                                fi
+                            fi
+                        done
+                    fi
+                    read -p "  Press Enter to continue..."
+                    ;;
+                6)
+                    echo ""
+                    print_info "Testing Nginx configuration..."
+                    nginx -t 2>&1
+                    echo ""
+                    print_info "Reloading Nginx..."
+                    systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+                    print_success "Nginx reloaded."
                     ;;
             esac
             
