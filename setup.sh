@@ -2180,14 +2180,20 @@ else
     # Wait a moment for DB to be ready
     sleep 2
     
+    # Detect MySQL client command (MariaDB 12+ uses 'mariadb' instead of 'mysql')
+    MYSQL_CMD="mariadb"
+    if ! docker exec database which mariadb &>/dev/null; then
+      MYSQL_CMD="mysql"
+    fi
+    
     # Check if user already exists
-    USER_EXISTS=$(docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM mysql.user WHERE User='$DB_USER'" 2>/dev/null)
+    USER_EXISTS=$(docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM mysql.user WHERE User='$DB_USER'" 2>/dev/null)
     
     if [ "${USER_EXISTS:-0}" -gt 0 ]; then
       print_info "User '$DB_USER' already exists in database."
       
       # Try to authenticate with the provided password
-      if docker exec database mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" 2>/dev/null; then
+      if docker exec database $MYSQL_CMD -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" 2>/dev/null; then
         print_success "Password matches. User '$DB_USER' is ready."
       else
         print_warning "Password mismatch! The existing user has a different password."
@@ -2203,7 +2209,7 @@ else
         case $pw_choice in
           1)
             SQL="ALTER USER '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD'; FLUSH PRIVILEGES;"
-            if docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
+            if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
               print_success "Password updated for user '$DB_USER'."
             else
               print_error "Failed to update password. Run 'dbsetup.sh' to fix manually."
@@ -2221,7 +2227,7 @@ else
       
       # Ensure grants are correct
       SQL="GRANT ALL PRIVILEGES ON *.* TO '$DB_USER'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
-      docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null
+      docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null
       
     else
       # User doesn't exist - create it
@@ -2230,7 +2236,7 @@ else
       SQL+="GRANT ALL PRIVILEGES ON *.* TO '$DB_USER'@'%' WITH GRANT OPTION; "
       SQL+="FLUSH PRIVILEGES;"
       
-      if docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
+      if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
         print_success "DB user '$DB_USER' created with full privileges."
       else
         print_error "Could not create user. Run 'dbsetup.sh' after setup completes."
@@ -2240,7 +2246,7 @@ else
     # Create databases if they don't exist
     DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
     for db in "${DBS[@]}"; do
-      docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$db\`" 2>/dev/null
+      docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$db\`" 2>/dev/null
     done
     print_success "Databases verified: ${DBS[*]}"
     

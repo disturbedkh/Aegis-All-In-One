@@ -357,13 +357,19 @@ check_mariadb() {
     local root_pass="${MYSQL_ROOT_PASSWORD:-}"
     
     if [ -n "$root_pass" ]; then
-        local version=$(docker exec database mysql -u root -p"$root_pass" -e "SELECT VERSION();" -N 2>/dev/null | head -1)
+        # Try mariadb command first (MariaDB 12+), fall back to mysql
+        local mysql_cmd="mariadb"
+        if ! docker exec database which mariadb &>/dev/null; then
+            mysql_cmd="mysql"
+        fi
+        
+        local version=$(docker exec database $mysql_cmd -u root -p"$root_pass" -e "SELECT VERSION();" -N 2>/dev/null | head -1)
         if [ -n "$version" ]; then
             echo -e "  Connection:      ${GREEN}Connected${NC}"
             echo -e "  Version:         ${CYAN}$version${NC}"
             
             # Check databases
-            local dbs=$(docker exec database mysql -u root -p"$root_pass" -e "SHOW DATABASES;" -N 2>/dev/null)
+            local dbs=$(docker exec database $mysql_cmd -u root -p"$root_pass" -e "SHOW DATABASES;" -N 2>/dev/null)
             local expected=("golbat" "dragonite" "koji" "reactmap" "poracle")
             local found=0
             for db in "${expected[@]}"; do

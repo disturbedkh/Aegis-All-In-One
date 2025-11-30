@@ -127,7 +127,10 @@ fi
 }
 
 check_mariadb_installed() {
-    if command -v mysql &> /dev/null; then
+    # Check for mariadb command first (MariaDB 12+), then mysql
+    if command -v mariadb &> /dev/null; then
+        return 0
+    elif command -v mysql &> /dev/null; then
         return 0
     else
         return 1
@@ -145,10 +148,17 @@ check_mariadb_running() {
 }
 
 setup_mysql_cmd() {
+    # Detect which MySQL client command to use
+    # MariaDB 12+ uses 'mariadb' command, older versions use 'mysql'
+    local mysql_client="mysql"
+    if command -v mariadb &> /dev/null; then
+        mysql_client="mariadb"
+    fi
+    
     if [ -n "$MYSQL_ROOT_PASSWORD" ]; then
-        MYSQL_CMD="mysql -u root -p${MYSQL_ROOT_PASSWORD}"
+        MYSQL_CMD="$mysql_client -u root -p${MYSQL_ROOT_PASSWORD}"
     else
-        MYSQL_CMD="mysql -u root"
+        MYSQL_CMD="$mysql_client -u root"
     fi
 }
 
