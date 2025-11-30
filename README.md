@@ -110,31 +110,24 @@ sudo usermod -aG docker $USER
 
 ### Configure Docker Logging (Recommended)
 
-Docker can generate massive log files. Configure log rotation to prevent disk space issues:
+Docker can generate massive log files. The setup script (`setup.sh`) will automatically prompt you to configure log rotation to prevent disk space issues.
 
-```bash
-sudo nano /etc/docker/daemon.json
-```
-
-Add the following configuration:
+**Default configuration** (applied by setup script):
 
 ```json
 {
   "log-driver": "json-file",
   "log-opts": {
     "max-size": "100m",
-    "max-file": "3"
+    "max-file": "3",
+    "compress": "true"
   }
 }
 ```
 
-Apply changes:
+This limits logs to 300MB total (3 files × 100MB each) with automatic rotation and compression.
 
-```bash
-sudo systemctl restart docker
-```
-
-This limits logs to 300MB total (3 files × 100MB each) with automatic rotation.
+> 💡 **Tip**: The setup script lets you customize these values and will automatically restart Docker to apply the changes.
 
 ---
 
@@ -178,6 +171,8 @@ sudo bash ./setup.sh
 
 The setup script will:
 
+- ✅ Check and install Docker if needed
+- ✅ Configure Docker log rotation to prevent disk space issues
 - ✅ Generate secure random passwords for all services
 - ✅ Create configuration files from templates
 - ✅ Set up MariaDB with optimized settings for your hardware

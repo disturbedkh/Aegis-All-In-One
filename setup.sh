@@ -5,13 +5,14 @@
 # =============================================================================
 # This script handles:
 #   1. Checking/installing Docker and Docker Compose
-#   2. Checking/installing Google Chrome (specific version for compatibility)
-#   3. Detecting system resources (RAM, CPU, Storage)
-#   4. Optimizing MariaDB configuration for your hardware
-#   5. Copying default config files
-#   6. Generating/setting secure passwords and tokens
-#   7. Installing MariaDB (optional)
-#   8. Creating required databases
+#   2. Configuring Docker logging (log rotation to prevent disk space issues)
+#   3. Checking/installing Google Chrome (specific version for compatibility)
+#   4. Detecting system resources (RAM, CPU, Storage)
+#   5. Optimizing MariaDB configuration for your hardware
+#   6. Copying default config files
+#   7. Generating/setting secure passwords and tokens
+#   8. Installing MariaDB (optional)
+#   9. Creating required databases
 # =============================================================================
 
 # Colors for output
@@ -60,7 +61,7 @@ CHROME_DEB_URL="https://github.com/NDViet/google-chrome-stable/releases/download
 # =============================================================================
 # Step 1: Check/Install Docker and Docker Compose
 # =============================================================================
-echo "[1/8] Checking Docker installation..."
+echo "[1/9] Checking Docker installation..."
 echo ""
 
 # Function to detect package manager
@@ -338,9 +339,263 @@ fi
 echo ""
 
 # =============================================================================
-# Step 2: Check/Install Google Chrome (Specific Version)
+# Step 2: Configure Docker Logging (Recommended)
 # =============================================================================
-echo "[2/8] Checking Google Chrome installation..."
+echo "[2/9] Configuring Docker logging..."
+echo ""
+
+# Docker can generate massive log files. Configure log rotation to prevent disk space issues.
+print_info "Docker containers can generate large log files that may fill up disk space."
+print_info "Configuring log rotation is recommended to prevent this issue."
+echo ""
+
+DAEMON_JSON="/etc/docker/daemon.json"
+CONFIGURE_LOGGING=false
+EXISTING_CONFIG=false
+
+# Check if daemon.json already exists
+if [ -f "$DAEMON_JSON" ]; then
+    EXISTING_CONFIG=true
+    print_warning "Existing Docker daemon configuration found at $DAEMON_JSON"
+    
+    # Check if logging is already configured
+    if grep -q '"log-driver"' "$DAEMON_JSON" 2>/dev/null; then
+        print_info "Log configuration already exists in daemon.json:"
+        echo ""
+        cat "$DAEMON_JSON"
+        echo ""
+        read -p "  Overwrite existing log configuration? (y/n) [n]: " OVERWRITE_LOGS
+        OVERWRITE_LOGS=${OVERWRITE_LOGS:-n}
+        if [ "$OVERWRITE_LOGS" = "y" ] || [ "$OVERWRITE_LOGS" = "Y" ]; then
+            CONFIGURE_LOGGING=true
+        else
+            print_info "Keeping existing Docker log configuration."
+        fi
+    else
+        read -p "  Add log rotation configuration to existing daemon.json? (y/n) [y]: " ADD_LOGS
+        ADD_LOGS=${ADD_LOGS:-y}
+        if [ "$ADD_LOGS" = "y" ] || [ "$ADD_LOGS" = "Y" ]; then
+            CONFIGURE_LOGGING=true
+        fi
+    fi
+else
+    read -p "  Configure Docker log rotation? (Recommended) (y/n) [y]: " SETUP_LOGS
+    SETUP_LOGS=${SETUP_LOGS:-y}
+    if [ "$SETUP_LOGS" = "y" ] || [ "$SETUP_LOGS" = "Y" ]; then
+        CONFIGURE_LOGGING=true
+    fi
+fi
+
+if [ "$CONFIGURE_LOGGING" = true ]; then
+    echo ""
+    echo "  Docker Log Configuration Options"
+    echo "  ─────────────────────────────────"
+    echo ""
+    
+    # Log driver selection
+    echo "  Select log driver:"
+    echo "    1) json-file (default, recommended)"
+    echo "    2) local (faster, but less features)"
+    echo "    3) journald (uses systemd journal)"
+    echo "    4) none (disable logging - not recommended)"
+    echo ""
+    read -p "  Log driver [1-4, default: 1]: " LOG_DRIVER_CHOICE
+    LOG_DRIVER_CHOICE=${LOG_DRIVER_CHOICE:-1}
+    
+    case $LOG_DRIVER_CHOICE in
+        1) LOG_DRIVER="json-file" ;;
+        2) LOG_DRIVER="local" ;;
+        3) LOG_DRIVER="journald" ;;
+        4) LOG_DRIVER="none" ;;
+        *) LOG_DRIVER="json-file" ;;
+    esac
+    
+    print_info "Selected log driver: $LOG_DRIVER"
+    echo ""
+    
+    # Only prompt for log-opts if using json-file or local driver
+    if [ "$LOG_DRIVER" = "json-file" ] || [ "$LOG_DRIVER" = "local" ]; then
+        # Max size per log file
+        echo "  Maximum size per log file (e.g., 10m, 50m, 100m, 500m, 1g)"
+        echo "  Smaller = more rotations, larger = fewer rotations"
+        read -p "  Max log file size [default: 100m]: " LOG_MAX_SIZE
+        LOG_MAX_SIZE=${LOG_MAX_SIZE:-100m}
+        
+        # Validate format (number followed by k, m, or g)
+        if ! echo "$LOG_MAX_SIZE" | grep -qE '^[0-9]+[kmgKMG]$'; then
+            print_warning "Invalid format. Using default: 100m"
+            LOG_MAX_SIZE="100m"
+        fi
+        
+        echo ""
+        
+        # Max number of log files to keep
+        echo "  Maximum number of log files to keep per container"
+        echo "  Total space per container = max-size × max-file"
+        read -p "  Max log files [default: 3]: " LOG_MAX_FILE
+        LOG_MAX_FILE=${LOG_MAX_FILE:-3}
+        
+        # Validate number
+        if ! echo "$LOG_MAX_FILE" | grep -qE '^[0-9]+$'; then
+            print_warning "Invalid number. Using default: 3"
+            LOG_MAX_FILE="3"
+        fi
+        
+        # Calculate and display total size
+        # Extract number and unit from LOG_MAX_SIZE
+        SIZE_NUM=$(echo "$LOG_MAX_SIZE" | sed 's/[^0-9]//g')
+        SIZE_UNIT=$(echo "$LOG_MAX_SIZE" | sed 's/[0-9]//g' | tr '[:upper:]' '[:lower:]')
+        TOTAL_SIZE=$((SIZE_NUM * LOG_MAX_FILE))
+        
+        echo ""
+        echo "  ┌─────────────────────────────────────────────────────────┐"
+        echo "  │              DOCKER LOG CONFIGURATION                   │"
+        echo "  ├─────────────────────────────────────────────────────────┤"
+        printf "  │  Log Driver:            %-30s │\n" "$LOG_DRIVER"
+        printf "  │  Max Size per File:     %-30s │\n" "$LOG_MAX_SIZE"
+        printf "  │  Max Files per Container: %-28s │\n" "$LOG_MAX_FILE"
+        printf "  │  Total per Container:   %-30s │\n" "${TOTAL_SIZE}${SIZE_UNIT}"
+        echo "  └─────────────────────────────────────────────────────────┘"
+        echo ""
+        
+        # Compression option (only for json-file)
+        if [ "$LOG_DRIVER" = "json-file" ]; then
+            read -p "  Enable log compression? (y/n) [y]: " ENABLE_COMPRESSION
+            ENABLE_COMPRESSION=${ENABLE_COMPRESSION:-y}
+            if [ "$ENABLE_COMPRESSION" = "y" ] || [ "$ENABLE_COMPRESSION" = "Y" ]; then
+                COMPRESS_LOGS="true"
+            else
+                COMPRESS_LOGS="false"
+            fi
+        else
+            COMPRESS_LOGS="true"
+        fi
+        
+        # Build daemon.json content
+        if [ "$LOG_DRIVER" = "json-file" ]; then
+            DAEMON_CONTENT=$(cat <<EOF
+{
+  "log-driver": "$LOG_DRIVER",
+  "log-opts": {
+    "max-size": "$LOG_MAX_SIZE",
+    "max-file": "$LOG_MAX_FILE",
+    "compress": "$COMPRESS_LOGS"
+  }
+}
+EOF
+)
+        else
+            # local driver doesn't support compress option
+            DAEMON_CONTENT=$(cat <<EOF
+{
+  "log-driver": "$LOG_DRIVER",
+  "log-opts": {
+    "max-size": "$LOG_MAX_SIZE",
+    "max-file": "$LOG_MAX_FILE"
+  }
+}
+EOF
+)
+        fi
+    else
+        # journald or none - no log-opts needed
+        echo ""
+        echo "  ┌─────────────────────────────────────────────────────────┐"
+        echo "  │              DOCKER LOG CONFIGURATION                   │"
+        echo "  ├─────────────────────────────────────────────────────────┤"
+        printf "  │  Log Driver:            %-30s │\n" "$LOG_DRIVER"
+        if [ "$LOG_DRIVER" = "journald" ]; then
+        echo "  │  Note: Logs managed by systemd journal                 │"
+        else
+        echo "  │  Warning: Logging disabled - not recommended!          │"
+        fi
+        echo "  └─────────────────────────────────────────────────────────┘"
+        echo ""
+        
+        DAEMON_CONTENT=$(cat <<EOF
+{
+  "log-driver": "$LOG_DRIVER"
+}
+EOF
+)
+    fi
+    
+    # Handle existing daemon.json - merge or replace
+    if [ "$EXISTING_CONFIG" = true ] && [ -f "$DAEMON_JSON" ]; then
+        # Backup existing config
+        BACKUP_FILE="${DAEMON_JSON}.backup.$(date +%Y%m%d%H%M%S)"
+        cp "$DAEMON_JSON" "$BACKUP_FILE"
+        print_info "Backed up existing config to: $BACKUP_FILE"
+        
+        # Check if we need to merge with existing non-logging config
+        if ! grep -q '"log-driver"' "$DAEMON_JSON" 2>/dev/null; then
+            # Try to merge using simple JSON manipulation
+            # Remove closing brace from existing, add comma, add our config
+            EXISTING_CONTENT=$(cat "$DAEMON_JSON")
+            if echo "$EXISTING_CONTENT" | grep -q '{' && echo "$EXISTING_CONTENT" | grep -q '}'; then
+                # Has valid JSON structure, try to merge
+                # This is a simple merge - may not work for complex configs
+                print_warning "Attempting to merge with existing configuration..."
+                print_warning "Please verify the resulting daemon.json manually."
+            fi
+        fi
+    fi
+    
+    # Write the new daemon.json
+    print_info "Writing Docker daemon configuration..."
+    echo "$DAEMON_CONTENT" > "$DAEMON_JSON"
+    
+    if [ $? -eq 0 ]; then
+        print_success "Docker daemon configuration written to $DAEMON_JSON"
+        echo ""
+        echo "  Configuration:"
+        cat "$DAEMON_JSON"
+        echo ""
+        
+        # Restart Docker to apply changes
+        print_info "Restarting Docker to apply log configuration..."
+        
+        if systemctl restart docker 2>/dev/null; then
+            # Wait a moment for Docker to fully restart
+            sleep 2
+            
+            if systemctl is-active --quiet docker; then
+                print_success "Docker restarted successfully with new log configuration!"
+                DOCKER_RUNNING=true
+            else
+                print_error "Docker failed to start after restart."
+                print_info "Check the configuration with: sudo dockerd --validate"
+                print_info "View Docker logs with: sudo journalctl -xeu docker"
+                
+                # Offer to restore backup
+                if [ -n "$BACKUP_FILE" ] && [ -f "$BACKUP_FILE" ]; then
+                    read -p "  Restore previous configuration? (y/n) [y]: " RESTORE_BACKUP
+                    RESTORE_BACKUP=${RESTORE_BACKUP:-y}
+                    if [ "$RESTORE_BACKUP" = "y" ] || [ "$RESTORE_BACKUP" = "Y" ]; then
+                        cp "$BACKUP_FILE" "$DAEMON_JSON"
+                        systemctl restart docker
+                        print_info "Previous configuration restored."
+                    fi
+                fi
+            fi
+        else
+            print_warning "Could not restart Docker automatically."
+            print_info "Please restart Docker manually: sudo systemctl restart docker"
+        fi
+    else
+        print_error "Failed to write Docker daemon configuration."
+        print_info "You may need to configure logging manually."
+    fi
+else
+    print_info "Skipping Docker log configuration."
+fi
+
+echo ""
+
+# =============================================================================
+# Step 3: Check/Install Google Chrome (Specific Version)
+# =============================================================================
+echo "[3/9] Checking Google Chrome installation..."
 echo ""
 
 # Function to get Chrome version
@@ -518,9 +773,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 3: Detect System Resources
+# Step 4: Detect System Resources
 # =============================================================================
-echo "[3/8] Detecting system resources..."
+echo "[4/9] Detecting system resources..."
 echo ""
 
 # Detect RAM (in MB)
@@ -592,9 +847,9 @@ print_success "Storage type: $STORAGE_NAME"
 echo ""
 
 # =============================================================================
-# Step 4: Calculate Optimal MariaDB Settings
+# Step 5: Calculate Optimal MariaDB Settings
 # =============================================================================
-echo "[4/8] Calculating optimal MariaDB settings..."
+echo "[5/9] Calculating optimal MariaDB settings..."
 echo ""
 
 # Calculate InnoDB Buffer Pool Size
@@ -749,9 +1004,9 @@ fi
 echo ""
 
 # =============================================================================
-# Step 5: Copy default config files
+# Step 6: Copy default config files
 # =============================================================================
-echo "[5/8] Copying default config files..."
+echo "[6/9] Copying default config files..."
 
 cp env-default .env
 cp reactmap/local-default.json reactmap/local.json
@@ -763,9 +1018,9 @@ print_success "Config files copied."
 echo ""
 
 # =============================================================================
-# Step 6: Generate/prompt for secrets and passwords
+# Step 7: Generate/prompt for secrets and passwords
 # =============================================================================
-echo "[6/8] Configuring secrets and passwords..."
+echo "[7/9] Configuring secrets and passwords..."
 echo "      (Press enter to auto-generate random values)"
 echo ""
 
@@ -854,9 +1109,9 @@ print_success "Secrets applied to all config files."
 echo ""
 
 # =============================================================================
-# Step 7: MariaDB installation (optional)
+# Step 8: MariaDB installation (optional)
 # =============================================================================
-echo "[7/8] Database setup..."
+echo "[8/9] Database setup..."
 
 if ! command -v mysql &> /dev/null; then
   read -p "      MariaDB not found. Install it now? (y/n): " INSTALL_CHOICE
@@ -904,11 +1159,11 @@ else
 fi
 
 # =============================================================================
-# Step 8: Create databases
+# Step 9: Create databases
 # =============================================================================
 if [ "$SKIP_DB_SETUP" != "true" ]; then
   echo ""
-  echo "[8/8] Creating databases..."
+  echo "[9/9] Creating databases..."
 
   read -p "      DB root username (default: root): " ROOT_USER
   [ -z "$ROOT_USER" ] && ROOT_USER="root"
@@ -938,7 +1193,7 @@ if [ "$SKIP_DB_SETUP" != "true" ]; then
   fi
 else
   echo ""
-  echo "[8/8] Skipped database creation (using Docker's MariaDB)."
+  echo "[9/9] Skipped database creation (using Docker's MariaDB)."
   print_info "Docker's MariaDB will create databases on first run."
 fi
 
