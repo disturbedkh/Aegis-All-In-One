@@ -2841,6 +2841,280 @@ quick_health_check() {
 }
 
 # =============================================================================
+# LOG SEARCH
+# =============================================================================
+
+# Search logs across all containers
+search_all_logs() {
+    local keyword=$1
+    local context=${2:-3}
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    SEARCH ALL LOGS: \"$keyword\""
+    draw_box_bottom
+    echo ""
+    
+    local total_matches=0
+    local containers_with_matches=0
+    local temp_results=$(mktemp)
+    
+    echo -e "${CYAN}Searching all container logs...${NC}"
+    echo ""
+    
+    for service in "${SERVICES[@]}"; do
+        local status=$(get_container_status "$service")
+        if [ "$status" = "running" ] || [ "$status" = "stopped" ]; then
+            local count=$(docker logs "$service" 2>&1 | grep -ic "$keyword" 2>/dev/null || echo "0")
+            if [ "$count" -gt 0 ] 2>/dev/null; then
+                echo "$service:$count" >> "$temp_results"
+                ((total_matches += count))
+                ((containers_with_matches++))
+            fi
+        fi
+    done
+    
+    if [ "$total_matches" -eq 0 ]; then
+        echo -e "  ${YELLOW}No matches found for \"$keyword\"${NC}"
+        rm -f "$temp_results"
+        press_enter
+        return
+    fi
+    
+    echo -e "${WHITE}${BOLD}Search Results Summary${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    echo -e "  Total matches: ${GREEN}$total_matches${NC} across ${GREEN}$containers_with_matches${NC} container(s)"
+    echo ""
+    
+    # Show breakdown by container
+    echo -e "${WHITE}${BOLD}Matches by Container:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local i=1
+    local containers_array=()
+    while IFS=: read -r container count; do
+        printf "  %2d) %-20s %s matches\n" "$i" "$container" "$count"
+        containers_array+=("$container")
+        ((i++))
+    done < "$temp_results"
+    
+    echo ""
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    echo "  v) View all matches (first 100)"
+    echo "  #) Enter number to view specific container's matches"
+    echo "  0) Back"
+    echo ""
+    read -p "  Select option: " choice
+    
+    case $choice in
+        v|V)
+            view_search_results_all "$keyword" "$context"
+            ;;
+        [1-9]|[1-9][0-9])
+            if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "${#containers_array[@]}" ] 2>/dev/null; then
+                local selected="${containers_array[$((choice-1))]}"
+                view_search_results_container "$selected" "$keyword" "$context"
+            fi
+            ;;
+        0|"")
+            ;;
+        *)
+            ;;
+    esac
+    
+    rm -f "$temp_results"
+}
+
+# View search results from all containers
+view_search_results_all() {
+    local keyword=$1
+    local context=${2:-3}
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    ALL MATCHES: \"$keyword\""
+    draw_box_bottom
+    echo ""
+    
+    local temp_output=$(mktemp)
+    
+    for service in "${SERVICES[@]}"; do
+        local status=$(get_container_status "$service")
+        if [ "$status" = "running" ] || [ "$status" = "stopped" ]; then
+            local matches=$(docker logs "$service" 2>&1 | grep -i "$keyword" 2>/dev/null | head -20)
+            if [ -n "$matches" ]; then
+                echo -e "${CYAN}━━━ $service ━━━${NC}" >> "$temp_output"
+                echo "$matches" >> "$temp_output"
+                echo "" >> "$temp_output"
+            fi
+        fi
+    done
+    
+    # Use less for pagination if available
+    if command -v less &> /dev/null; then
+        less -R "$temp_output"
+    else
+        cat "$temp_output"
+        press_enter
+    fi
+    
+    rm -f "$temp_output"
+}
+
+# View search results from a specific container
+view_search_results_container() {
+    local container=$1
+    local keyword=$2
+    local context=${3:-3}
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    MATCHES IN: $container"
+    draw_box_line "                    Keyword: \"$keyword\""
+    draw_box_bottom
+    echo ""
+    
+    local temp_output=$(mktemp)
+    
+    # Get matches with context
+    docker logs "$container" 2>&1 | grep -i -B"$context" -A"$context" --color=always "$keyword" > "$temp_output" 2>/dev/null || true
+    
+    local match_count=$(docker logs "$container" 2>&1 | grep -ic "$keyword" 2>/dev/null || echo "0")
+    
+    echo -e "  Found ${GREEN}$match_count${NC} matches (showing with $context lines context)"
+    echo ""
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Use less for pagination if available
+    if command -v less &> /dev/null; then
+        less -R "$temp_output"
+    else
+        head -200 "$temp_output"
+        if [ "$match_count" -gt 50 ]; then
+            echo ""
+            echo -e "${YELLOW}(Showing first ~200 lines. Use less for full output)${NC}"
+        fi
+        press_enter
+    fi
+    
+    rm -f "$temp_output"
+}
+
+# Search a specific container's logs
+search_container_logs() {
+    local container=$1
+    local keyword=$2
+    local context=${3:-3}
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    SEARCH: $container"
+    draw_box_line "                    Keyword: \"$keyword\""
+    draw_box_bottom
+    echo ""
+    
+    local match_count=$(docker logs "$container" 2>&1 | grep -ic "$keyword" 2>/dev/null || echo "0")
+    
+    if [ "$match_count" -eq 0 ]; then
+        echo -e "  ${YELLOW}No matches found for \"$keyword\" in $container${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "  Found ${GREEN}$match_count${NC} matches"
+    echo ""
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local temp_output=$(mktemp)
+    docker logs "$container" 2>&1 | grep -i -B"$context" -A"$context" --color=always "$keyword" > "$temp_output" 2>/dev/null || true
+    
+    # Use less for pagination if available
+    if command -v less &> /dev/null; then
+        less -R "$temp_output"
+    else
+        head -200 "$temp_output"
+        if [ "$match_count" -gt 50 ]; then
+            echo ""
+            echo -e "${YELLOW}(Showing first ~200 lines)${NC}"
+        fi
+        press_enter
+    fi
+    
+    rm -f "$temp_output"
+}
+
+# Main search menu
+search_logs_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    LOG SEARCH"
+        draw_box_bottom
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Search Options${NC}"
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "  1) Search all containers"
+        echo "  2) Search specific container"
+        echo ""
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+        echo "  0) Back to main menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                read -p "  Enter search keyword: " keyword
+                if [ -n "$keyword" ]; then
+                    read -p "  Context lines (default 3): " ctx
+                    ctx=${ctx:-3}
+                    search_all_logs "$keyword" "$ctx"
+                fi
+                ;;
+            2)
+                echo ""
+                echo -e "${WHITE}${BOLD}Available Containers:${NC}"
+                echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+                local i=1
+                for service in "${SERVICES[@]}"; do
+                    local status=$(get_container_status "$service")
+                    local status_color="${GREEN}"
+                    [ "$status" != "running" ] && status_color="${RED}"
+                    printf "  %2d) %-20s [${status_color}%s${NC}]\n" "$i" "$service" "$status"
+                    ((i++))
+                done
+                echo ""
+                read -p "  Select container (1-${#SERVICES[@]}): " container_choice
+                
+                if [ "$container_choice" -ge 1 ] 2>/dev/null && [ "$container_choice" -le "${#SERVICES[@]}" ] 2>/dev/null; then
+                    local selected="${SERVICES[$((container_choice-1))]}"
+                    echo ""
+                    read -p "  Enter search keyword: " keyword
+                    if [ -n "$keyword" ]; then
+                        read -p "  Context lines (default 3): " ctx
+                        ctx=${ctx:-3}
+                        search_container_logs "$selected" "$keyword" "$ctx"
+                    fi
+                fi
+                ;;
+            0|"")
+                return
+                ;;
+            *)
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
 # MAIN MENU
 # =============================================================================
 
@@ -2851,6 +3125,7 @@ show_main_menu() {
         echo -e "${WHITE}${BOLD}Options${NC}"
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
         echo "    1-${#SERVICES[@]}) Select service for details"
+        echo "    s) Search logs"
         echo "    q) Quick health check"
         echo "    x) Xilriws status & proxy management"
         echo "    d) Device disconnect monitor"
@@ -2867,6 +3142,7 @@ show_main_menu() {
                     show_service_detail "${SERVICES[$((choice-1))]}"
                 fi
                 ;;
+            s|S) search_logs_menu ;;
             q|Q) quick_health_check ;;
             x|X) show_xilriws_menu ;;
             d|D) show_device_disconnects ;;
