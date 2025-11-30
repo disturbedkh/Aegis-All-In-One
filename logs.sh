@@ -47,9 +47,10 @@ ERROR_PATTERNS=(
 # Exclusion patterns - these are NOT errors even if they match error keywords
 # These are success/info messages that contain words like "database" or "connection"
 EXCLUSION_PATTERNS=(
-    # Info symbol prefix (ℹ character indicates info, not error)
-    # Any line containing ℹ is an info message
+    # Info/Warning symbol prefixes (these are log level indicators, not errors)
+    # ℹ = info, ⚠ = warning (not error)
     "ℹ"
+    "⚠"
     # Success/Info messages with "database" keyword
     "database version:"
     "Current database version"
@@ -89,7 +90,7 @@ EXCLUSION_PATTERNS=(
     "initialized"
     "new version available"
     # ReactMap specific info prefixes
-    "\[API\] Loaded"
+    "\[API\]"
     "\[STATS\]"
     "\[UPDATE\]"
     "\[AREAS\]"
@@ -100,6 +101,27 @@ EXCLUSION_PATTERNS=(
     "\[NESTS\]"
     "\[SESSIONS\]"
     "\[WEATHER\]"
+    "\[CONFIG\]"
+    "\[MASTERFILE\]"
+    "\[EVENT\]"
+    "\[SCANNER\]"
+    "\[GEOCODER\]"
+    "\[BACKUP\]"
+    "\[CLIENTS\]"
+    "\[WEBHOOK\]"
+    "\[HISTORICAL\]"
+    "\[INVASION\]"
+    "\[LURE\]"
+    "\[POKESTOP\]"
+    "\[GYM\]"
+    "\[RAID\]"
+    "\[ROUTE\]"
+    "\[SPAWNPOINT\]"
+    "\[QUEST\]"
+    "\[S2CELL\]"
+    "\[PORTAL\]"
+    # Node.js startup
+    "^\\\$ node"
     # Info-level log prefixes (these lines are informational, not errors)
     "^INFO "
     "| I |"
