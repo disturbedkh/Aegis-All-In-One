@@ -336,13 +336,25 @@ Manage existing security configuration with colorful status dashboard:
 | **Site Management** | Enable/disable sites, view/edit configs, add new sites |
 | **SSL Certificates** | Request, renew, revoke, delete certificates |
 | **Fail2Ban** | View jails, ban/unban IPs, view logs |
-| **UFW Firewall** | Enable/disable, allow/deny ports, manage rules |
+| **UFW Firewall** | Enable/disable, allow/deny ports, manage rules, **log management** |
 
 **Add New Sites:**
 - Aegis service proxy template (ReactMap, Dragonite, etc.)
 - Custom reverse proxy
 - Static file site
 - Auto-enable and optional SSL setup
+
+**Firewall Log Management (Press 'l' in UFW menu):**
+- Log dashboard with statistics (blocked/allowed counts)
+- View blocked connections with color highlighting
+- View allowed connections
+- Filter by port or IP address
+- Real-time log monitoring (live tail)
+- Search logs by keyword
+- **Top blocked IPs analysis** with ban option
+- **Top targeted ports analysis**
+- Log rotation and cleanup
+- Export log entries
 
 **Command Line Options:**
 ```bash

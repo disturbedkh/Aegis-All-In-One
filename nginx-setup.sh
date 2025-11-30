@@ -1053,6 +1053,673 @@ fail2ban_management_menu() {
 # MAINTENANCE MODE - FIREWALL MANAGEMENT
 # =============================================================================
 
+# Get UFW log file path
+get_ufw_log_path() {
+    # UFW logs to different locations depending on system config
+    if [ -f "/var/log/ufw.log" ]; then
+        echo "/var/log/ufw.log"
+    elif [ -f "/var/log/syslog" ]; then
+        echo "/var/log/syslog"
+    elif [ -f "/var/log/kern.log" ]; then
+        echo "/var/log/kern.log"
+    else
+        echo "/var/log/messages"
+    fi
+}
+
+# Get UFW logging level
+get_ufw_logging_level() {
+    local level=$(ufw status verbose 2>/dev/null | grep "Logging:" | awk '{print $2}')
+    echo "${level:-off}"
+}
+
+# Get UFW log statistics
+get_ufw_log_stats() {
+    local log_file=$(get_ufw_log_path)
+    
+    if [ ! -f "$log_file" ]; then
+        echo "0|0|0|0"
+        return
+    fi
+    
+    local blocked=$(grep -c "\[UFW BLOCK\]" "$log_file" 2>/dev/null || echo "0")
+    local allowed=$(grep -c "\[UFW ALLOW\]" "$log_file" 2>/dev/null || echo "0")
+    local audit=$(grep -c "\[UFW AUDIT\]" "$log_file" 2>/dev/null || echo "0")
+    local total=$((blocked + allowed + audit))
+    
+    echo "$total|$blocked|$allowed|$audit"
+}
+
+# Get log file size
+get_ufw_log_size() {
+    local log_file=$(get_ufw_log_path)
+    if [ -f "$log_file" ]; then
+        local size=$(stat -c %s "$log_file" 2>/dev/null || stat -f %z "$log_file" 2>/dev/null || echo "0")
+        # Format size
+        if [ "$size" -gt 1073741824 ]; then
+            echo "$(echo "scale=1; $size/1073741824" | bc)G"
+        elif [ "$size" -gt 1048576 ]; then
+            echo "$(echo "scale=1; $size/1048576" | bc)M"
+        elif [ "$size" -gt 1024 ]; then
+            echo "$(echo "scale=1; $size/1024" | bc)K"
+        else
+            echo "${size}B"
+        fi
+    else
+        echo "N/A"
+    fi
+}
+
+# Show firewall log dashboard
+show_firewall_log_dashboard() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    UFW FIREWALL LOG MANAGER"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local log_level=$(get_ufw_logging_level)
+    local log_size=$(get_ufw_log_size)
+    local stats=$(get_ufw_log_stats)
+    
+    local total=$(echo "$stats" | cut -d'|' -f1)
+    local blocked=$(echo "$stats" | cut -d'|' -f2)
+    local allowed=$(echo "$stats" | cut -d'|' -f3)
+    local audit=$(echo "$stats" | cut -d'|' -f4)
+    
+    # Log Configuration
+    echo -e "${WHITE}${BOLD}Log Configuration${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Color code logging level
+    local level_color="${RED}"
+    case "$log_level" in
+        "on"|"low") level_color="${GREEN}" ;;
+        "medium") level_color="${CYAN}" ;;
+        "high"|"full") level_color="${YELLOW}" ;;
+    esac
+    
+    printf "  %-20s ${level_color}%s${NC}\n" "Logging Level:" "$log_level"
+    printf "  %-20s %s\n" "Log File:" "$log_file"
+    printf "  %-20s %s\n" "Log Size:" "$log_size"
+    echo ""
+    
+    # Log Statistics
+    echo -e "${WHITE}${BOLD}Log Statistics${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    printf "  %-20s %s\n" "Total Entries:" "$total"
+    printf "  %-20s ${RED}%s${NC}\n" "Blocked:" "$blocked"
+    printf "  %-20s ${GREEN}%s${NC}\n" "Allowed:" "$allowed"
+    printf "  %-20s ${CYAN}%s${NC}\n" "Audit:" "$audit"
+    echo ""
+    
+    # Recent Activity Summary (last 24 hours if possible)
+    if [ -f "$log_file" ]; then
+        local today=$(date +%b\ %d)
+        local today_blocked=$(grep "$today" "$log_file" 2>/dev/null | grep -c "\[UFW BLOCK\]" || echo "0")
+        local today_allowed=$(grep "$today" "$log_file" 2>/dev/null | grep -c "\[UFW ALLOW\]" || echo "0")
+        
+        echo -e "${WHITE}${BOLD}Today's Activity${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        printf "  %-20s ${RED}%s${NC}\n" "Blocked Today:" "$today_blocked"
+        printf "  %-20s ${GREEN}%s${NC}\n" "Allowed Today:" "$today_allowed"
+        echo ""
+    fi
+}
+
+# Firewall log management submenu
+firewall_log_menu() {
+    while true; do
+        show_firewall_log_dashboard
+        
+        echo -e "${WHITE}${BOLD}Log Management Options${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "  ${WHITE}Logging Control${NC}"
+        echo "    1) Enable logging (low)"
+        echo "    2) Set logging level (off/low/medium/high/full)"
+        echo "    3) Disable logging"
+        echo ""
+        echo "  ${WHITE}View Logs${NC}"
+        echo "    4) View recent blocked connections"
+        echo "    5) View recent allowed connections"
+        echo "    6) View all recent UFW entries"
+        echo "    7) View blocked by port"
+        echo "    8) View blocked by IP"
+        echo "    9) Follow log in real-time"
+        echo ""
+        echo "  ${WHITE}Search & Analysis${NC}"
+        echo "    s) Search logs by keyword"
+        echo "    t) Top blocked IPs"
+        echo "    p) Top blocked ports"
+        echo ""
+        echo "  ${WHITE}Maintenance${NC}"
+        echo "    c) Clear/rotate UFW log"
+        echo "    e) Export log entries"
+        echo ""
+        echo "    0) Back to firewall menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) 
+                ufw logging on
+                print_success "UFW logging enabled (low level)"
+                press_enter
+                ;;
+            2)
+                echo ""
+                echo "  Logging levels:"
+                echo "    ${DIM}off${NC}    - No logging"
+                echo "    ${GREEN}low${NC}    - Log blocked packets not matching default policy"
+                echo "    ${CYAN}medium${NC} - Log blocked + rate limited + invalid packets"
+                echo "    ${YELLOW}high${NC}   - Log all packets with rate limiting"
+                echo "    ${RED}full${NC}   - Log everything (can fill disk quickly!)"
+                echo ""
+                read -p "  Enter level (off/low/medium/high/full): " level
+                if [ -n "$level" ]; then
+                    ufw logging "$level"
+                    print_success "Logging level set to: $level"
+                fi
+                press_enter
+                ;;
+            3)
+                ufw logging off
+                print_success "UFW logging disabled"
+                press_enter
+                ;;
+            4) view_ufw_blocked ;;
+            5) view_ufw_allowed ;;
+            6) view_ufw_all ;;
+            7) view_blocked_by_port ;;
+            8) view_blocked_by_ip ;;
+            9) follow_ufw_log ;;
+            s|S) search_ufw_logs ;;
+            t|T) show_top_blocked_ips ;;
+            p|P) show_top_blocked_ports ;;
+            c|C) clear_ufw_log ;;
+            e|E) export_ufw_log ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# View blocked connections
+view_ufw_blocked() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    BLOCKED CONNECTIONS"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local count=$(grep -c "\[UFW BLOCK\]" "$log_file" 2>/dev/null || echo "0")
+    
+    echo -e "  Found ${RED}$count${NC} blocked connection entries"
+    echo ""
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${DIM}No blocked connections found in log${NC}"
+        press_enter
+        return
+    fi
+    
+    # Show navigation help
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search, ${GREEN}arrows${NC} to scroll       ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
+    # Show blocked entries with color highlighting
+    grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | tail -100 | \
+        sed -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+            -e "s/SRC=\([^ ]*\)/SRC=${YELLOW}\1${NC}/g" \
+            -e "s/DPT=\([^ ]*\)/DPT=${CYAN}\1${NC}/g" | \
+        less -R -P "Line %lt-%lb (press q to quit)"
+}
+
+# View allowed connections
+view_ufw_allowed() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    ALLOWED CONNECTIONS"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local count=$(grep -c "\[UFW ALLOW\]" "$log_file" 2>/dev/null || echo "0")
+    
+    echo -e "  Found ${GREEN}$count${NC} allowed connection entries"
+    echo ""
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${DIM}No allowed connections logged (logging may be at 'low' level)${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search                         ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
+    grep "\[UFW ALLOW\]" "$log_file" 2>/dev/null | tail -100 | \
+        sed -e "s/\[UFW ALLOW\]/${GREEN}[UFW ALLOW]${NC}/g" | \
+        less -R -P "Line %lt-%lb (press q to quit)"
+}
+
+# View all UFW entries
+view_ufw_all() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    ALL UFW LOG ENTRIES"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search                         ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
+    grep "\[UFW" "$log_file" 2>/dev/null | tail -200 | \
+        sed -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+            -e "s/\[UFW ALLOW\]/${GREEN}[UFW ALLOW]${NC}/g" \
+            -e "s/\[UFW AUDIT\]/${CYAN}[UFW AUDIT]${NC}/g" | \
+        less -R -P "Line %lt-%lb (press q to quit)"
+}
+
+# View blocked by specific port
+view_blocked_by_port() {
+    echo ""
+    read -p "  Enter port number to filter: " port
+    
+    if [ -z "$port" ]; then
+        return
+    fi
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    BLOCKED ON PORT $port"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local count=$(grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | grep -c "DPT=$port " || echo "0")
+    
+    echo -e "  Found ${RED}$count${NC} blocked connections on port $port"
+    echo ""
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${DIM}No blocked connections on this port${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${DIM}Press q to quit viewer${NC}"
+    sleep 1
+    
+    grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | grep "DPT=$port " | tail -50 | \
+        sed -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+            -e "s/DPT=$port/${CYAN}DPT=$port${NC}/g" | \
+        less -R
+}
+
+# View blocked by specific IP
+view_blocked_by_ip() {
+    echo ""
+    read -p "  Enter IP address to filter: " ip
+    
+    if [ -z "$ip" ]; then
+        return
+    fi
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    BLOCKED FROM IP: $ip"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local count=$(grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | grep -c "SRC=$ip " || echo "0")
+    
+    echo -e "  Found ${RED}$count${NC} blocked connections from $ip"
+    echo ""
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${DIM}No blocked connections from this IP${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${DIM}Press q to quit viewer${NC}"
+    sleep 1
+    
+    grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | grep "SRC=$ip " | tail -50 | \
+        sed -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+            -e "s/SRC=$ip/${YELLOW}SRC=$ip${NC}/g" | \
+        less -R
+}
+
+# Follow UFW log in real-time
+follow_ufw_log() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    LIVE UFW LOG MONITOR"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    
+    echo -e "  ${CYAN}Monitoring UFW entries in real-time...${NC}"
+    echo -e "  ${DIM}Press Ctrl+C to stop${NC}"
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    # Use tail -f with grep to only show UFW entries
+    tail -f "$log_file" 2>/dev/null | grep --line-buffered "\[UFW" | \
+        sed -u -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+               -e "s/\[UFW ALLOW\]/${GREEN}[UFW ALLOW]${NC}/g" \
+               -e "s/\[UFW AUDIT\]/${CYAN}[UFW AUDIT]${NC}/g"
+}
+
+# Search UFW logs
+search_ufw_logs() {
+    echo ""
+    echo "  Search options:"
+    echo "    1) Search by IP address"
+    echo "    2) Search by port"
+    echo "    3) Custom keyword search"
+    echo ""
+    read -p "  Select (1-3): " search_type
+    
+    case $search_type in
+        1)
+            read -p "  Enter IP to search: " keyword
+            ;;
+        2)
+            read -p "  Enter port to search: " port
+            keyword="DPT=$port"
+            ;;
+        3)
+            read -p "  Enter keyword: " keyword
+            ;;
+        *)
+            return
+            ;;
+    esac
+    
+    if [ -z "$keyword" ]; then
+        return
+    fi
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    SEARCH RESULTS: $keyword"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local count=$(grep "\[UFW" "$log_file" 2>/dev/null | grep -ic "$keyword" || echo "0")
+    
+    echo -e "  Found ${GREEN}$count${NC} matches"
+    echo ""
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${DIM}No matches found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${DIM}Press q to quit viewer${NC}"
+    sleep 1
+    
+    grep "\[UFW" "$log_file" 2>/dev/null | grep -i "$keyword" | tail -100 | \
+        sed -e "s/\[UFW BLOCK\]/${RED}[UFW BLOCK]${NC}/g" \
+            -e "s/\[UFW ALLOW\]/${GREEN}[UFW ALLOW]${NC}/g" | \
+        less -R
+}
+
+# Show top blocked IPs
+show_top_blocked_ips() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    TOP BLOCKED IP ADDRESSES"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    
+    echo -e "${WHITE}${BOLD}Most Frequently Blocked IPs${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    printf "  ${DIM}%-8s %-20s${NC}\n" "COUNT" "IP ADDRESS"
+    echo -e "${DIM}  ────────────────────────────────────${NC}"
+    
+    grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | \
+        grep -oP 'SRC=\K[0-9.]+' | \
+        sort | uniq -c | sort -rn | head -20 | \
+        while read count ip; do
+            if [ "$count" -gt 100 ]; then
+                printf "  ${RED}%-8s${NC} ${YELLOW}%-20s${NC}\n" "$count" "$ip"
+            elif [ "$count" -gt 50 ]; then
+                printf "  ${YELLOW}%-8s${NC} %-20s\n" "$count" "$ip"
+            else
+                printf "  %-8s %-20s\n" "$count" "$ip"
+            fi
+        done
+    
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  Options:"
+    echo "    b) Ban top IP with Fail2Ban"
+    echo "    d) Add deny rule for IP"
+    echo "    Enter) Back"
+    echo ""
+    read -p "  Select: " action
+    
+    case $action in
+        b|B)
+            read -p "  Enter IP to ban: " ip
+            if [ -n "$ip" ] && command -v fail2ban-client &>/dev/null; then
+                fail2ban-client set recidive banip "$ip" 2>/dev/null || \
+                fail2ban-client set sshd banip "$ip" 2>/dev/null
+                print_success "IP $ip banned"
+            fi
+            press_enter
+            ;;
+        d|D)
+            read -p "  Enter IP to deny: " ip
+            if [ -n "$ip" ]; then
+                ufw deny from "$ip"
+                print_success "Deny rule added for $ip"
+            fi
+            press_enter
+            ;;
+    esac
+}
+
+# Show top blocked ports
+show_top_blocked_ports() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    TOP TARGETED PORTS"
+    draw_box_bottom
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    
+    echo -e "${WHITE}${BOLD}Most Frequently Targeted Ports${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    printf "  ${DIM}%-8s %-10s %-30s${NC}\n" "COUNT" "PORT" "COMMON SERVICE"
+    echo -e "${DIM}  ────────────────────────────────────────────────────${NC}"
+    
+    grep "\[UFW BLOCK\]" "$log_file" 2>/dev/null | \
+        grep -oP 'DPT=\K[0-9]+' | \
+        sort | uniq -c | sort -rn | head -20 | \
+        while read count port; do
+            # Common port names
+            local service=""
+            case $port in
+                22) service="SSH" ;;
+                23) service="Telnet" ;;
+                25) service="SMTP" ;;
+                53) service="DNS" ;;
+                80) service="HTTP" ;;
+                443) service="HTTPS" ;;
+                445) service="SMB" ;;
+                3306) service="MySQL" ;;
+                3389) service="RDP" ;;
+                5432) service="PostgreSQL" ;;
+                6379) service="Redis" ;;
+                8080) service="HTTP Proxy" ;;
+                27017) service="MongoDB" ;;
+                *) service="" ;;
+            esac
+            
+            if [ "$count" -gt 100 ]; then
+                printf "  ${RED}%-8s${NC} ${CYAN}%-10s${NC} ${DIM}%-30s${NC}\n" "$count" "$port" "$service"
+            else
+                printf "  %-8s ${CYAN}%-10s${NC} ${DIM}%-30s${NC}\n" "$count" "$port" "$service"
+            fi
+        done
+    
+    press_enter
+}
+
+# Clear/rotate UFW log
+clear_ufw_log() {
+    echo ""
+    echo -e "${WHITE}${BOLD}UFW Log Maintenance${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local log_file=$(get_ufw_log_path)
+    local log_size=$(get_ufw_log_size)
+    
+    echo -e "  Current log file: $log_file"
+    echo -e "  Current size: $log_size"
+    echo ""
+    echo "  Options:"
+    echo "    1) Rotate log (keeps backup)"
+    echo "    2) Clear log completely"
+    echo "    3) Configure logrotate for UFW"
+    echo "    0) Cancel"
+    echo ""
+    read -p "  Select: " action
+    
+    case $action in
+        1)
+            if [ -f "$log_file" ]; then
+                local backup="${log_file}.$(date +%Y%m%d_%H%M%S)"
+                cp "$log_file" "$backup"
+                > "$log_file"
+                print_success "Log rotated. Backup: $backup"
+            fi
+            ;;
+        2)
+            echo ""
+            echo -e "${YELLOW}WARNING: This will permanently delete all UFW log entries!${NC}"
+            read -p "  Type 'CLEAR' to confirm: " confirm
+            if [ "$confirm" = "CLEAR" ]; then
+                > "$log_file" 2>/dev/null || truncate -s 0 "$log_file"
+                print_success "UFW log cleared"
+            fi
+            ;;
+        3)
+            configure_ufw_logrotate
+            ;;
+    esac
+    press_enter
+}
+
+# Configure logrotate for UFW
+configure_ufw_logrotate() {
+    echo ""
+    echo -e "${CYAN}Configuring UFW log rotation...${NC}"
+    
+    cat > /etc/logrotate.d/ufw << 'EOF'
+/var/log/ufw.log {
+    daily
+    rotate 7
+    compress
+    delaycompress
+    missingok
+    notifempty
+    create 640 syslog adm
+    sharedscripts
+    postrotate
+        /usr/sbin/invoke-rc.d rsyslog rotate > /dev/null
+    endscript
+}
+EOF
+    
+    print_success "UFW logrotate configured"
+    echo -e "${DIM}  - Rotates daily"
+    echo -e "  - Keeps 7 days of logs"
+    echo -e "  - Compresses old logs${NC}"
+}
+
+# Export UFW log entries
+export_ufw_log() {
+    echo ""
+    echo "  Export options:"
+    echo "    1) Export all UFW entries"
+    echo "    2) Export blocked only"
+    echo "    3) Export today's entries"
+    echo "    0) Cancel"
+    echo ""
+    read -p "  Select: " export_type
+    
+    if [ "$export_type" = "0" ] || [ -z "$export_type" ]; then
+        return
+    fi
+    
+    local log_file=$(get_ufw_log_path)
+    local export_file="ufw_export_$(date +%Y%m%d_%H%M%S).log"
+    
+    case $export_type in
+        1)
+            grep "\[UFW" "$log_file" > "$export_file" 2>/dev/null
+            ;;
+        2)
+            grep "\[UFW BLOCK\]" "$log_file" > "$export_file" 2>/dev/null
+            ;;
+        3)
+            local today=$(date +%b\ %d)
+            grep "\[UFW" "$log_file" 2>/dev/null | grep "$today" > "$export_file"
+            ;;
+    esac
+    
+    local count=$(wc -l < "$export_file" 2>/dev/null || echo "0")
+    
+    # Restore ownership
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER:$REAL_GROUP" "$export_file" 2>/dev/null
+    fi
+    
+    print_success "Exported $count entries to: $export_file"
+    press_enter
+}
+
 firewall_management_menu() {
     while true; do
         clear
@@ -1073,22 +1740,53 @@ firewall_management_menu() {
             return
         fi
         
-        # Show current status
-        echo -e "${WHITE}${BOLD}Current Status${NC}"
+        # Show current status with more detail
+        echo -e "${WHITE}${BOLD}Firewall Status${NC}"
         echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
-        ufw status verbose 2>/dev/null | head -20
+        
+        local ufw_status=$(ufw status 2>/dev/null | head -1)
+        if echo "$ufw_status" | grep -q "active"; then
+            echo -e "  Status:          ${GREEN}● Active${NC}"
+        else
+            echo -e "  Status:          ${YELLOW}○ Inactive${NC}"
+        fi
+        
+        local rule_count=$(ufw status numbered 2>/dev/null | grep -c "^\[" || echo "0")
+        local log_level=$(get_ufw_logging_level)
+        local log_size=$(get_ufw_log_size)
+        
+        printf "  %-18s %s\n" "Rules:" "$rule_count"
+        printf "  %-18s %s\n" "Logging:" "$log_level"
+        printf "  %-18s %s\n" "Log Size:" "$log_size"
+        echo ""
+        
+        # Show recent blocked count
+        local log_file=$(get_ufw_log_path)
+        local today=$(date +%b\ %d)
+        local today_blocked=$(grep "$today" "$log_file" 2>/dev/null | grep -c "\[UFW BLOCK\]" || echo "0")
+        echo -e "  ${RED}$today_blocked${NC} connections blocked today"
         echo ""
         
         echo -e "${WHITE}${BOLD}Actions${NC}"
         echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
         echo ""
+        echo "  ${WHITE}Firewall Control${NC}"
         echo "    1) Enable firewall"
         echo "    2) Disable firewall"
+        echo ""
+        echo "  ${WHITE}Rules${NC}"
         echo "    3) Allow port"
         echo "    4) Deny port"
-        echo "    5) Delete rule"
-        echo "    6) View numbered rules"
-        echo "    7) Reset firewall (removes all rules)"
+        echo "    5) Allow IP"
+        echo "    6) Deny/Block IP"
+        echo "    7) Delete rule"
+        echo "    8) View all rules (numbered)"
+        echo ""
+        echo "  ${WHITE}Logging & Analysis${NC}"
+        echo "    l) Log Manager (view, search, analyze logs)"
+        echo ""
+        echo "  ${WHITE}Danger Zone${NC}"
+        echo "    r) Reset firewall (removes ALL rules)"
         echo ""
         echo "    0) Back to maintenance menu"
         echo ""
@@ -1097,22 +1795,41 @@ firewall_management_menu() {
         case $choice in
             1)
                 echo ""
-                echo -e "${YELLOW}WARNING: Make sure SSH is allowed before enabling!${NC}"
-                read -p "  Enable UFW? (y/n): " confirm
+                echo -e "${YELLOW}╔════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${YELLOW}║  WARNING: Make sure SSH (port 22) is allowed before enabling!     ║${NC}"
+                echo -e "${YELLOW}╚════════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
+                echo "  Current SSH rule status:"
+                ufw status | grep -i "22\|ssh" || echo -e "  ${RED}No SSH rule found!${NC}"
+                echo ""
+                read -p "  Enable UFW? (y/n) [n]: " confirm
                 if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
-                    ufw --force enable
+                    ufw --force enable && print_success "UFW enabled"
                 fi
                 press_enter
                 ;;
             2)
-                ufw disable
+                ufw disable && print_success "UFW disabled"
                 press_enter
                 ;;
             3)
                 echo ""
                 read -p "  Enter port to allow (e.g., 80, 443, 22): " port
                 if [ -n "$port" ]; then
-                    ufw allow "$port"
+                    echo ""
+                    echo "  Allow from:"
+                    echo "    1) Anywhere (most common)"
+                    echo "    2) Specific IP only"
+                    read -p "  Select [1]: " from_type
+                    from_type=${from_type:-1}
+                    
+                    if [ "$from_type" = "2" ]; then
+                        read -p "  Enter source IP: " src_ip
+                        ufw allow from "$src_ip" to any port "$port"
+                    else
+                        ufw allow "$port"
+                    fi
+                    print_success "Rule added"
                 fi
                 press_enter
                 ;;
@@ -1121,30 +1838,57 @@ firewall_management_menu() {
                 read -p "  Enter port to deny: " port
                 if [ -n "$port" ]; then
                     ufw deny "$port"
+                    print_success "Deny rule added for port $port"
                 fi
                 press_enter
                 ;;
             5)
                 echo ""
-                ufw status numbered
-                echo ""
-                read -p "  Enter rule number to delete: " rule_num
-                if [ -n "$rule_num" ]; then
-                    ufw delete "$rule_num"
+                read -p "  Enter IP to allow: " ip
+                if [ -n "$ip" ]; then
+                    ufw allow from "$ip"
+                    print_success "Allow rule added for $ip"
                 fi
                 press_enter
                 ;;
             6)
                 echo ""
-                ufw status numbered
+                read -p "  Enter IP to block: " ip
+                if [ -n "$ip" ]; then
+                    ufw deny from "$ip"
+                    print_success "Deny rule added for $ip"
+                fi
                 press_enter
                 ;;
             7)
                 echo ""
-                echo -e "${RED}WARNING: This will remove ALL firewall rules!${NC}"
+                ufw status numbered
+                echo ""
+                read -p "  Enter rule number to delete (0 to cancel): " rule_num
+                if [ -n "$rule_num" ] && [ "$rule_num" != "0" ]; then
+                    ufw --force delete "$rule_num"
+                fi
+                press_enter
+                ;;
+            8)
+                echo ""
+                ufw status numbered
+                press_enter
+                ;;
+            l|L)
+                firewall_log_menu
+                ;;
+            r|R)
+                echo ""
+                echo -e "${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "${RED}║  DANGER: This will remove ALL firewall rules!                     ║${NC}"
+                echo -e "${RED}║  Your server will be completely exposed!                          ║${NC}"
+                echo -e "${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
                 read -p "  Type 'RESET' to confirm: " confirm
                 if [ "$confirm" = "RESET" ]; then
-                    ufw reset
+                    ufw --force reset
+                    print_warning "Firewall reset. All rules removed."
                 fi
                 press_enter
                 ;;
