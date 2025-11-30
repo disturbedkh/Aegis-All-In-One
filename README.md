@@ -198,8 +198,15 @@ sudo bash ./aegis.sh
 | | x) Stop Stack | docker compose down |
 | | t) Restart Stack | docker compose restart |
 | | c) Container Status | docker compose ps |
-| **Updates** | p) Pull Latest | Git pull only |
+| | v) Container Dashboard | Detailed status + image info |
+| **Services** | +) Start Service(s) | Start individual services |
+| | -) Stop Service(s) | Stop individual services |
+| | *) Restart Service(s) | Restart individual services |
+| **Updates** | i) Pull Images Only | Pull latest images (no restart) |
+| | p) Pull Latest | Git pull only |
 | | u) Update & Rebuild | Pull, rebuild, restart |
+| **Maintenance** | d) Docker Purge | Clean up Docker resources |
+| | z) Uninstall Stack | Remove Aegis stack |
 | **Other** | h) Help | Documentation for all options |
 
 **Command Line Options:**
@@ -209,10 +216,35 @@ sudo bash ./aegis.sh
 ./aegis.sh --start      # Start all containers
 ./aegis.sh --stop       # Stop all containers
 ./aegis.sh --restart    # Restart all containers
+./aegis.sh --pull-images # Pull latest Docker images (no restart)
 ./aegis.sh --pull       # Git pull latest changes
 ./aegis.sh --update     # Pull, rebuild, restart stack
+./aegis.sh --dashboard  # Detailed container dashboard
 ./aegis.sh --help       # Help
 ```
+
+**Service Management:**
+Select individual services to start, stop, or restart using comma-separated numbers (e.g., `1,3,5`). Supports all 14 stack services with real-time status display.
+
+**Container Dashboard:**
+Shows detailed status for all services including:
+- Running/Stopped/Not deployed status
+- Image pull status
+- Option to check for image updates from registries
+- Option to pull all latest images
+
+**Docker Purge Options:**
+- Stop & remove Aegis containers only
+- Remove containers + volumes (keeps images)
+- Remove unused Docker images
+- Remove all unused Docker data (system prune)
+- Remove Docker networks
+- Nuclear option - Remove ALL Docker data
+
+**Uninstall Options:**
+- Light uninstall - Remove containers, keep configs
+- Full uninstall - Remove containers + reset configs
+- Complete removal - Delete entire Aegis directory
 
 **Built-in Help System:**
 Press `h` in the menu for detailed documentation on each script and feature.
@@ -230,12 +262,14 @@ sudo bash ./setup.sh
 **What it does:**
 - ✅ Installs Docker and Docker Compose if missing
 - ✅ Configures Docker log rotation (prevents disk space issues)
+- ✅ **Checks port availability** for all stack services with remediation options
 - ✅ Detects system resources (RAM, CPU, storage type)
 - ✅ Generates secure random passwords for all services
 - ✅ Creates configuration files from templates
 - ✅ Tunes MariaDB settings for your hardware
 - ✅ Creates required databases and users
 - ✅ Sets up inter-service communication
+- ✅ **Restores file ownership** (prevents root-locked files)
 
 ---
 
@@ -594,11 +628,13 @@ The setup script will:
 
 - ✅ Check and install Docker if needed
 - ✅ Configure Docker log rotation to prevent disk space issues
+- ✅ **Check port availability** (6001-6006, 7070, 5090) with options to free locked ports
 - ✅ Generate secure random passwords for all services
 - ✅ Create configuration files from templates
 - ✅ Set up MariaDB with optimized settings for your hardware
 - ✅ Create all required databases
 - ✅ Configure inter-service communication
+- ✅ **Properly restore file ownership** to non-root user
 
 You'll be prompted to customize:
 - Database usernames and passwords

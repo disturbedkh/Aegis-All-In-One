@@ -64,6 +64,302 @@ fi
 # Track if user needs to re-login for docker group
 NEEDS_RELOGIN=false
 
+# Track all files modified by this script for ownership restoration
+MODIFIED_FILES=()
+
+# Function to track file modifications and restore ownership later
+track_file() {
+    local file="$1"
+    # Only track if file exists and we have a real user
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        MODIFIED_FILES+=("$file")
+    fi
+}
+
+# Function to restore ownership on all tracked files
+restore_all_ownership() {
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        print_info "Restoring file ownership to user '$REAL_USER'..."
+        
+        # Restore ownership on all tracked files
+        for file in "${MODIFIED_FILES[@]}"; do
+            if [ -e "$file" ]; then
+                chown "$REAL_USER:$REAL_GROUP" "$file" 2>/dev/null || true
+            fi
+        done
+        
+        # Also restore ownership on common directories that may have been touched
+        local dirs_to_fix=(
+            "."
+            "mysql_data"
+            "unown"
+            "unown/logs"
+            "unown/golbat_cache"
+            "unown/rotom_jobs"
+            "reactmap"
+            "grafana"
+            "Poracle"
+            "Poracle/config"
+            "Poracle/geofence"
+            "victoriametrics"
+            "victoriametrics/data"
+            "vmagent"
+            "vmagent/data"
+            "init"
+            "fletchling"
+        )
+        
+        for dir in "${dirs_to_fix[@]}"; do
+            if [ -d "$dir" ]; then
+                chown "$REAL_USER:$REAL_GROUP" "$dir" 2>/dev/null || true
+            fi
+        done
+        
+        print_success "File ownership restored."
+    fi
+}
+
+# =============================================================================
+# Port Checking Functions
+# =============================================================================
+
+# Stack service ports to check
+declare -A STACK_PORTS=(
+    ["6001"]="ReactMap (Web UI)"
+    ["6002"]="Dragonite Admin"
+    ["6003"]="Rotom UI"
+    ["6004"]="Koji"
+    ["6005"]="phpMyAdmin"
+    ["6006"]="Grafana"
+    ["7070"]="Rotom Device Connection"
+    ["5090"]="Xilriws"
+)
+
+# Optional ports (commented services)
+declare -A OPTIONAL_PORTS=(
+    ["6007"]="Poracle"
+    ["9042"]="Fletchling"
+)
+
+# Function to check if a port is in use
+check_port_in_use() {
+    local port=$1
+    if command -v ss &> /dev/null; then
+        ss -tuln 2>/dev/null | grep -q ":${port} " && return 0
+    elif command -v netstat &> /dev/null; then
+        netstat -tuln 2>/dev/null | grep -q ":${port} " && return 0
+    elif command -v lsof &> /dev/null; then
+        lsof -i ":${port}" &> /dev/null && return 0
+    fi
+    return 1
+}
+
+# Function to get process using a port
+get_port_process() {
+    local port=$1
+    local result=""
+    
+    if command -v ss &> /dev/null; then
+        result=$(ss -tulnp 2>/dev/null | grep ":${port} " | awk '{print $NF}' | head -1)
+    elif command -v netstat &> /dev/null; then
+        result=$(netstat -tulnp 2>/dev/null | grep ":${port} " | awk '{print $NF}' | head -1)
+    elif command -v lsof &> /dev/null; then
+        result=$(lsof -i ":${port}" -t 2>/dev/null | head -1)
+        if [ -n "$result" ]; then
+            local pname=$(ps -p "$result" -o comm= 2>/dev/null)
+            result="pid=$result ($pname)"
+        fi
+    fi
+    
+    echo "$result"
+}
+
+# Function to get PID from process info
+extract_pid() {
+    local proc_info="$1"
+    # Extract PID from formats like "users:((\"docker-proxy\",pid=1234,fd=4))" or "pid=1234"
+    # Using sed for portability (grep -oP not available on all systems)
+    echo "$proc_info" | sed -n 's/.*pid=\([0-9]*\).*/\1/p' | head -1
+}
+
+# Function to check all ports and handle conflicts
+check_all_ports() {
+    local ports_in_use=()
+    local port_details=()
+    
+    print_info "Checking port availability for stack services..."
+    echo ""
+    
+    # Check required ports
+    for port in "${!STACK_PORTS[@]}"; do
+        if check_port_in_use "$port"; then
+            ports_in_use+=("$port")
+            local proc=$(get_port_process "$port")
+            port_details+=("$port:${STACK_PORTS[$port]}:$proc")
+        fi
+    done
+    
+    # If no ports are in use, we're good
+    if [ ${#ports_in_use[@]} -eq 0 ]; then
+        print_success "All required ports are available!"
+        echo ""
+        echo "  ┌─────────────────────────────────────────────────────────┐"
+        echo "  │              PORT AVAILABILITY CHECK                    │"
+        echo "  ├─────────────────────────────────────────────────────────┤"
+        for port in $(echo "${!STACK_PORTS[@]}" | tr ' ' '\n' | sort -n); do
+            printf "  │  Port %-5s %-30s ${GREEN}FREE${NC}   │\n" "$port" "${STACK_PORTS[$port]}"
+        done
+        echo "  └─────────────────────────────────────────────────────────┘"
+        echo ""
+        return 0
+    fi
+    
+    # Show port conflict report
+    print_warning "Port conflicts detected!"
+    echo ""
+    echo "  ┌─────────────────────────────────────────────────────────────────────┐"
+    echo "  │                    PORT AVAILABILITY CHECK                          │"
+    echo "  ├─────────────────────────────────────────────────────────────────────┤"
+    for port in $(echo "${!STACK_PORTS[@]}" | tr ' ' '\n' | sort -n); do
+        if [[ " ${ports_in_use[*]} " =~ " ${port} " ]]; then
+            local proc=$(get_port_process "$port")
+            printf "  │  Port %-5s %-25s ${RED}IN USE${NC}  %-15s │\n" "$port" "${STACK_PORTS[$port]}" "$proc"
+        else
+            printf "  │  Port %-5s %-25s ${GREEN}FREE${NC}                    │\n" "$port" "${STACK_PORTS[$port]}"
+        fi
+    done
+    echo "  └─────────────────────────────────────────────────────────────────────┘"
+    echo ""
+    
+    # Offer remediation options
+    echo "  The following ports are in use and need to be freed:"
+    echo ""
+    for detail in "${port_details[@]}"; do
+        IFS=':' read -r port service proc <<< "$detail"
+        echo "    • Port $port ($service)"
+        if [ -n "$proc" ]; then
+            echo "      Used by: $proc"
+        fi
+    done
+    echo ""
+    
+    echo "  Options:"
+    echo "    1) Attempt to stop processes using these ports"
+    echo "    2) Stop existing Docker containers that may be using these ports"
+    echo "    3) Show detailed process information"
+    echo "    4) Continue anyway (may cause startup failures)"
+    echo "    5) Exit and resolve manually"
+    echo ""
+    read -p "  Select option [1-5, default: 2]: " PORT_ACTION
+    PORT_ACTION=${PORT_ACTION:-2}
+    
+    case $PORT_ACTION in
+        1)
+            echo ""
+            print_info "Attempting to stop processes on conflicting ports..."
+            for port in "${ports_in_use[@]}"; do
+                local proc=$(get_port_process "$port")
+                local pid=$(extract_pid "$proc")
+                if [ -n "$pid" ]; then
+                    print_info "Stopping PID $pid (port $port)..."
+                    kill "$pid" 2>/dev/null || kill -9 "$pid" 2>/dev/null || true
+                    sleep 1
+                    if check_port_in_use "$port"; then
+                        print_warning "Could not free port $port - may need manual intervention"
+                    else
+                        print_success "Port $port freed!"
+                    fi
+                else
+                    print_warning "Could not identify process for port $port"
+                fi
+            done
+            ;;
+        2)
+            echo ""
+            print_info "Stopping Docker containers that may be using these ports..."
+            
+            # Stop containers by name (common Aegis containers)
+            local containers=("reactmap" "admin" "dragonite" "golbat" "rotom" "koji" "pma" "grafana" "xilriws" "database" "vmagent" "victoriametrics" "poracle" "fletchling")
+            for container in "${containers[@]}"; do
+                if docker ps -q -f "name=$container" 2>/dev/null | grep -q .; then
+                    print_info "Stopping container: $container"
+                    docker stop "$container" 2>/dev/null || true
+                fi
+            done
+            
+            # Also try docker compose down if compose file exists
+            if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
+                print_info "Running docker compose down..."
+                docker compose down 2>/dev/null || docker-compose down 2>/dev/null || true
+            fi
+            
+            sleep 2
+            
+            # Re-check ports
+            local still_in_use=()
+            for port in "${ports_in_use[@]}"; do
+                if check_port_in_use "$port"; then
+                    still_in_use+=("$port")
+                fi
+            done
+            
+            if [ ${#still_in_use[@]} -eq 0 ]; then
+                print_success "All ports are now free!"
+            else
+                print_warning "Some ports are still in use: ${still_in_use[*]}"
+                print_info "These may be used by non-Docker processes."
+                read -p "  Continue anyway? (y/n) [n]: " CONTINUE_ANYWAY
+                if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
+                    print_error "Please free the ports manually and re-run setup."
+                    exit 1
+                fi
+            fi
+            ;;
+        3)
+            echo ""
+            print_info "Detailed process information for ports in use:"
+            echo ""
+            for port in "${ports_in_use[@]}"; do
+                echo "  ═══ Port $port (${STACK_PORTS[$port]}) ═══"
+                if command -v ss &> /dev/null; then
+                    ss -tulnp 2>/dev/null | grep ":${port} " | head -3
+                elif command -v netstat &> /dev/null; then
+                    netstat -tulnp 2>/dev/null | grep ":${port} " | head -3
+                elif command -v lsof &> /dev/null; then
+                    lsof -i ":${port}" 2>/dev/null | head -5
+                fi
+                echo ""
+            done
+            read -p "  Press Enter to continue..."
+            # Recursively call to show options again
+            check_all_ports
+            return $?
+            ;;
+        4)
+            print_warning "Continuing with port conflicts. Services may fail to start!"
+            ;;
+        5)
+            print_info "Exiting. Please free the following ports and re-run setup:"
+            for port in "${ports_in_use[@]}"; do
+                echo "    • Port $port (${STACK_PORTS[$port]})"
+            done
+            echo ""
+            echo "  Commands that may help:"
+            echo "    • sudo lsof -i :PORT      - Show what's using a port"
+            echo "    • sudo kill -9 PID        - Force stop a process"
+            echo "    • docker compose down     - Stop all Docker containers"
+            echo "    • sudo systemctl stop SERVICE  - Stop a system service"
+            exit 1
+            ;;
+        *)
+            print_warning "Invalid option. Continuing anyway..."
+            ;;
+    esac
+    
+    echo ""
+    return 0
+}
+
 # Required Chrome version for compatibility with scanning tools
 REQUIRED_CHROME_VERSION="125.0.6422.141"
 CHROME_DEB_URL="https://github.com/NDViet/google-chrome-stable/releases/download/125.0.6422.141-1/google-chrome-stable_125.0.6422.141-1_amd64.deb"
@@ -374,6 +670,14 @@ fi
 echo ""
 
 # =============================================================================
+# Step 1b: Check Port Availability for Stack Services
+# =============================================================================
+echo "[1b/9] Checking port availability for stack services..."
+echo ""
+
+check_all_ports
+
+# =============================================================================
 # Step 2: Configure Docker Logging (Recommended)
 # =============================================================================
 echo "[2/9] Configuring Docker logging..."
@@ -581,6 +885,7 @@ EOF
     echo "$DAEMON_CONTENT" > "$DAEMON_JSON"
     
     if [ $? -eq 0 ]; then
+        # Note: daemon.json is a system file, ownership stays as root
         print_success "Docker daemon configuration written to $DAEMON_JSON"
         echo ""
         echo "  Configuration:"
@@ -1028,6 +1333,9 @@ if [ "$APPLY_DB_SETTINGS" = "y" ] || [ "$APPLY_DB_SETTINGS" = "Y" ]; then
         CONFIG_DATE=$(date '+%Y-%m-%d %H:%M:%S')
         sed -i "1a # Auto-configured on $CONFIG_DATE for: ${TOTAL_RAM_GB}GB RAM, ${CPU_CORES} CPU cores, $STORAGE_NAME storage" "$MARIADB_CNF"
         
+        # Track for ownership restoration
+        track_file "$MARIADB_CNF"
+        
         print_success "MariaDB settings optimized for your hardware!"
     else
         print_warning "mariadb.cnf not found at $MARIADB_CNF - skipping optimization"
@@ -1043,11 +1351,11 @@ echo ""
 # =============================================================================
 echo "[6/9] Copying default config files..."
 
-cp env-default .env
-cp reactmap/local-default.json reactmap/local.json
-cp unown/dragonite_config-default.toml unown/dragonite_config.toml
-cp unown/golbat_config-default.toml unown/golbat_config.toml
-cp unown/rotom_config-default.json unown/rotom_config.json
+cp env-default .env && track_file ".env"
+cp reactmap/local-default.json reactmap/local.json && track_file "reactmap/local.json"
+cp unown/dragonite_config-default.toml unown/dragonite_config.toml && track_file "unown/dragonite_config.toml"
+cp unown/golbat_config-default.toml unown/golbat_config.toml && track_file "unown/golbat_config.toml"
+cp unown/rotom_config-default.json unown/rotom_config.json && track_file "unown/rotom_config.json"
 
 print_success "Config files copied."
 echo ""
@@ -1141,10 +1449,11 @@ sed -i "s/SuperSecureDragoniteApiSecret/${DRAGONITE_API_SECRET}/g" .env
 # Poracle API secret (used by ReactMap to communicate with Poracle)
 sed -i "s/SuperSecurePoracleApiSecret/${PORACLE_API_SECRET}/g" reactmap/local.json
 
+# Track Poracle config file
+track_file "Poracle/config/local.json"
+
 # Restore file ownership to the original user (not root)
-chown "$REAL_USER:$REAL_GROUP" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
-chown "$REAL_USER:$REAL_GROUP" Poracle/config/local.json 2>/dev/null || true
-chown "$REAL_USER:$REAL_GROUP" mysql_data/mariadb.cnf 2>/dev/null || true
+restore_all_ownership
 
 print_success "Secrets applied to all config files."
 echo ""
@@ -1237,6 +1546,12 @@ else
   echo "[9/9] Skipped database creation (using Docker's MariaDB)."
   print_info "Docker's MariaDB will create databases on first run."
 fi
+
+# =============================================================================
+# Final Ownership Restoration
+# =============================================================================
+# Ensure all files touched by this script are owned by the real user, not root
+restore_all_ownership
 
 # =============================================================================
 # Summary

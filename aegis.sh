@@ -162,12 +162,38 @@ check_git_updates() {
 # Count running containers
 count_containers() {
     if command -v docker &> /dev/null && docker info &> /dev/null; then
-        local running=$(docker ps --filter "name=database\|golbat\|dragonite\|rotom\|reactmap\|koji\|admin\|grafana\|pma\|xilriws\|poracle\|fletchling" --format "{{.Names}}" 2>/dev/null | wc -l)
-        local total=$(docker ps -a --filter "name=database\|golbat\|dragonite\|rotom\|reactmap\|koji\|admin\|grafana\|pma\|xilriws\|poracle\|fletchling" --format "{{.Names}}" 2>/dev/null | wc -l)
+        local running=$(docker ps --filter "name=database\|golbat\|dragonite\|rotom\|reactmap\|koji\|admin\|grafana\|pma\|xilriws\|poracle\|fletchling\|victoriametrics\|vmagent" --format "{{.Names}}" 2>/dev/null | wc -l)
+        local total=$(docker ps -a --filter "name=database\|golbat\|dragonite\|rotom\|reactmap\|koji\|admin\|grafana\|pma\|xilriws\|poracle\|fletchling\|victoriametrics\|vmagent" --format "{{.Names}}" 2>/dev/null | wc -l)
         echo "${running}/${total}"
     else
         echo "N/A"
     fi
+}
+
+# Get quick container summary for main dashboard
+get_container_summary() {
+    if ! command -v docker &> /dev/null || ! docker info &> /dev/null; then
+        echo "docker_unavailable"
+        return
+    fi
+    
+    local containers=("database" "reactmap" "dragonite" "admin" "golbat" "rotom" "koji" "pma" "grafana" "victoriametrics" "vmagent" "xilriws")
+    local running=0
+    local stopped=0
+    local missing=0
+    
+    for container in "${containers[@]}"; do
+        local status=$(docker ps -a --filter "name=^${container}$" --format "{{.Status}}" 2>/dev/null)
+        if [ -z "$status" ]; then
+            ((missing++))
+        elif [[ "$status" == *"Up"* ]]; then
+            ((running++))
+        else
+            ((stopped++))
+        fi
+    done
+    
+    echo "${running}:${stopped}:${missing}"
 }
 
 # Check if .env exists and is configured
@@ -261,17 +287,30 @@ show_status_dashboard() {
             ;;
     esac
 
-    # Containers
-    local containers=$(count_containers)
-    if [ "$containers" != "N/A" ]; then
-        local running=$(echo $containers | cut -d/ -f1)
-        local total=$(echo $containers | cut -d/ -f2)
-        if [ "$running" -eq "$total" ] && [ "$total" -gt 0 ]; then
-            print_status "Containers:" "$containers running" "$GREEN"
+    # Containers - Enhanced display
+    local container_summary=$(get_container_summary)
+    if [ "$container_summary" != "docker_unavailable" ]; then
+        local running=$(echo $container_summary | cut -d: -f1)
+        local stopped=$(echo $container_summary | cut -d: -f2)
+        local missing=$(echo $container_summary | cut -d: -f3)
+        local installed=$((running + stopped))
+        local total=$((installed + missing))
+        
+        if [ "$running" -eq "$installed" ] && [ "$installed" -gt 0 ]; then
+            print_status "Containers:" "${running}/${installed} running" "$GREEN"
         elif [ "$running" -gt 0 ]; then
-            print_status "Containers:" "$containers running" "$YELLOW"
+            print_status "Containers:" "${running}/${installed} running" "$YELLOW"
+            if [ "$stopped" -gt 0 ]; then
+                print_status "  Stopped:" "$stopped container(s)" "$RED"
+            fi
+        elif [ "$installed" -gt 0 ]; then
+            print_status "Containers:" "0/${installed} running" "$RED"
         else
-            print_status "Containers:" "None running" "$RED"
+            print_status "Containers:" "Not deployed" "$DIM"
+        fi
+        
+        if [ "$missing" -gt 0 ] && [ "$installed" -gt 0 ]; then
+            print_status "  Not deployed:" "$missing service(s)" "$DIM"
         fi
     fi
 
@@ -390,11 +429,22 @@ show_main_menu() {
     echo "    s) Start Stack            - Start all containers"
     echo "    x) Stop Stack             - Stop all containers"
     echo "    t) Restart Stack          - Restart all containers"
-    echo "    c) Container Status       - View container status"
+    echo "    c) Container Status       - View docker compose status"
+    echo "    v) Container Dashboard    - Detailed status + image check"
     echo ""
-    echo -e "  ${CYAN}Updates${NC}"
+    echo -e "  ${CYAN}Service Management${NC}"
+    echo "    +) Start Service(s)       - Start individual services"
+    echo "    -) Stop Service(s)        - Stop individual services"
+    echo "    *) Restart Service(s)     - Restart individual services"
+    echo ""
+    echo -e "  ${CYAN}Updates & Images${NC}"
+    echo "    i) Pull Images Only       - Pull latest images (no restart)"
     echo "    p) Pull Latest            - Git pull latest changes"
     echo "    u) Update & Rebuild       - Pull, rebuild, and restart stack"
+    echo ""
+    echo -e "  ${CYAN}Maintenance & Cleanup${NC}"
+    echo "    d) Docker Purge           - Clean up Docker resources"
+    echo "    z) Uninstall Stack        - Remove Aegis stack"
     echo ""
     echo -e "  ${CYAN}Other${NC}"
     echo "    h) Help & Documentation"
@@ -498,14 +548,38 @@ show_help() {
     echo "  s) Start Stack    - docker compose up -d"
     echo "  x) Stop Stack     - docker compose down"
     echo "  t) Restart Stack  - docker compose restart"
-    echo "  c) Status         - docker compose ps"
+    echo "  c) Status         - docker compose ps -a"
+    echo "  v) Dashboard      - Detailed container status + image info"
     echo ""
 
-    echo -e "${WHITE}${BOLD}Updates${NC}"
+    echo -e "${WHITE}${BOLD}Service Management${NC}"
     echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
+    echo "  +) Start Service(s)   - Interactive menu to start individual services"
+    echo "  -) Stop Service(s)    - Interactive menu to stop individual services"
+    echo "  *) Restart Service(s) - Interactive menu to restart individual services"
+    echo ""
+    echo "  Select multiple services using comma-separated numbers (e.g., 1,3,5)"
+    echo ""
+
+    echo -e "${WHITE}${BOLD}Updates & Images${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  i) Pull Images      - Pull latest Docker images without restarting"
+    echo "                        (Use to download updates before applying them)"
     echo "  p) Pull Latest      - Git pull latest changes only"
     echo "  u) Update & Rebuild - Pull changes, rebuild containers, restart stack"
+    echo ""
+
+    echo -e "${WHITE}${BOLD}Maintenance & Cleanup${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  d) Docker Purge     - Clean up Docker resources (containers, images,"
+    echo "                        volumes, networks). Multiple cleanup options."
+    echo "  z) Uninstall Stack  - Remove Aegis stack from system"
+    echo "                        • Light: Keep configs, remove containers"
+    echo "                        • Full: Reset configs, remove data"
+    echo "                        • Complete: Delete entire directory"
     echo ""
 
     echo -e "${WHITE}${BOLD}Quick Tips${NC}"
@@ -732,6 +806,312 @@ check_updates() {
 # DOCKER CONTROLS
 # =============================================================================
 
+# List of all Aegis stack services with their image names
+# Format: "container_name:description:image_name"
+AEGIS_SERVICES_FULL=(
+    "database:MariaDB Database:mariadb:latest"
+    "reactmap:ReactMap Web UI:ghcr.io/watwowmap/reactmap:main"
+    "dragonite:Dragonite Scanner:ghcr.io/unownhash/dragonite-public:latest"
+    "admin:Dragonite Admin UI:ghcr.io/unownhash/dragonite-public-admin:latest"
+    "golbat:Golbat Data Parser:ghcr.io/unownhash/golbat:main"
+    "rotom:Rotom Device Manager:ghcr.io/unownhash/rotom:main"
+    "koji:Koji Geofence Manager:ghcr.io/turtiesocks/koji:main"
+    "pma:phpMyAdmin:phpmyadmin:latest"
+    "grafana:Grafana Statistics:grafana/grafana:latest"
+    "victoriametrics:VictoriaMetrics DB:victoriametrics/victoria-metrics:latest"
+    "vmagent:VictoriaMetrics Agent:victoriametrics/vmagent:latest"
+    "xilriws:Xilriws Anti-Bot:ghcr.io/unownhash/xilriws:main"
+    "poracle:Poracle Notifications:ghcr.io/kartuludus/poraclejs:develop"
+    "fletchling:Fletchling Nests:ghcr.io/unownhash/fletchling:latest"
+)
+
+# List of all Aegis stack services
+AEGIS_SERVICES=(
+    "database:MariaDB Database"
+    "reactmap:ReactMap Web UI"
+    "dragonite:Dragonite Scanner"
+    "admin:Dragonite Admin UI"
+    "golbat:Golbat Data Parser"
+    "rotom:Rotom Device Manager"
+    "koji:Koji Geofence Manager"
+    "pma:phpMyAdmin"
+    "grafana:Grafana Statistics"
+    "victoriametrics:VictoriaMetrics DB"
+    "vmagent:VictoriaMetrics Agent"
+    "xilriws:Xilriws Anti-Bot"
+    "poracle:Poracle Notifications"
+    "fletchling:Fletchling Nests"
+)
+
+# =============================================================================
+# IMAGE UPDATE CHECKING
+# =============================================================================
+
+# Check if a local image is up to date with remote
+# Returns: "up_to_date", "update_available", "not_pulled", or "unknown"
+check_image_update() {
+    local image=$1
+    
+    # Check if image exists locally
+    local local_digest=$(docker images --digests --format "{{.Digest}}" "$image" 2>/dev/null | head -1)
+    
+    if [ -z "$local_digest" ] || [ "$local_digest" = "<none>" ]; then
+        echo "not_pulled"
+        return
+    fi
+    
+    # Try to get remote digest (this requires network access)
+    # Use docker manifest inspect for accurate comparison
+    local remote_digest=$(docker manifest inspect "$image" 2>/dev/null | grep -m1 '"digest"' | cut -d'"' -f4)
+    
+    if [ -z "$remote_digest" ]; then
+        echo "unknown"
+        return
+    fi
+    
+    if [ "$local_digest" = "$remote_digest" ]; then
+        echo "up_to_date"
+    else
+        echo "update_available"
+    fi
+}
+
+# Get detailed container info
+get_container_info() {
+    local container=$1
+    local info=$(docker ps -a --filter "name=^${container}$" --format "{{.Status}}|{{.Image}}|{{.CreatedAt}}" 2>/dev/null)
+    echo "$info"
+}
+
+# Show detailed container status dashboard
+show_container_dashboard() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    CONTAINER STATUS DASHBOARD"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Checking container and image status...${NC}"
+    echo ""
+    
+    # Header
+    printf "  ${WHITE}%-18s %-10s %-12s %-15s${NC}\n" "SERVICE" "STATUS" "INSTALLED" "IMAGE STATUS"
+    echo -e "  ${DIM}──────────────────────────────────────────────────────────────────${NC}"
+    
+    local updates_available=0
+    local not_running=0
+    local not_installed=0
+    
+    for service_entry in "${AEGIS_SERVICES_FULL[@]}"; do
+        local container_name=$(echo "$service_entry" | cut -d: -f1)
+        local service_desc=$(echo "$service_entry" | cut -d: -f2)
+        local image_name=$(echo "$service_entry" | cut -d: -f3-)
+        
+        # Get container status
+        local container_info=$(docker ps -a --filter "name=^${container_name}$" --format "{{.Status}}" 2>/dev/null)
+        local container_exists=$(docker ps -a --filter "name=^${container_name}$" --format "{{.Names}}" 2>/dev/null)
+        
+        # Determine running status
+        local status_icon status_text
+        if [ -z "$container_exists" ]; then
+            status_icon="${DIM}○${NC}"
+            status_text="${DIM}--${NC}"
+            installed_text="${DIM}No${NC}"
+            ((not_installed++))
+        elif [[ "$container_info" == *"Up"* ]]; then
+            status_icon="${GREEN}●${NC}"
+            status_text="${GREEN}Running${NC}"
+            installed_text="${GREEN}Yes${NC}"
+        else
+            status_icon="${RED}●${NC}"
+            status_text="${RED}Stopped${NC}"
+            installed_text="${YELLOW}Yes${NC}"
+            ((not_running++))
+        fi
+        
+        # Check image status (only if container exists or we want to show all)
+        local image_status_text
+        if [ -n "$container_exists" ]; then
+            # Quick check - just see if image exists locally
+            local local_image=$(docker images -q "$image_name" 2>/dev/null)
+            if [ -z "$local_image" ]; then
+                image_status_text="${DIM}Not pulled${NC}"
+            else
+                # For speed, just show "Pulled" - full update check is slow
+                image_status_text="${CYAN}Pulled${NC}"
+            fi
+        else
+            image_status_text="${DIM}--${NC}"
+        fi
+        
+        printf "  ${status_icon} %-16s %-18b %-20b %-15b\n" "$service_desc" "$status_text" "$installed_text" "$image_status_text"
+    done
+    
+    echo ""
+    echo -e "  ${DIM}──────────────────────────────────────────────────────────────────${NC}"
+    
+    # Summary
+    local total=${#AEGIS_SERVICES_FULL[@]}
+    local installed=$((total - not_installed))
+    local running=$((installed - not_running))
+    
+    echo ""
+    printf "  ${WHITE}Summary:${NC} %d/%d installed, %d/%d running\n" "$installed" "$total" "$running" "$installed"
+    echo ""
+    
+    echo -e "  ${CYAN}Options:${NC}"
+    echo "    i) Check for image updates (slow - queries registries)"
+    echo "    p) Pull all latest images"
+    echo "    0) Back to main menu"
+    echo ""
+    
+    read -p "  Select option: " choice
+    
+    case $choice in
+        i|I)
+            check_all_image_updates
+            ;;
+        p|P)
+            docker_pull_images
+            ;;
+        0|"")
+            return
+            ;;
+        *)
+            show_container_dashboard
+            ;;
+    esac
+}
+
+# Check all images for updates (slow operation)
+check_all_image_updates() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    CHECKING IMAGE UPDATES"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${YELLOW}Checking registries for updates... This may take a minute.${NC}"
+    echo ""
+    
+    printf "  ${WHITE}%-25s %-20s %-20s${NC}\n" "IMAGE" "LOCAL" "STATUS"
+    echo -e "  ${DIM}──────────────────────────────────────────────────────────────────────${NC}"
+    
+    local updates_count=0
+    
+    for service_entry in "${AEGIS_SERVICES_FULL[@]}"; do
+        local container_name=$(echo "$service_entry" | cut -d: -f1)
+        local service_desc=$(echo "$service_entry" | cut -d: -f2)
+        local image_name=$(echo "$service_entry" | cut -d: -f3-)
+        
+        # Show we're checking
+        printf "  Checking %-40s\r" "$service_desc..."
+        
+        # Get local image info
+        local local_created=$(docker images --format "{{.CreatedSince}}" "$image_name" 2>/dev/null | head -1)
+        
+        if [ -z "$local_created" ]; then
+            printf "  %-25s %-20s ${DIM}%-20s${NC}\n" "$service_desc" "Not pulled" "--"
+            continue
+        fi
+        
+        # Check for updates
+        local update_status=$(check_image_update "$image_name")
+        
+        case $update_status in
+            "up_to_date")
+                printf "  %-25s %-20s ${GREEN}%-20s${NC}\n" "$service_desc" "$local_created" "Up to date"
+                ;;
+            "update_available")
+                printf "  %-25s %-20s ${YELLOW}%-20s${NC}\n" "$service_desc" "$local_created" "Update available"
+                ((updates_count++))
+                ;;
+            "not_pulled")
+                printf "  %-25s %-20s ${DIM}%-20s${NC}\n" "$service_desc" "Not pulled" "--"
+                ;;
+            *)
+                printf "  %-25s %-20s ${DIM}%-20s${NC}\n" "$service_desc" "$local_created" "Unknown"
+                ;;
+        esac
+    done
+    
+    echo ""
+    echo -e "  ${DIM}──────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    if [ $updates_count -gt 0 ]; then
+        echo -e "  ${YELLOW}$updates_count update(s) available${NC}"
+        echo ""
+        read -p "  Pull updates now? (y/n) [n]: " pull_now
+        if [ "$pull_now" = "y" ] || [ "$pull_now" = "Y" ]; then
+            docker_pull_images
+            return
+        fi
+    else
+        echo -e "  ${GREEN}All images are up to date!${NC}"
+    fi
+    
+    press_enter
+}
+
+# Pull all images without starting containers
+docker_pull_images() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    PULL LATEST IMAGES"
+    draw_box_bottom
+    echo ""
+    
+    if [ ! -f "docker-compose.yaml" ] && [ ! -f "docker-compose.yml" ]; then
+        echo -e "${RED}docker-compose.yaml not found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${CYAN}Pulling latest images from registries...${NC}"
+    echo -e "${DIM}This will NOT start or restart any containers.${NC}"
+    echo ""
+    
+    docker compose pull
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}✓ All images pulled successfully${NC}"
+        echo ""
+        echo -e "${CYAN}Options:${NC}"
+        echo "  1) Start/restart stack with new images"
+        echo "  2) Return to menu (containers unchanged)"
+        echo ""
+        read -p "  Select option [1-2]: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                echo "Recreating containers with new images..."
+                docker compose up -d --force-recreate
+                echo ""
+                echo -e "${GREEN}✓ Stack restarted with new images${NC}"
+                ;;
+            *)
+                echo ""
+                echo -e "${CYAN}Images pulled but containers not restarted.${NC}"
+                echo "Run 'docker compose up -d --force-recreate' to apply updates."
+                ;;
+        esac
+    else
+        echo ""
+        echo -e "${RED}Some images failed to pull. Check your network connection.${NC}"
+    fi
+    
+    press_enter
+}
+
 docker_start() {
     clear
     echo ""
@@ -790,12 +1170,587 @@ docker_status() {
     echo ""
     
     if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose ps
+        docker compose ps -a
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
     fi
     
     press_enter
+}
+
+# =============================================================================
+# INDIVIDUAL SERVICE MANAGEMENT
+# =============================================================================
+
+# Get service status (running/stopped/not_found)
+get_service_status() {
+    local service=$1
+    local status=$(docker ps -a --filter "name=^${service}$" --format "{{.Status}}" 2>/dev/null)
+    
+    if [ -z "$status" ]; then
+        echo "not_found"
+    elif [[ "$status" == *"Up"* ]]; then
+        echo "running"
+    else
+        echo "stopped"
+    fi
+}
+
+# Show service management menu
+show_service_menu() {
+    local action=$1  # "start" or "stop"
+    local action_past=$2  # "started" or "stopped"
+    local action_verb=$3  # "Start" or "Stop"
+    
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    ${action_verb^^} INDIVIDUAL SERVICES"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Available Services${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local i=1
+    local available_services=()
+    
+    for service_entry in "${AEGIS_SERVICES[@]}"; do
+        local service_name=$(echo "$service_entry" | cut -d: -f1)
+        local service_desc=$(echo "$service_entry" | cut -d: -f2)
+        local status=$(get_service_status "$service_name")
+        
+        case $status in
+            "running")
+                printf "  ${GREEN}●${NC} %2d) %-20s ${GREEN}Running${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:running")
+                ;;
+            "stopped")
+                printf "  ${RED}●${NC} %2d) %-20s ${RED}Stopped${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:stopped")
+                ;;
+            *)
+                printf "  ${DIM}○${NC} %2d) %-20s ${DIM}Not deployed${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:not_found")
+                ;;
+        esac
+        ((i++))
+    done
+    
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo "   a) ${action_verb} ALL services"
+    echo "   0) Back to main menu"
+    echo ""
+    
+    read -p "  Select service(s) to ${action} (comma-separated, e.g., 1,3,5): " selection
+    
+    if [ "$selection" = "0" ]; then
+        return
+    fi
+    
+    if [ "$selection" = "a" ] || [ "$selection" = "A" ]; then
+        echo ""
+        if [ "$action" = "start" ]; then
+            docker compose up -d
+        else
+            docker compose down
+        fi
+        echo ""
+        echo -e "${GREEN}✓ All services ${action_past}${NC}"
+        press_enter
+        return
+    fi
+    
+    # Parse comma-separated selections
+    IFS=',' read -ra selections <<< "$selection"
+    
+    echo ""
+    for sel in "${selections[@]}"; do
+        # Trim whitespace
+        sel=$(echo "$sel" | tr -d ' ')
+        
+        # Validate selection
+        if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt ${#available_services[@]} ]; then
+            echo -e "${RED}Invalid selection: $sel${NC}"
+            continue
+        fi
+        
+        local idx=$((sel - 1))
+        local entry="${available_services[$idx]}"
+        local service_name=$(echo "$entry" | cut -d: -f1)
+        local service_desc=$(echo "$entry" | cut -d: -f2)
+        local service_status=$(echo "$entry" | cut -d: -f3)
+        
+        if [ "$service_status" = "not_found" ]; then
+            echo -e "${YELLOW}Skipping $service_desc - not deployed${NC}"
+            continue
+        fi
+        
+        if [ "$action" = "start" ]; then
+            if [ "$service_status" = "running" ]; then
+                echo -e "${DIM}$service_desc is already running${NC}"
+            else
+                echo -e "Starting ${CYAN}$service_desc${NC}..."
+                docker compose up -d "$service_name" 2>/dev/null || docker start "$service_name" 2>/dev/null
+                echo -e "${GREEN}✓ $service_desc started${NC}"
+            fi
+        else
+            if [ "$service_status" = "stopped" ]; then
+                echo -e "${DIM}$service_desc is already stopped${NC}"
+            else
+                echo -e "Stopping ${CYAN}$service_desc${NC}..."
+                docker compose stop "$service_name" 2>/dev/null || docker stop "$service_name" 2>/dev/null
+                echo -e "${GREEN}✓ $service_desc stopped${NC}"
+            fi
+        fi
+    done
+    
+    press_enter
+}
+
+# Wrapper functions for service management
+service_start_menu() {
+    show_service_menu "start" "started" "Start"
+}
+
+service_stop_menu() {
+    show_service_menu "stop" "stopped" "Stop"
+}
+
+# Restart individual service menu
+service_restart_menu() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    RESTART INDIVIDUAL SERVICES"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Available Services${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local i=1
+    local available_services=()
+    
+    for service_entry in "${AEGIS_SERVICES[@]}"; do
+        local service_name=$(echo "$service_entry" | cut -d: -f1)
+        local service_desc=$(echo "$service_entry" | cut -d: -f2)
+        local status=$(get_service_status "$service_name")
+        
+        case $status in
+            "running")
+                printf "  ${GREEN}●${NC} %2d) %-20s ${GREEN}Running${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:running")
+                ;;
+            "stopped")
+                printf "  ${RED}●${NC} %2d) %-20s ${RED}Stopped${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:stopped")
+                ;;
+            *)
+                printf "  ${DIM}○${NC} %2d) %-20s ${DIM}Not deployed${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc:not_found")
+                ;;
+        esac
+        ((i++))
+    done
+    
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo "   a) Restart ALL services"
+    echo "   0) Back to main menu"
+    echo ""
+    
+    read -p "  Select service(s) to restart (comma-separated, e.g., 1,3,5): " selection
+    
+    if [ "$selection" = "0" ]; then
+        return
+    fi
+    
+    if [ "$selection" = "a" ] || [ "$selection" = "A" ]; then
+        echo ""
+        docker compose restart
+        echo ""
+        echo -e "${GREEN}✓ All services restarted${NC}"
+        press_enter
+        return
+    fi
+    
+    # Parse comma-separated selections
+    IFS=',' read -ra selections <<< "$selection"
+    
+    echo ""
+    for sel in "${selections[@]}"; do
+        sel=$(echo "$sel" | tr -d ' ')
+        
+        if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt ${#available_services[@]} ]; then
+            echo -e "${RED}Invalid selection: $sel${NC}"
+            continue
+        fi
+        
+        local idx=$((sel - 1))
+        local entry="${available_services[$idx]}"
+        local service_name=$(echo "$entry" | cut -d: -f1)
+        local service_desc=$(echo "$entry" | cut -d: -f2)
+        local service_status=$(echo "$entry" | cut -d: -f3)
+        
+        if [ "$service_status" = "not_found" ]; then
+            echo -e "${YELLOW}Skipping $service_desc - not deployed${NC}"
+            continue
+        fi
+        
+        echo -e "Restarting ${CYAN}$service_desc${NC}..."
+        docker compose restart "$service_name" 2>/dev/null || docker restart "$service_name" 2>/dev/null
+        echo -e "${GREEN}✓ $service_desc restarted${NC}"
+    done
+    
+    press_enter
+}
+
+# =============================================================================
+# DOCKER PURGE FUNCTIONS
+# =============================================================================
+
+docker_purge_menu() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                      DOCKER PURGE"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${RED}${BOLD}⚠ WARNING: These actions are destructive and cannot be undone!${NC}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Purge Options${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  1) Stop & Remove Aegis containers only"
+    echo "  2) Remove Aegis containers + volumes (keeps images)"
+    echo "  3) Remove unused Docker images (docker image prune)"
+    echo "  4) Remove all unused Docker data (prune system)"
+    echo "  5) Remove Docker networks"
+    echo "  6) Nuclear option - Remove ALL Docker data (containers, images, volumes, networks)"
+    echo ""
+    echo "  0) Back to main menu"
+    echo ""
+    
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${YELLOW}This will stop and remove all Aegis containers.${NC}"
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                echo ""
+                echo "Stopping and removing Aegis containers..."
+                docker compose down 2>/dev/null
+                echo ""
+                echo -e "${GREEN}✓ Aegis containers removed${NC}"
+            fi
+            press_enter
+            ;;
+        2)
+            echo ""
+            echo -e "${YELLOW}This will remove all Aegis containers AND their volumes.${NC}"
+            echo -e "${RED}Database data will be lost!${NC}"
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                read -p "Are you REALLY sure? Type 'DELETE' to confirm: " confirm2
+                if [ "$confirm2" = "DELETE" ]; then
+                    echo ""
+                    echo "Removing Aegis containers and volumes..."
+                    docker compose down -v 2>/dev/null
+                    echo ""
+                    echo -e "${GREEN}✓ Aegis containers and volumes removed${NC}"
+                else
+                    echo -e "${YELLOW}Aborted${NC}"
+                fi
+            fi
+            press_enter
+            ;;
+        3)
+            echo ""
+            echo "Removing unused Docker images..."
+            docker image prune -f
+            echo ""
+            echo -e "${GREEN}✓ Unused images removed${NC}"
+            press_enter
+            ;;
+        4)
+            echo ""
+            echo -e "${YELLOW}This will remove:${NC}"
+            echo "  - All stopped containers"
+            echo "  - All unused networks"
+            echo "  - All dangling images"
+            echo "  - All dangling build cache"
+            echo ""
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                echo ""
+                docker system prune -f
+                echo ""
+                echo -e "${GREEN}✓ Docker system pruned${NC}"
+            fi
+            press_enter
+            ;;
+        5)
+            echo ""
+            echo "Current Docker networks:"
+            docker network ls
+            echo ""
+            echo -e "${YELLOW}This will remove all unused networks.${NC}"
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                echo ""
+                docker network prune -f
+                echo ""
+                echo -e "${GREEN}✓ Unused networks removed${NC}"
+            fi
+            press_enter
+            ;;
+        6)
+            echo ""
+            echo -e "${RED}${BOLD}╔═══════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}${BOLD}║                    ⚠ NUCLEAR OPTION ⚠                             ║${NC}"
+            echo -e "${RED}${BOLD}╠═══════════════════════════════════════════════════════════════════╣${NC}"
+            echo -e "${RED}${BOLD}║  This will PERMANENTLY DELETE:                                    ║${NC}"
+            echo -e "${RED}${BOLD}║    - ALL Docker containers (running and stopped)                  ║${NC}"
+            echo -e "${RED}${BOLD}║    - ALL Docker images                                            ║${NC}"
+            echo -e "${RED}${BOLD}║    - ALL Docker volumes (including database data!)                ║${NC}"
+            echo -e "${RED}${BOLD}║    - ALL Docker networks                                          ║${NC}"
+            echo -e "${RED}${BOLD}║    - ALL Docker build cache                                       ║${NC}"
+            echo -e "${RED}${BOLD}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                read -p "Type 'NUKE DOCKER' to confirm complete purge: " confirm2
+                if [ "$confirm2" = "NUKE DOCKER" ]; then
+                    echo ""
+                    echo "Stopping all containers..."
+                    docker stop $(docker ps -aq) 2>/dev/null
+                    
+                    echo "Removing all containers..."
+                    docker rm $(docker ps -aq) 2>/dev/null
+                    
+                    echo "Removing all images..."
+                    docker rmi $(docker images -aq) -f 2>/dev/null
+                    
+                    echo "Removing all volumes..."
+                    docker volume rm $(docker volume ls -q) 2>/dev/null
+                    
+                    echo "Removing all networks..."
+                    docker network prune -f 2>/dev/null
+                    
+                    echo "Final cleanup..."
+                    docker system prune -a -f --volumes 2>/dev/null
+                    
+                    echo ""
+                    echo -e "${GREEN}✓ All Docker data has been removed${NC}"
+                    echo -e "${YELLOW}You will need to rebuild everything from scratch.${NC}"
+                else
+                    echo -e "${YELLOW}Aborted${NC}"
+                fi
+            fi
+            press_enter
+            ;;
+        0|"")
+            return
+            ;;
+        *)
+            echo -e "${RED}Invalid option${NC}"
+            sleep 1
+            docker_purge_menu
+            ;;
+    esac
+}
+
+# =============================================================================
+# UNINSTALL STACK
+# =============================================================================
+
+uninstall_stack() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                      UNINSTALL AEGIS STACK"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${RED}${BOLD}⚠ WARNING: This will remove the Aegis stack from your system!${NC}"
+    echo ""
+    echo -e "${WHITE}${BOLD}Uninstall Options${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  1) Light uninstall - Stop containers, remove Docker resources"
+    echo "     (Keeps config files, can restart later)"
+    echo ""
+    echo "  2) Full uninstall - Remove containers + reset config files"
+    echo "     (Keeps directory, removes generated configs)"
+    echo ""
+    echo "  3) Complete removal - Delete entire Aegis directory"
+    echo "     (Removes everything including this script)"
+    echo ""
+    echo "  0) Cancel and go back"
+    echo ""
+    
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${YELLOW}Light Uninstall will:${NC}"
+            echo "  - Stop all Aegis containers"
+            echo "  - Remove containers and their volumes"
+            echo "  - Keep all configuration files"
+            echo ""
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                echo ""
+                echo "Stopping and removing Aegis containers..."
+                docker compose down -v 2>/dev/null
+                
+                echo "Removing Aegis-related images..."
+                docker images --filter "reference=*golbat*" --filter "reference=*dragonite*" \
+                    --filter "reference=*reactmap*" --filter "reference=*rotom*" \
+                    --filter "reference=*koji*" --filter "reference=*xilriws*" \
+                    --filter "reference=*poracle*" --filter "reference=*fletchling*" \
+                    -q 2>/dev/null | xargs -r docker rmi -f 2>/dev/null
+                
+                echo ""
+                echo -e "${GREEN}✓ Light uninstall complete${NC}"
+                echo -e "${CYAN}Config files preserved. Run 'docker compose up -d' to restart.${NC}"
+            fi
+            press_enter
+            ;;
+        2)
+            echo ""
+            echo -e "${YELLOW}Full Uninstall will:${NC}"
+            echo "  - Stop and remove all Aegis containers"
+            echo "  - Remove generated configuration files (.env, local.json, etc.)"
+            echo "  - Remove log files"
+            echo "  - Keep template/default files for fresh setup"
+            echo ""
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                read -p "Type 'UNINSTALL' to confirm: " confirm2
+                if [ "$confirm2" = "UNINSTALL" ]; then
+                    echo ""
+                    echo "Stopping and removing containers..."
+                    docker compose down -v 2>/dev/null
+                    
+                    echo "Removing generated config files..."
+                    rm -f .env 2>/dev/null
+                    rm -f reactmap/local.json 2>/dev/null
+                    rm -f unown/dragonite_config.toml 2>/dev/null
+                    rm -f unown/golbat_config.toml 2>/dev/null
+                    rm -f unown/rotom_config.json 2>/dev/null
+                    
+                    echo "Removing log files..."
+                    rm -rf unown/logs/* 2>/dev/null
+                    rm -rf fletchling/*.log 2>/dev/null
+                    
+                    echo "Removing cache files..."
+                    rm -rf unown/golbat_cache/* 2>/dev/null
+                    
+                    echo "Removing database files..."
+                    rm -rf mysql_data/*.err mysql_data/*.pid 2>/dev/null
+                    # Keep mysql_data structure but remove data files
+                    find mysql_data -type f ! -name "mariadb.cnf" -delete 2>/dev/null
+                    find mysql_data -type d -empty -delete 2>/dev/null
+                    
+                    echo "Removing metrics data..."
+                    rm -rf victoriametrics/data/* 2>/dev/null
+                    rm -rf vmagent/data/* 2>/dev/null
+                    
+                    echo "Removing Grafana data..."
+                    rm -rf grafana/*.db grafana/plugins grafana/png 2>/dev/null
+                    
+                    echo "Removing Aegis-related Docker images..."
+                    docker images --filter "reference=*golbat*" --filter "reference=*dragonite*" \
+                        --filter "reference=*reactmap*" --filter "reference=*rotom*" \
+                        --filter "reference=*koji*" --filter "reference=*xilriws*" \
+                        --filter "reference=*poracle*" --filter "reference=*fletchling*" \
+                        -q 2>/dev/null | xargs -r docker rmi -f 2>/dev/null
+                    
+                    echo ""
+                    echo -e "${GREEN}✓ Full uninstall complete${NC}"
+                    echo -e "${CYAN}Run setup.sh to reconfigure from scratch.${NC}"
+                else
+                    echo -e "${YELLOW}Aborted${NC}"
+                fi
+            fi
+            press_enter
+            ;;
+        3)
+            echo ""
+            echo -e "${RED}${BOLD}╔═══════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${RED}${BOLD}║                  ⚠ COMPLETE REMOVAL ⚠                             ║${NC}"
+            echo -e "${RED}${BOLD}╠═══════════════════════════════════════════════════════════════════╣${NC}"
+            echo -e "${RED}${BOLD}║  This will PERMANENTLY DELETE:                                    ║${NC}"
+            echo -e "${RED}${BOLD}║    - All Aegis containers and volumes                             ║${NC}"
+            echo -e "${RED}${BOLD}║    - All configuration files                                      ║${NC}"
+            echo -e "${RED}${BOLD}║    - All data (database, logs, cache)                             ║${NC}"
+            echo -e "${RED}${BOLD}║    - The ENTIRE Aegis-All-In-One directory                        ║${NC}"
+            echo -e "${RED}${BOLD}║    - THIS SCRIPT ITSELF                                           ║${NC}"
+            echo -e "${RED}${BOLD}╚═══════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            read -p "Continue? (y/n) [n]: " confirm
+            if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                read -p "Type 'DELETE AEGIS' to confirm complete removal: " confirm2
+                if [ "$confirm2" = "DELETE AEGIS" ]; then
+                    echo ""
+                    echo "Stopping and removing all containers..."
+                    docker compose down -v 2>/dev/null
+                    
+                    echo "Removing Aegis-related Docker images..."
+                    docker images --filter "reference=*golbat*" --filter "reference=*dragonite*" \
+                        --filter "reference=*reactmap*" --filter "reference=*rotom*" \
+                        --filter "reference=*koji*" --filter "reference=*xilriws*" \
+                        --filter "reference=*poracle*" --filter "reference=*fletchling*" \
+                        --filter "reference=*mariadb*" --filter "reference=*phpmyadmin*" \
+                        --filter "reference=*grafana*" --filter "reference=*victoriametrics*" \
+                        -q 2>/dev/null | xargs -r docker rmi -f 2>/dev/null
+                    
+                    echo ""
+                    echo -e "${GREEN}✓ Docker resources removed${NC}"
+                    echo ""
+                    echo -e "${YELLOW}Deleting Aegis directory in 5 seconds...${NC}"
+                    echo -e "${YELLOW}Press Ctrl+C to abort!${NC}"
+                    sleep 5
+                    
+                    # Store parent directory before deleting
+                    local parent_dir=$(dirname "$SCRIPT_DIR")
+                    
+                    echo "Removing Aegis directory..."
+                    cd "$parent_dir"
+                    rm -rf "$SCRIPT_DIR"
+                    
+                    echo ""
+                    echo -e "${GREEN}✓ Aegis stack completely removed${NC}"
+                    echo ""
+                    exit 0
+                else
+                    echo -e "${YELLOW}Aborted${NC}"
+                fi
+            fi
+            press_enter
+            ;;
+        0|"")
+            return
+            ;;
+        *)
+            echo -e "${RED}Invalid option${NC}"
+            sleep 1
+            uninstall_stack
+            ;;
+    esac
 }
 
 # =============================================================================
@@ -859,9 +1814,18 @@ main() {
             x|X) docker_stop ;;
             t|T) docker_restart ;;
             c|C) docker_status ;;
-            # Updates
+            v|V) show_container_dashboard ;;
+            # Service Management
+            +) service_start_menu ;;
+            -) service_stop_menu ;;
+            \*) service_restart_menu ;;
+            # Updates & Images
+            i|I) docker_pull_images ;;
             p|P) git_pull ;;
             u|U) update_and_rebuild ;;
+            # Maintenance & Cleanup
+            d|D) docker_purge_menu ;;
+            z|Z) uninstall_stack ;;
             # Other
             h|H) show_help ;;
             r|R) continue ;;
@@ -890,14 +1854,16 @@ case "${1:-}" in
         echo "Usage: $0 [option]"
         echo ""
         echo "Options:"
-        echo "  (none)      Interactive menu"
-        echo "  --status    Show status only"
-        echo "  --start     Start all containers"
-        echo "  --stop      Stop all containers"
-        echo "  --restart   Restart all containers"
-        echo "  --pull      Git pull latest changes"
-        echo "  --update    Pull, rebuild, and restart stack"
-        echo "  --help      This help message"
+        echo "  (none)         Interactive menu"
+        echo "  --status       Show status only"
+        echo "  --start        Start all containers"
+        echo "  --stop         Stop all containers"
+        echo "  --restart      Restart all containers"
+        echo "  --pull-images  Pull latest Docker images (no restart)"
+        echo "  --pull         Git pull latest changes"
+        echo "  --update       Pull, rebuild, and restart stack"
+        echo "  --dashboard    Show detailed container dashboard"
+        echo "  --help         This help message"
         echo ""
         exit 0
         ;;
@@ -917,12 +1883,20 @@ case "${1:-}" in
         docker_restart
         exit 0
         ;;
+    --pull-images)
+        docker_pull_images
+        exit 0
+        ;;
     --pull)
         git_pull
         exit 0
         ;;
     --update)
         update_and_rebuild
+        exit 0
+        ;;
+    --dashboard)
+        show_container_dashboard
         exit 0
         ;;
     *)
