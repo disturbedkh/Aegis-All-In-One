@@ -1124,8 +1124,18 @@ view_error_with_extended_context() {
     local total_lines=$(wc -l < "$log_file" 2>/dev/null || echo "0")
     [ "$end_line" -gt "$total_lines" ] && end_line=$total_lines
     
+    # Show navigation help
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}Enter${NC} to scroll, ${GREEN}q${NC} to quit                         ${DIM}║${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Arrows:${NC} ↑/↓ scroll line, PgUp/PgDn scroll page                      ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
     echo -e "${DIM}  Extended log context (±$context lines):${NC}"
     echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local temp_output=$(mktemp)
     
     # Use sed to extract range and display with highlighting
     sed -n "${start_line},${end_line}p" "$log_file" | while IFS= read -r line; do
@@ -1139,9 +1149,15 @@ view_error_with_extended_context() {
         else
             echo -e "  ${DIM}  L${actual_line}:${NC} $content"
         fi
-    done | less -R
+    done > "$temp_output"
     
-    echo ""
+    if command -v less &> /dev/null; then
+        less -R -P "Line %lt-%lb (press q to quit, arrows to scroll)" "$temp_output"
+    else
+        cat "$temp_output"
+    fi
+    
+    rm -f "$temp_output"
     press_enter
 }
 
@@ -2989,6 +3005,7 @@ view_search_results_all() {
     echo ""
     
     local temp_output=$(mktemp)
+    local total_lines=0
     
     for service in "${SERVICES[@]}"; do
         local status=$(get_container_status "$service")
@@ -2998,13 +3015,29 @@ view_search_results_all() {
                 echo -e "${CYAN}━━━ $service ━━━${NC}" >> "$temp_output"
                 echo "$matches" >> "$temp_output"
                 echo "" >> "$temp_output"
+                ((total_lines += $(echo "$matches" | wc -l)))
             fi
         fi
     done
     
-    # Use less for pagination if available
+    if [ "$total_lines" -eq 0 ]; then
+        echo -e "  ${YELLOW}No matches found${NC}"
+        press_enter
+        rm -f "$temp_output"
+        return
+    fi
+    
+    # Show with simple pagination
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}Enter${NC} to scroll, ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search       ${DIM}║${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Arrows:${NC} ↑/↓ scroll line, PgUp/PgDn scroll page                      ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
+    # Use less with helpful prompt
     if command -v less &> /dev/null; then
-        less -R "$temp_output"
+        less -R -P "Line %lt-%lb (press q to quit, / to search, arrows to scroll)" "$temp_output"
     else
         cat "$temp_output"
         press_enter
@@ -3036,16 +3069,30 @@ view_search_results_container() {
     
     echo -e "  Found ${GREEN}$match_count${NC} matches (showing with $context lines context)"
     echo ""
-    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
     
-    # Use less for pagination if available
+    if [ "$match_count" -eq 0 ]; then
+        echo -e "  ${YELLOW}No matches found${NC}"
+        press_enter
+        rm -f "$temp_output"
+        return
+    fi
+    
+    # Show navigation help
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}Enter${NC} to scroll, ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search       ${DIM}║${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Arrows:${NC} ↑/↓ scroll line, PgUp/PgDn scroll page                      ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
+    
+    # Use less with helpful prompt
     if command -v less &> /dev/null; then
-        less -R "$temp_output"
+        less -R -P "Line %lt-%lb (press q to quit, / to search, arrows to scroll)" "$temp_output"
     else
         head -200 "$temp_output"
         if [ "$match_count" -gt 50 ]; then
             echo ""
-            echo -e "${YELLOW}(Showing first ~200 lines. Use less for full output)${NC}"
+            echo -e "${YELLOW}(Showing first ~200 lines)${NC}"
         fi
         press_enter
     fi
@@ -3075,17 +3122,23 @@ search_container_logs() {
         return
     fi
     
-    echo -e "  Found ${GREEN}$match_count${NC} matches"
+    echo -e "  Found ${GREEN}$match_count${NC} matches (with $context lines context)"
     echo ""
-    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Show navigation help
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}Enter${NC} to scroll, ${GREEN}q${NC} to quit, ${GREEN}/${NC} to search       ${DIM}║${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Arrows:${NC} ↑/↓ scroll line, PgUp/PgDn scroll page                      ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
     echo ""
+    sleep 1
     
     local temp_output=$(mktemp)
     docker logs "$container" 2>&1 | grep -i -B"$context" -A"$context" --color=always "$keyword" > "$temp_output" 2>/dev/null || true
     
-    # Use less for pagination if available
+    # Use less with helpful prompt
     if command -v less &> /dev/null; then
-        less -R "$temp_output"
+        less -R -P "Line %lt-%lb (press q to quit, / to search, arrows to scroll)" "$temp_output"
     else
         head -200 "$temp_output"
         if [ "$match_count" -gt 50 ]; then
