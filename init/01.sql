@@ -1,15 +1,19 @@
-# Create databases for Aegis All-in-One
-# Give the user 'dbuser' all privileges on the databases
-# NOTE: If you change MYSQL_USER in .env, you must also update this file!
-# The username here must match MYSQL_USER in your .env file.
+# Create databases and user for Aegis All-in-One
+# This file runs ONLY on first database container creation.
+# 
+# NOTE: setup.sh replaces 'dbuser' with your chosen username.
+# If you ran setup.sh after the database was already created,
+# run dbsetup.sh to create the user manually.
 
+# Create the database user (setup.sh replaces 'dbuser' and password)
+CREATE USER IF NOT EXISTS 'dbuser'@'%' IDENTIFIED BY 'SuperSecuredbuserPassword';
+GRANT ALL PRIVILEGES ON *.* TO 'dbuser'@'%' WITH GRANT OPTION;
+
+# Create all required databases
 CREATE DATABASE IF NOT EXISTS `golbat`;
-GRANT ALL ON `golbat`.* TO 'dbuser'@'%';
 CREATE DATABASE IF NOT EXISTS `dragonite`;
-GRANT ALL ON `dragonite`.* TO 'dbuser'@'%';
 CREATE DATABASE IF NOT EXISTS `koji`;
-GRANT ALL ON `koji`.* TO 'dbuser'@'%';
 CREATE DATABASE IF NOT EXISTS `reactmap`;
-GRANT ALL ON `reactmap`.* TO 'dbuser'@'%';
 CREATE DATABASE IF NOT EXISTS `poracle`;
-GRANT ALL ON `poracle`.* TO 'dbuser'@'%';
+
+FLUSH PRIVILEGES;

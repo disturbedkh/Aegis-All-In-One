@@ -1944,11 +1944,12 @@ echo ""
 # =============================================================================
 echo "[6/9] Copying default config files..."
 
-cp env-default .env && track_file ".env"
-cp reactmap/local-default.json reactmap/local.json && track_file "reactmap/local.json"
-cp unown/dragonite_config-default.toml unown/dragonite_config.toml && track_file "unown/dragonite_config.toml"
-cp unown/golbat_config-default.toml unown/golbat_config.toml && track_file "unown/golbat_config.toml"
-cp unown/rotom_config-default.json unown/rotom_config.json && track_file "unown/rotom_config.json"
+# Force copy with -f to overwrite any existing files
+cp -f env-default .env && track_file ".env"
+cp -f reactmap/local-default.json reactmap/local.json && track_file "reactmap/local.json"
+cp -f unown/dragonite_config-default.toml unown/dragonite_config.toml && track_file "unown/dragonite_config.toml"
+cp -f unown/golbat_config-default.toml unown/golbat_config.toml && track_file "unown/golbat_config.toml"
+cp -f unown/rotom_config-default.json unown/rotom_config.json && track_file "unown/rotom_config.json"
 
 print_success "Config files copied."
 echo ""
@@ -2012,7 +2013,7 @@ print_info "Applying secrets to config files..."
 # IMPORTANT: Replace password BEFORE username since "dbuser" appears inside "SuperSecuredbuserPassword"
 
 # DB password (must be done before DB user)
-sed -i "s/SuperSecuredbuserPassword/${DB_PASSWORD}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
+sed -i "s/SuperSecuredbuserPassword/${DB_PASSWORD}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json init/01.sql
 sed -i "s/CHANGE_ME/${DB_PASSWORD}/g" Poracle/config/local.json
 
 # DB user
@@ -2137,8 +2138,85 @@ if [ "$SKIP_DB_SETUP" != "true" ]; then
   fi
 else
   echo ""
-  echo "[9/9] Skipped database creation (using Docker's MariaDB)."
-  print_info "Docker's MariaDB will create databases on first run."
+  echo "[9/9] Setting up database user for Docker MariaDB..."
+  print_info "Database will be configured when containers start."
+  
+  # Check if containers are already running
+  if docker ps --filter "name=database" --format "{{.Names}}" 2>/dev/null | grep -q "database"; then
+    print_info "Database container is running. Configuring user now..."
+    
+    # Wait a moment for DB to be ready
+    sleep 2
+    
+    # Check if user already exists
+    USER_EXISTS=$(docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM mysql.user WHERE User='$DB_USER'" 2>/dev/null)
+    
+    if [ "${USER_EXISTS:-0}" -gt 0 ]; then
+      print_info "User '$DB_USER' already exists in database."
+      
+      # Try to authenticate with the provided password
+      if docker exec database mysql -u "$DB_USER" -p"$DB_PASSWORD" -e "SELECT 1" 2>/dev/null; then
+        print_success "Password matches. User '$DB_USER' is ready."
+      else
+        print_warning "Password mismatch! The existing user has a different password."
+        echo ""
+        echo "  Options:"
+        echo "    1) Update password in database to match config"
+        echo "    2) Keep existing password (you'll need to update config files manually)"
+        echo "    3) Skip - I'll fix this later"
+        echo ""
+        read -p "  Choice [1]: " pw_choice
+        pw_choice=${pw_choice:-1}
+        
+        case $pw_choice in
+          1)
+            SQL="ALTER USER '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD'; FLUSH PRIVILEGES;"
+            if docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
+              print_success "Password updated for user '$DB_USER'."
+            else
+              print_error "Failed to update password. Run 'dbsetup.sh' to fix manually."
+            fi
+            ;;
+          2)
+            print_warning "Config files have different password than database."
+            print_warning "Update .env, reactmap/local.json, and unown/*.toml files manually."
+            ;;
+          *)
+            print_info "Skipped. Run 'dbsetup.sh' later to fix database user."
+            ;;
+        esac
+      fi
+      
+      # Ensure grants are correct
+      SQL="GRANT ALL PRIVILEGES ON *.* TO '$DB_USER'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"
+      docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null
+      
+    else
+      # User doesn't exist - create it
+      print_info "Creating database user '$DB_USER'..."
+      SQL="CREATE USER '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD'; "
+      SQL+="GRANT ALL PRIVILEGES ON *.* TO '$DB_USER'@'%' WITH GRANT OPTION; "
+      SQL+="FLUSH PRIVILEGES;"
+      
+      if docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
+        print_success "DB user '$DB_USER' created with full privileges."
+      else
+        print_error "Could not create user. Run 'dbsetup.sh' after setup completes."
+      fi
+    fi
+    
+    # Create databases if they don't exist
+    DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
+    for db in "${DBS[@]}"; do
+      docker exec database mysql -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$db\`" 2>/dev/null
+    done
+    print_success "Databases verified: ${DBS[*]}"
+    
+  else
+    print_info "Database container not running."
+    print_info "After running 'docker compose up -d', the user will be created from init/01.sql"
+    print_warning "If database already exists, run 'dbsetup.sh' to create the user."
+  fi
 fi
 
 # =============================================================================
