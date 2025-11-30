@@ -14,6 +14,7 @@
 - [Installation](#installation)
 - [Services](#services)
 - [Optional Features](#optional-features)
+- [Xilriws Operation](#xilriws-operation)
 - [Security Setup](#security-setup)
 - [Configuration](#configuration)
 - [Device Setup](#device-setup)
@@ -695,6 +696,14 @@ Performance monitoring with:
 - Device performance metrics
 - Historical data analysis
 
+### Xilriws (Port 6008)
+
+Pokemon GO API proxy service that:
+- Handles authentication requests from devices
+- Obtains login cookies for accounts
+- Manages proxy rotation for requests
+- Provides account status monitoring
+
 ---
 
 ## Optional Features
@@ -741,6 +750,154 @@ Import the included dashboard for comprehensive monitoring:
 4. Select **Prometheus** and set URL to `http://victoriametrics:8428`
 5. Go to **Dashboards → Import**
 6. Upload `grafana/Dragonite-Emi-v5.json`
+
+---
+
+## Xilriws Operation
+
+Xilriws is a critical component that handles Pokemon GO authentication requests. Proper management of proxies and monitoring of login success rates is essential for smooth operation.
+
+### Accessing Xilriws Management
+
+Access Xilriws tools via the Log Manager:
+
+```bash
+# Via main control panel
+sudo bash ./aegis.sh
+# Select option 5) Log Manager, then press 'x'
+
+# Or directly
+sudo bash ./logs.sh -x
+```
+
+### Xilriws Status Dashboard
+
+The status dashboard provides real-time visibility into Xilriws performance:
+
+| Metric | Description |
+|--------|-------------|
+| **Successful Logins** | Number of accounts that obtained cookies successfully |
+| **Auth-Banned** | Accounts flagged as authentication banned |
+| **Invalid Credentials** | Failed logins due to wrong password/username |
+| **Tunneling Errors** | Proxy tunnel/CONNECT failures |
+| **Code 15 Errors** | Specific API error responses |
+| **Rate Limited** | Requests blocked due to rate limiting |
+| **Timeouts** | Connection timeouts to proxy or API |
+| **Connection Refused** | Failed connections to proxies |
+| **Proxy Errors** | General proxy-related failures |
+| **Permanently Banned** | IPs flagged as permanently banned |
+| **Success Rate** | Percentage of successful logins |
+
+### Xilriws Menu Options
+
+| Option | Key | Description |
+|--------|-----|-------------|
+| View Recent Errors | `1` | Display last 50 error entries from logs |
+| Live Monitoring Mode | `2` | Real-time stats with auto-restart on 30 consecutive failures |
+| Clear Logs | `3` | Truncate Xilriws container logs |
+| Restart Container | `4` | Restart Xilriws container |
+| Proxy Manager | `p` | Access proxy management submenu |
+
+### Proxy Manager
+
+The Proxy Manager provides comprehensive tools for maintaining your proxy list:
+
+| Option | Key | Description |
+|--------|-----|-------------|
+| View Proxy Statistics | `1` | Total count, unique IPs, group distribution |
+| Randomize Proxy List | `2` | Smart shuffle avoiding consecutive same-subnet entries |
+| View Banned IPs | `3` | IPs associated with ban messages in logs |
+| Find Failing Proxies | `4` | Proxies with 25+ failures and no success |
+| Remove Banned IPs | `5` | Remove banned IPs from proxy.txt |
+| Remove Failing Proxies | `6` | Remove consistently failing proxies |
+| Remove Duplicates | `7` | Remove duplicate entries |
+| View Sample | `8` | Display first/last 10 proxies |
+
+### Proxy Randomization
+
+The randomization feature intelligently shuffles your proxy list:
+
+**How it works:**
+1. Groups proxies by IP subnet (first 3 octets) or domain
+2. Shuffles the list while avoiding consecutive same-group entries
+3. Creates automatic backup before modification
+4. Reports unavoidable consecutive duplicates (when too many proxies share a subnet)
+
+**Benefits:**
+- Distributes load across different proxy providers
+- Reduces detection patterns
+- Minimizes consecutive failures from same source
+
+**Example:**
+```
+Before: 192.168.1.10, 192.168.1.20, 192.168.1.30, 10.0.0.5, 10.0.0.6
+After:  192.168.1.10, 10.0.0.5, 192.168.1.20, 10.0.0.6, 192.168.1.30
+```
+
+### Live Monitoring Mode
+
+The live monitoring mode provides continuous oversight:
+
+```bash
+# Start directly from command line
+sudo bash ./logs.sh --xilriws-monitor
+```
+
+**Features:**
+- Real-time statistics refresh (every 3 seconds)
+- Consecutive failure tracking
+- **Auto-restart container after 30 consecutive failures**
+- Color-coded warnings (green → yellow → red)
+- Last 5 log entries displayed
+- Press Ctrl+C to exit
+
+**Auto-restart trigger:**
+When 30 consecutive failures are detected, the system:
+1. Displays a critical warning banner
+2. Automatically restarts the Xilriws container
+3. Resets the failure counter
+4. Continues monitoring
+
+### Proxy File Requirements
+
+Xilriws expects a `proxy.txt` file in the project root with the following formats supported:
+
+```
+# IP:Port
+192.168.1.1:8080
+
+# User:Pass@IP:Port
+username:password@192.168.1.1:8080
+
+# Protocol://IP:Port
+http://192.168.1.1:8080
+socks5://192.168.1.1:1080
+
+# Full format
+http://username:password@192.168.1.1:8080
+```
+
+### Proxy Maintenance Best Practices
+
+1. **Regular Monitoring**: Check the status dashboard daily for degradation
+2. **Remove Bad Proxies**: Use the failing proxy removal tool weekly
+3. **Randomize Periodically**: Shuffle the list after removing proxies
+4. **Keep Backups**: All modifications create timestamped backups
+5. **Monitor Success Rate**: Aim for >50% success rate; investigate drops
+6. **Check Banned IPs**: Remove permanently banned IPs promptly
+
+### Command Line Quick Access
+
+```bash
+# Xilriws status menu
+sudo bash ./logs.sh -x
+
+# Start live monitoring
+sudo bash ./logs.sh --xilriws-monitor
+
+# Quick health check (all services)
+sudo bash ./logs.sh -h
+```
 
 ---
 
