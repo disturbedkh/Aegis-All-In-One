@@ -156,6 +156,23 @@ EXCLUSION_PATTERNS=(
     # Koji patterns
     "Listening on"
     "Connected to"
+    # VictoriaMetrics/vmagent info patterns (tab-separated format)
+    "	info	"
+    "	debug	"
+    "starting vmagent"
+    "started vmagent"
+    "started server at"
+    "reading scrape configs"
+    "starting service discovery"
+    "added targets:"
+    "initialized client"
+    "limiting caches"
+    "opened fast queue"
+    "build version:"
+    "command-line flags"
+    "pprof handlers"
+    # Note: vmagent "warn" about cannot scrape are NOT excluded - they're real issues
+    # but will be marked as [STARTUP] if within startup window
 )
 
 # Startup window in seconds - errors within this window after container start are likely transient
