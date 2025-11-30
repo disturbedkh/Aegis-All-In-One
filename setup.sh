@@ -273,6 +273,8 @@ if [ "$DOCKER_INSTALLED" = false ]; then
             DOCKER_INSTALLED=true
             DOCKER_RUNNING=true
             DOCKER_COMPOSE_AVAILABLE=true
+            # Reset DOCKER_ACCESSIBLE to re-check after fresh install
+            DOCKER_ACCESSIBLE=false
         else
             print_error "Docker installation failed. Cannot continue."
             print_info "Please install Docker manually: https://docs.docker.com/engine/install/"
@@ -306,21 +308,44 @@ if [ "$DOCKER_INSTALLED" = true ]; then
     fi
 fi
 
-# Add user to docker group if needed
-if [ "$DOCKER_INSTALLED" = true ] && [ "$DOCKER_ACCESSIBLE" = false ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    echo ""
-    read -p "  Add user '$REAL_USER' to docker group? (y/n) [y]: " ADD_TO_GROUP
-    ADD_TO_GROUP=${ADD_TO_GROUP:-y}
-    
-    if [ "$ADD_TO_GROUP" = "y" ] || [ "$ADD_TO_GROUP" = "Y" ]; then
-        if add_user_to_docker_group "$REAL_USER"; then
-            DOCKER_ACCESSIBLE=true
-            NEEDS_RELOGIN=true
-            print_warning "User '$REAL_USER' needs to log out and back in for group changes to take effect."
-        fi
+# Check/Add user to docker group for proper permissions
+# This check runs after potential Docker installation to ensure fresh installs are covered
+if [ "$DOCKER_INSTALLED" = true ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    # Re-check docker group membership (important after fresh Docker install)
+    if check_docker_group "$REAL_USER"; then
+        DOCKER_ACCESSIBLE=true
     else
-        print_warning "User '$REAL_USER' will need to use 'sudo' for Docker commands."
+        DOCKER_ACCESSIBLE=false
     fi
+    
+    if [ "$DOCKER_ACCESSIBLE" = false ]; then
+        echo ""
+        print_warning "User '$REAL_USER' is NOT in the docker group."
+        print_info "Without docker group membership, you'll need to use 'sudo' for all Docker commands."
+        print_info "Adding to docker group is recommended for proper permissions."
+        echo ""
+        read -p "  Add user '$REAL_USER' to docker group? (Recommended) (y/n) [y]: " ADD_TO_GROUP
+        ADD_TO_GROUP=${ADD_TO_GROUP:-y}
+        
+        if [ "$ADD_TO_GROUP" = "y" ] || [ "$ADD_TO_GROUP" = "Y" ]; then
+            if add_user_to_docker_group "$REAL_USER"; then
+                DOCKER_ACCESSIBLE=true
+                NEEDS_RELOGIN=true
+                echo ""
+                print_warning "════════════════════════════════════════════════════════════"
+                print_warning "  IMPORTANT: Group changes require a new login session!"
+                print_warning "  User '$REAL_USER' must log out and back in after setup."
+                print_warning "════════════════════════════════════════════════════════════"
+                echo ""
+            fi
+        else
+            print_warning "User '$REAL_USER' will need to use 'sudo' for Docker commands."
+            print_info "You can add yourself later with: sudo usermod -aG docker $REAL_USER"
+        fi
+    fi
+elif [ "$REAL_USER" = "root" ]; then
+    DOCKER_ACCESSIBLE=true
+    print_info "Running as root - docker group membership not required."
 fi
 
 # Verify Docker Compose after potential installation
