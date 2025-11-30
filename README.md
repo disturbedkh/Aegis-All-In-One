@@ -845,18 +845,22 @@ sudo bash ./logs.sh --xilriws-monitor
 
 **Features:**
 - Real-time statistics refresh (every 3 seconds)
-- Consecutive failure tracking
-- **Auto-restart container after 30 consecutive failures**
-- Color-coded warnings (green → yellow → red)
+- **Watches for Xilriws "30 consecutive failures" log message**
+- Auto-restart container when Xilriws stops trying proxies
+- Highlights critical messages in red
 - Last 5 log entries displayed
+- Restart counter tracking
 - Press Ctrl+C to exit
 
 **Auto-restart trigger:**
-When 30 consecutive failures are detected, the system:
+The monitor specifically watches for the **"30 consecutive failures"** message that Xilriws outputs when it stops attempting to use proxies. This is the critical error that halts proxy operations.
+
+When this message is detected in the logs:
 1. Displays a critical warning banner
 2. Automatically restarts the Xilriws container
-3. Resets the failure counter
-4. Continues monitoring
+3. Resets the baseline failure count
+4. Increments the restart counter
+5. Continues monitoring
 
 ### Proxy File Requirements
 

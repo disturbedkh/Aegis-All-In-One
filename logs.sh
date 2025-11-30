@@ -1828,8 +1828,11 @@ xilriws_live_monitor() {
     draw_box_divider
     draw_box_line "  This mode monitors Xilriws logs in real-time and will:"
     draw_box_line "    • Display live statistics"
-    draw_box_line "    • Track consecutive failures"
-    draw_box_line "    • Auto-restart container after 30 consecutive failures"
+    draw_box_line "    • Watch for '30 consecutive failures' message in logs"
+    draw_box_line "    • Auto-restart container when Xilriws stops trying proxies"
+    draw_box_line ""
+    draw_box_line "  The '30 consecutive failures' message from Xilriws means it"
+    draw_box_line "  has stopped attempting to use proxies and needs a restart."
     draw_box_line ""
     draw_box_line "  Press Ctrl+C to exit monitoring mode"
     draw_box_bottom
@@ -1844,12 +1847,12 @@ xilriws_live_monitor() {
     print_info "Starting live monitor... (Ctrl+C to stop)"
     sleep 2
     
-    local consecutive_failures=0
-    local failure_threshold=30
-    local last_line=""
-    local total_success=0
-    local total_failures=0
     local session_start=$(date +%s)
+    local last_restart_check=""
+    local restart_count=0
+    
+    # Get initial count of the critical message to establish baseline
+    local initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
     
     # Trap Ctrl+C
     trap 'echo ""; print_info "Monitoring stopped"; sleep 1; return' INT
@@ -1873,21 +1876,27 @@ xilriws_live_monitor() {
         local status_color="${GREEN}"
         [ "$status" != "running" ] && status_color="${RED}"
         
-        printf "${CYAN}║${NC}  Container:          ${status_color}%-52s${NC} ${CYAN}║${NC}\n" "$status"
-        printf "${CYAN}║${NC}  Monitor Uptime:     %-53s ${CYAN}║${NC}\n" "${uptime_mins}m ${uptime_secs}s"
-        printf "${CYAN}║${NC}  Consecutive Fails:  "
+        # Count "30 consecutive failures" messages in log
+        local current_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
+        local new_failures=$((current_failure_count - initial_failure_count))
+        [ "$new_failures" -lt 0 ] && new_failures=0
         
-        if [ "$consecutive_failures" -ge 20 ]; then
-            printf "${RED}%-53s${NC}" "$consecutive_failures / $failure_threshold"
-        elif [ "$consecutive_failures" -ge 10 ]; then
-            printf "${YELLOW}%-53s${NC}" "$consecutive_failures / $failure_threshold"
+        printf "${CYAN}║${NC}  Container:          ${status_color}%-52s${NC} ${CYAN}║${NC}\n" "$status"
+        printf "${CYAN}║${NC}  Monitor Uptime:     %-53s ${CYAN}║${NC}\n" "${uptime_mins}m $((uptime_secs % 60))s"
+        printf "${CYAN}║${NC}  Auto-Restarts:      %-53s ${CYAN}║${NC}\n" "$restart_count"
+        
+        # Show failure message detection status
+        printf "${CYAN}║${NC}  "
+        if [ "$new_failures" -gt 0 ]; then
+            printf "${RED}⚠ '30 consecutive failures' detected: $new_failures (since monitor start)${NC}"
+            printf "%*s" $((44 - ${#new_failures})) ""
         else
-            printf "${GREEN}%-53s${NC}" "$consecutive_failures / $failure_threshold"
+            printf "${GREEN}✓ No '30 consecutive failures' message detected${NC}%26s" ""
         fi
         printf " ${CYAN}║${NC}\n"
         
         draw_box_divider
-        draw_box_line "  SESSION STATISTICS"
+        draw_box_line "  SESSION STATISTICS (from all logs)"
         draw_box_divider
         
         printf "${CYAN}║${NC}    ${GREEN}✓ Successful:${NC}     %-55s ${CYAN}║${NC}\n" "$XILRIWS_SUCCESS"
@@ -1898,56 +1907,59 @@ xilriws_live_monitor() {
         printf "${CYAN}║${NC}    ${YELLOW}⚠ Total Errors:${NC}  %-55s ${CYAN}║${NC}\n" "$XILRIWS_TOTAL_ERRORS"
         
         draw_box_divider
-        draw_box_line "  LAST LOG ENTRIES"
+        draw_box_line "  WATCHING FOR: '30 consecutive failures' message"
         draw_box_divider
         
         # Get last 5 log entries
         local recent_logs=$(docker logs xilriws --tail 5 2>&1)
         while IFS= read -r line; do
-            # Truncate long lines
+            # Truncate long lines and highlight the critical message
             local short_line="${line:0:72}"
-            printf "${CYAN}║${NC}  %-73s ${CYAN}║${NC}\n" "$short_line"
+            if echo "$line" | grep -qi "30 consecutive failures"; then
+                printf "${CYAN}║${NC}  ${RED}${BOLD}%-73s${NC} ${CYAN}║${NC}\n" "$short_line"
+            elif echo "$line" | grep -qiE "error|failed|banned"; then
+                printf "${CYAN}║${NC}  ${YELLOW}%-73s${NC} ${CYAN}║${NC}\n" "$short_line"
+            else
+                printf "${CYAN}║${NC}  %-73s ${CYAN}║${NC}\n" "$short_line"
+            fi
         done <<< "$recent_logs"
         
         draw_box_bottom
         
-        # Check for consecutive failures
-        local latest=$(docker logs xilriws --tail 1 2>&1)
+        # Check for the specific "30 consecutive failures" message in recent logs
+        # This is the critical message that means Xilriws has stopped trying
+        local recent_check=$(docker logs xilriws --tail 20 2>&1)
         
-        if echo "$latest" | grep -qiE "error|failed|banned|timeout|refused"; then
-            if [ "$latest" != "$last_line" ]; then
-                ((consecutive_failures++))
-                ((total_failures++))
-                last_line="$latest"
-            fi
-        elif echo "$latest" | grep -qiE "success|obtained.*cookie"; then
-            if [ "$latest" != "$last_line" ]; then
-                consecutive_failures=0
-                ((total_success++))
-                last_line="$latest"
-            fi
-        fi
-        
-        # Check if threshold exceeded
-        if [ "$consecutive_failures" -ge "$failure_threshold" ]; then
-            echo ""
-            echo -e "  ${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
-            echo -e "  ${RED}║        ⚠️  CRITICAL: 30 CONSECUTIVE FAILURES DETECTED! ⚠️          ║${NC}"
-            echo -e "  ${RED}║              AUTO-RESTARTING XILRIWS CONTAINER                    ║${NC}"
-            echo -e "  ${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
-            echo ""
+        if echo "$recent_check" | grep -qi "30 consecutive failures"; then
+            # Make sure we haven't just restarted for this same occurrence
+            local latest_failure_line=$(echo "$recent_check" | grep -i "30 consecutive failures" | tail -1)
             
-            print_warning "This is really bad! Restarting Xilriws container..."
-            docker restart xilriws
-            
-            if [ $? -eq 0 ]; then
-                print_success "Container restarted successfully"
-                consecutive_failures=0
-            else
-                print_error "Failed to restart container!"
+            if [ "$latest_failure_line" != "$last_restart_check" ]; then
+                echo ""
+                echo -e "  ${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
+                echo -e "  ${RED}║   ⚠️  CRITICAL: '30 CONSECUTIVE FAILURES' DETECTED IN LOGS! ⚠️     ║${NC}"
+                echo -e "  ${RED}║                                                                    ║${NC}"
+                echo -e "  ${RED}║   Xilriws has stopped attempting to use proxies.                  ║${NC}"
+                echo -e "  ${RED}║   This is really bad! Auto-restarting container...                ║${NC}"
+                echo -e "  ${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
+                echo ""
+                
+                print_warning "Restarting Xilriws container..."
+                docker restart xilriws
+                
+                if [ $? -eq 0 ]; then
+                    print_success "Container restarted successfully"
+                    last_restart_check="$latest_failure_line"
+                    ((restart_count++))
+                    # Reset baseline after restart
+                    sleep 3
+                    initial_failure_count=$(docker logs xilriws 2>&1 | grep -ic "30 consecutive failures" || echo "0")
+                else
+                    print_error "Failed to restart container!"
+                fi
+                
+                sleep 5
             fi
-            
-            sleep 5
         fi
         
         # Wait before next refresh
