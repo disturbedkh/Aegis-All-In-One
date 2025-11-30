@@ -264,10 +264,14 @@ check_permissions() {
     # Check file ownership of key files
     if [ -f ".env" ]; then
         local env_owner=$(stat -c '%U' .env 2>/dev/null || stat -f '%Su' .env 2>/dev/null)
-        if [ "$env_owner" = "$current_user" ] || [ "$env_owner" = "root" ]; then
+        # Check if owner matches the real user or current user
+        if [ "$env_owner" = "$REAL_USER" ] || [ "$env_owner" = "$current_user" ] || [ -z "$env_owner" ]; then
+            echo -e "  .env Owner:      ${GREEN}$env_owner${NC}"
+        elif [ "$EUID" -eq 0 ] && [ "$REAL_USER" != "root" ]; then
+            # Running as root but REAL_USER is different - this is normal when using sudo
             echo -e "  .env Owner:      ${GREEN}$env_owner${NC}"
         else
-            echo -e "  .env Owner:      ${YELLOW}$env_owner${NC} (may need: sudo chown $current_user .env)"
+            echo -e "  .env Owner:      ${YELLOW}$env_owner${NC}"
         fi
     fi
 
