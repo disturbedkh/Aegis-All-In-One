@@ -443,6 +443,7 @@ show_main_menu() {
     echo "    s) Start Stack            - Start all containers"
     echo "    x) Stop Stack             - Stop all containers"
     echo "    t) Restart Stack          - Restart all containers"
+    echo "    b) Force Rebuild          - Rebuild containers from scratch"
     echo "    c) Container Status       - View docker compose status"
     echo "    v) Container Dashboard    - Detailed status + image check"
     echo ""
@@ -562,6 +563,8 @@ show_help() {
     echo "  s) Start Stack    - docker compose up -d"
     echo "  x) Stop Stack     - docker compose stop (preserves containers)"
     echo "  t) Restart Stack  - docker compose restart"
+    echo "  b) Force Rebuild  - docker compose up -d --force-recreate --build"
+    echo "                      Pulls images, rebuilds containers from scratch"
     echo "  c) Status         - docker compose ps -a"
     echo "  v) Dashboard      - Detailed container status + image info"
     echo ""
@@ -1173,6 +1176,177 @@ docker_restart() {
         echo -e "${GREEN}✓ Containers restarted${NC}"
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
+    fi
+    
+    press_enter
+}
+
+docker_force_rebuild() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                    FORCE REBUILD CONTAINERS"
+    draw_box_bottom
+    echo ""
+    
+    if [ ! -f "docker-compose.yaml" ] && [ ! -f "docker-compose.yml" ]; then
+        echo -e "${RED}docker-compose.yaml not found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "${YELLOW}This will:${NC}"
+    echo "  1. Stop all running containers"
+    echo "  2. Remove existing containers"
+    echo "  3. Pull latest images from registries"
+    echo "  4. Rebuild containers from scratch"
+    echo "  5. Start all containers"
+    echo ""
+    echo -e "${DIM}Command: docker compose up -d --force-recreate --build --pull always${NC}"
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Rebuild Options${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo "  1) Full rebuild (pull images + recreate + build)"
+    echo "  2) Recreate only (no image pull, just rebuild containers)"
+    echo "  3) Rebuild specific service(s)"
+    echo "  0) Cancel"
+    echo ""
+    
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${CYAN}Performing full force rebuild...${NC}"
+            echo ""
+            
+            echo -e "${DIM}Step 1/2: Pulling latest images...${NC}"
+            docker compose pull
+            
+            echo ""
+            echo -e "${DIM}Step 2/2: Rebuilding and starting containers...${NC}"
+            docker compose up -d --force-recreate --build
+            
+            echo ""
+            echo -e "${GREEN}✓ Full force rebuild complete!${NC}"
+            echo ""
+            docker compose ps
+            ;;
+        2)
+            echo ""
+            echo -e "${CYAN}Recreating containers (no image pull)...${NC}"
+            echo ""
+            
+            docker compose up -d --force-recreate --build
+            
+            echo ""
+            echo -e "${GREEN}✓ Containers recreated!${NC}"
+            echo ""
+            docker compose ps
+            ;;
+        3)
+            force_rebuild_services
+            return
+            ;;
+        0|"")
+            return
+            ;;
+        *)
+            echo -e "${RED}Invalid option${NC}"
+            sleep 1
+            docker_force_rebuild
+            return
+            ;;
+    esac
+    
+    press_enter
+}
+
+force_rebuild_services() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                REBUILD SPECIFIC SERVICES"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Available Services${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local i=1
+    local available_services=()
+    
+    for service_entry in "${AEGIS_SERVICES[@]}"; do
+        local service_name=$(echo "$service_entry" | cut -d: -f1)
+        local service_desc=$(echo "$service_entry" | cut -d: -f2)
+        local status=$(get_service_status "$service_name")
+        
+        case $status in
+            "running")
+                printf "  ${GREEN}●${NC} %2d) %-20s ${GREEN}Running${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc")
+                ;;
+            "stopped")
+                printf "  ${RED}●${NC} %2d) %-20s ${RED}Stopped${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc")
+                ;;
+            *)
+                printf "  ${DIM}○${NC} %2d) %-20s ${DIM}Not deployed${NC}\n" "$i" "$service_desc"
+                available_services+=("$service_name:$service_desc")
+                ;;
+        esac
+        ((i++))
+    done
+    
+    echo ""
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo "   0) Back"
+    echo ""
+    
+    read -p "  Select service(s) to rebuild (comma-separated, e.g., 1,3,5): " selection
+    
+    if [ "$selection" = "0" ] || [ -z "$selection" ]; then
+        docker_force_rebuild
+        return
+    fi
+    
+    # Parse comma-separated selections
+    IFS=',' read -ra selections <<< "$selection"
+    
+    local services_to_rebuild=""
+    
+    for sel in "${selections[@]}"; do
+        sel=$(echo "$sel" | tr -d ' ')
+        
+        if ! [[ "$sel" =~ ^[0-9]+$ ]] || [ "$sel" -lt 1 ] || [ "$sel" -gt ${#available_services[@]} ]; then
+            echo -e "${RED}Invalid selection: $sel${NC}"
+            continue
+        fi
+        
+        local idx=$((sel - 1))
+        local entry="${available_services[$idx]}"
+        local service_name=$(echo "$entry" | cut -d: -f1)
+        services_to_rebuild="$services_to_rebuild $service_name"
+    done
+    
+    if [ -n "$services_to_rebuild" ]; then
+        echo ""
+        echo -e "${CYAN}Rebuilding:${NC}$services_to_rebuild"
+        echo ""
+        
+        echo -e "${DIM}Pulling images...${NC}"
+        docker compose pull $services_to_rebuild
+        
+        echo ""
+        echo -e "${DIM}Force rebuilding containers...${NC}"
+        docker compose up -d --force-recreate --build $services_to_rebuild
+        
+        echo ""
+        echo -e "${GREEN}✓ Services rebuilt!${NC}"
     fi
     
     press_enter
@@ -1973,6 +2147,7 @@ main() {
             s|S) docker_start ;;
             x|X) docker_stop ;;
             t|T) docker_restart ;;
+            b|B) docker_force_rebuild ;;
             c|C) docker_status ;;
             v|V) show_container_dashboard ;;
             # Service Management
@@ -2019,6 +2194,7 @@ case "${1:-}" in
         echo "  --start        Start all containers"
         echo "  --stop         Stop all containers"
         echo "  --restart      Restart all containers"
+        echo "  --rebuild      Force rebuild all containers"
         echo "  --pull-images  Pull latest Docker images (no restart)"
         echo "  --pull         Git pull latest changes"
         echo "  --update       Pull, rebuild, and restart stack"
@@ -2041,6 +2217,17 @@ case "${1:-}" in
         ;;
     --restart)
         docker_restart
+        exit 0
+        ;;
+    --rebuild)
+        clear
+        echo ""
+        echo -e "${CYAN}Force rebuilding all containers...${NC}"
+        echo ""
+        docker compose pull
+        docker compose up -d --force-recreate --build
+        echo ""
+        echo -e "${GREEN}✓ Force rebuild complete!${NC}"
         exit 0
         ;;
     --pull-images)
