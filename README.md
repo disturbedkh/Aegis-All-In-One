@@ -144,6 +144,7 @@ This repository includes several scripts to help you set up, secure, and maintai
 | `nginx-setup.sh` | Security, SSL, and firewall setup | After initial setup for external access |
 | `dbsetup.sh` | Database setup and maintenance | Initial setup or ongoing maintenance |
 | `check.sh` | Status dashboard & config validation | Troubleshooting, health checks |
+| `logs.sh` | Docker log analysis & maintenance | Monitoring, troubleshooting, log cleanup |
 
 ### Optional Feature Scripts
 
@@ -369,6 +370,70 @@ sudo bash ./docker-osm-importer.sh
 - Downloads OSM data for your region
 - Imports park and natural area boundaries
 - Provides data for Fletchling nest detection
+
+---
+
+### `logs.sh` - Docker Log Manager & Analyzer
+
+Comprehensive log analysis, monitoring, and maintenance tool.
+
+```bash
+sudo bash ./logs.sh
+```
+
+**Main Dashboard Shows:**
+- All services with running/stopped status
+- Log size for each container
+- Error counts (total, warnings, critical)
+- Color-coded health indicators
+
+**Service Detail View:**
+- Container uptime and status
+- Log size and file path
+- Error breakdown by category:
+  - Account errors (login, auth, banned)
+  - Database errors (MySQL, connection, deadlock)
+  - Connection errors (timeout, refused, socket)
+  - Memory errors (OOM, allocation)
+  - API errors (HTTP 4xx/5xx, endpoint failures)
+  - Device errors (worker, disconnect)
+  - Critical errors (fatal, panic)
+- Recent log activity preview
+
+**Error Analysis Features:**
+- View errors by category with context
+- Color-coded log output (errors=red, warnings=yellow)
+- Search functionality with preset patterns:
+  - Device disconnects
+  - Account errors
+  - Database errors
+  - Connection issues
+  - Custom regex search
+
+**Device Disconnect Monitor:**
+- Scans Rotom and Dragonite logs
+- Shows disconnect event counts
+- Displays recent disconnect entries
+
+**Log Maintenance:**
+- View all log sizes at a glance
+- Clear individual service logs
+- Clear ALL logs at once
+- View log file paths
+
+**Docker Configuration:**
+- View current daemon.json settings
+- Apply recommended log rotation settings
+- Edit config manually
+- Restart Docker to apply changes
+
+**Command Line Options:**
+```bash
+./logs.sh           # Interactive menu
+./logs.sh -h        # Quick health check
+./logs.sh --clear-all   # Clear all logs
+./logs.sh --help    # Help
+```
 
 ---
 
