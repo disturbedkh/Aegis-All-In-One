@@ -60,12 +60,27 @@ MYSQL_CMD=""
 DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
 
 # Get the original user who called sudo (to prevent files being locked to root)
-if [ -n "$SUDO_USER" ]; then
+# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    # REAL_USER was passed from aegis.sh - use it
+    if [ -z "$REAL_GROUP" ]; then
+        REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+    fi
+elif [ -n "$SUDO_USER" ]; then
     REAL_USER="$SUDO_USER"
     REAL_GROUP=$(id -gn "$SUDO_USER")
 else
     REAL_USER="$USER"
     REAL_GROUP=$(id -gn)
+fi
+
+# Ensure we have a valid user
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+    DIR_OWNER=$(stat -c '%U' "$PWD" 2>/dev/null || ls -ld "$PWD" | awk '{print $3}')
+    if [ -n "$DIR_OWNER" ] && [ "$DIR_OWNER" != "root" ]; then
+        REAL_USER="$DIR_OWNER"
+        REAL_GROUP=$(id -gn "$DIR_OWNER" 2>/dev/null || echo "$DIR_OWNER")
+    fi
 fi
 
 # =============================================================================
@@ -84,8 +99,13 @@ restore_ownership() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
         chown "$REAL_USER:$REAL_GROUP" mysql_data/mariadb.cnf 2>/dev/null || true
         chown "$REAL_USER:$REAL_GROUP" .env 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown -R "$REAL_USER:$REAL_GROUP" mysql_data 2>/dev/null || true
     fi
 }
+
+# Set up trap to restore ownership on exit
+trap restore_ownership EXIT
 
 load_env() {
 if [ ! -f ".env" ]; then

@@ -37,6 +37,38 @@ print_fail() { echo -e "${RED}[✗]${NC} $1"; ((ERRORS++)); }
 print_check() { echo -e "${BLUE}[CHECK]${NC} $1"; }
 print_header() { echo -e "\n${CYAN}━━━ $1 ━━━${NC}\n"; }
 
+# Get the original user who called sudo (to prevent files being locked to root)
+# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+    # REAL_USER was passed from aegis.sh - use it
+    if [ -z "$REAL_GROUP" ]; then
+        REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+    fi
+elif [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
+
+# Ensure we have a valid user
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+    DIR_OWNER=$(stat -c '%U' "$PWD" 2>/dev/null || ls -ld "$PWD" | awk '{print $3}')
+    if [ -n "$DIR_OWNER" ] && [ "$DIR_OWNER" != "root" ]; then
+        REAL_USER="$DIR_OWNER"
+        REAL_GROUP=$(id -gn "$DIR_OWNER" 2>/dev/null || echo "$DIR_OWNER")
+    fi
+fi
+
+# Set up trap to restore ownership on exit
+cleanup_on_exit() {
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER:$REAL_GROUP" *.sh *.yaml *.yml *.md 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT
+
 # Return to main menu function
 return_to_main() {
     if [ "$AEGIS_LAUNCHER" = "1" ]; then
