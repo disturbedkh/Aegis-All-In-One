@@ -1140,19 +1140,41 @@ view_category_errors() {
     local container_start=$(get_container_start_time "$service")
     local uptime=$(get_container_uptime_seconds "$service")
     
+    # Build exclusion grep pattern
+    local exclusion_pattern=""
+    for excl in "${EXCLUSION_PATTERNS[@]}"; do
+        if [ -z "$exclusion_pattern" ]; then
+            exclusion_pattern="$excl"
+        else
+            exclusion_pattern="$exclusion_pattern|$excl"
+        fi
+    done
+    
     # Count actual errors (excluding false positives)
     local actual_count=0
     local startup_count=0
     local excluded_count=0
     local temp_errors=$(mktemp)
+    local temp_all=$(mktemp)
     
-    # Get all lines matching pattern and filter
-    docker logs "$service" 2>&1 | grep -iE "$pattern" 2>/dev/null | while IFS= read -r line; do
-        # Check if this is an excluded (false positive) line
-        if is_excluded_line "$line"; then
+    # First, get all lines matching the category pattern
+    docker logs "$service" 2>&1 | grep -iE "$pattern" > "$temp_all" 2>/dev/null || true
+    
+    # Process each line
+    while IFS= read -r line; do
+        # Check for real error indicators (error=", failed=", etc.) - these are NEVER excluded
+        if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+            # This is a real error even if logged at info level
+            if is_startup_error "$line" "$container_start"; then
+                echo "STARTUP:$line" >> "$temp_errors"
+            else
+                echo "ERROR:$line" >> "$temp_errors"
+            fi
+        # Check if line should be excluded (info/success message)
+        elif echo "$line" | grep -qiE "$exclusion_pattern"; then
             echo "EXCLUDED:$line" >> "$temp_errors"
+        # Check if it has error keywords
         elif echo "$line" | grep -qiE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL"; then
-            # Check if it's a startup error
             if is_startup_error "$line" "$container_start"; then
                 echo "STARTUP:$line" >> "$temp_errors"
             else
@@ -1162,7 +1184,7 @@ view_category_errors() {
             # Matches pattern but isn't an error keyword - likely info
             echo "EXCLUDED:$line" >> "$temp_errors"
         fi
-    done
+    done < "$temp_all"
     
     actual_count=$(grep -c "^ERROR:" "$temp_errors" 2>/dev/null || echo "0")
     startup_count=$(grep -c "^STARTUP:" "$temp_errors" 2>/dev/null || echo "0")
@@ -1217,7 +1239,7 @@ view_category_errors() {
     fi
     
     # Cleanup
-    rm -f "$temp_errors"
+    rm -f "$temp_errors" "$temp_all"
 
     press_enter
 }
