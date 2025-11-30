@@ -1,7 +1,11 @@
 #!/bin/bash
 
-# Aegis All-in-One Nginx Reverse Proxy Setup Script
-# This script sets up nginx reverse proxies for all Aegis services with optional SSL
+# Aegis All-in-One Nginx Security & Management Script
+# =============================================================================
+# This script provides:
+#   - SETUP MODE: Full nginx reverse proxy setup with SSL, Fail2Ban, UFW
+#   - MAINTENANCE MODE: Status dashboard, service management, configuration
+# =============================================================================
 # Includes Fail2Ban configuration for brute-force and bot protection
 # Includes optional Authelia setup for SSO and 2FA authentication
 
@@ -11,6 +15,7 @@
 # Global variables
 AUTHELIA_ENABLED=false
 AUTHELIA_SUBDOMAIN="auth"
+SCRIPT_MODE=""
 
 # Colors for output
 RED='\033[0;31m'
@@ -18,6 +23,9 @@ GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
 CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+DIM='\033[2m'
+BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Get the original user who called sudo (to prevent files being locked to root)
@@ -57,6 +65,1187 @@ print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Helper function for press enter
+press_enter() {
+    echo ""
+    read -p "  Press Enter to continue..."
+}
+
+# Draw box functions for nice UI
+draw_box_top() {
+    echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════════════╗${NC}"
+}
+
+draw_box_bottom() {
+    echo -e "${CYAN}╚════════════════════════════════════════════════════════════════════════════╝${NC}"
+}
+
+draw_box_divider() {
+    echo -e "${CYAN}╠════════════════════════════════════════════════════════════════════════════╣${NC}"
+}
+
+draw_box_line() {
+    local text="$1"
+    printf "${CYAN}║${NC} %-74s ${CYAN}║${NC}\n" "$text"
+}
+
+# =============================================================================
+# MAINTENANCE MODE - STATUS DASHBOARD
+# =============================================================================
+
+# Get service status with color
+get_service_status() {
+    local service=$1
+    if systemctl is-active --quiet "$service" 2>/dev/null; then
+        echo -e "${GREEN}● Running${NC}"
+    elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
+        echo -e "${YELLOW}○ Stopped${NC}"
+    else
+        echo -e "${DIM}○ Not Installed${NC}"
+    fi
+}
+
+# Get simple status (for logic)
+get_service_status_simple() {
+    local service=$1
+    if systemctl is-active --quiet "$service" 2>/dev/null; then
+        echo "running"
+    elif systemctl is-enabled --quiet "$service" 2>/dev/null; then
+        echo "stopped"
+    elif command -v "$service" &>/dev/null || [ -f "/etc/init.d/$service" ]; then
+        echo "stopped"
+    else
+        echo "not_installed"
+    fi
+}
+
+# Count nginx sites
+count_nginx_sites() {
+    local enabled=0
+    local available=0
+    
+    if [ -d "/etc/nginx/sites-enabled" ]; then
+        enabled=$(ls -1 /etc/nginx/sites-enabled/ 2>/dev/null | wc -l)
+    fi
+    if [ -d "/etc/nginx/sites-available" ]; then
+        available=$(ls -1 /etc/nginx/sites-available/ 2>/dev/null | wc -l)
+    fi
+    
+    echo "$enabled/$available"
+}
+
+# Get SSL certificate info
+get_ssl_status() {
+    if command -v certbot &>/dev/null; then
+        local cert_count=$(certbot certificates 2>/dev/null | grep -c "Certificate Name:" || echo "0")
+        if [ "$cert_count" -gt 0 ]; then
+            echo -e "${GREEN}$cert_count certificate(s)${NC}"
+        else
+            echo -e "${YELLOW}No certificates${NC}"
+        fi
+    else
+        echo -e "${DIM}Certbot not installed${NC}"
+    fi
+}
+
+# Get fail2ban jail count
+get_fail2ban_status() {
+    if command -v fail2ban-client &>/dev/null; then
+        if systemctl is-active --quiet fail2ban 2>/dev/null; then
+            local jail_count=$(fail2ban-client status 2>/dev/null | grep "Number of jail:" | awk '{print $NF}')
+            local banned=$(fail2ban-client status 2>/dev/null | grep -A100 "Jail list:" | tail -n+2 | while read jail; do
+                fail2ban-client status "$jail" 2>/dev/null | grep "Currently banned:" | awk '{print $NF}'
+            done | paste -sd+ | bc 2>/dev/null || echo "0")
+            echo -e "${GREEN}$jail_count jails, ${banned:-0} banned${NC}"
+        else
+            echo -e "${YELLOW}Stopped${NC}"
+        fi
+    else
+        echo -e "${DIM}Not installed${NC}"
+    fi
+}
+
+# Get UFW status
+get_ufw_status() {
+    if command -v ufw &>/dev/null; then
+        local status=$(ufw status 2>/dev/null | head -1)
+        if echo "$status" | grep -q "active"; then
+            local rule_count=$(ufw status numbered 2>/dev/null | grep -c "^\[" || echo "0")
+            echo -e "${GREEN}Active ($rule_count rules)${NC}"
+        else
+            echo -e "${YELLOW}Inactive${NC}"
+        fi
+    else
+        echo -e "${DIM}Not installed${NC}"
+    fi
+}
+
+# Show maintenance status dashboard
+show_status_dashboard() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              NGINX SECURITY & MANAGEMENT - STATUS DASHBOARD"
+    draw_box_bottom
+    echo ""
+    
+    # Service Status Section
+    echo -e "${WHITE}${BOLD}Service Status${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local nginx_status=$(get_service_status "nginx")
+    local fail2ban_status=$(get_service_status "fail2ban")
+    local certbot_timer=$(systemctl is-active --quiet "certbot.timer" 2>/dev/null && echo -e "${GREEN}● Active${NC}" || echo -e "${DIM}○ Inactive${NC}")
+    
+    printf "  %-20s %s\n" "Nginx:" "$nginx_status"
+    printf "  %-20s %s\n" "Fail2Ban:" "$fail2ban_status"
+    printf "  %-20s %s\n" "Certbot Timer:" "$certbot_timer"
+    printf "  %-20s %s\n" "UFW Firewall:" "$(get_ufw_status)"
+    echo ""
+    
+    # Configuration Section
+    echo -e "${WHITE}${BOLD}Configuration${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local sites_count=$(count_nginx_sites)
+    local ssl_status=$(get_ssl_status)
+    local f2b_status=$(get_fail2ban_status)
+    
+    printf "  %-20s %s\n" "Nginx Sites:" "$sites_count (enabled/available)"
+    printf "  %-20s %s\n" "SSL Certificates:" "$ssl_status"
+    printf "  %-20s %s\n" "Fail2Ban:" "$f2b_status"
+    echo ""
+    
+    # Quick Health Check
+    echo -e "${WHITE}${BOLD}Quick Health Check${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Test nginx config
+    if command -v nginx &>/dev/null; then
+        if nginx -t 2>&1 | grep -q "test is successful"; then
+            echo -e "  Nginx Config:      ${GREEN}✓ Valid${NC}"
+        else
+            echo -e "  Nginx Config:      ${RED}✗ Errors detected${NC}"
+        fi
+    else
+        echo -e "  Nginx Config:      ${DIM}N/A${NC}"
+    fi
+    
+    # Check if ports are listening
+    if command -v ss &>/dev/null; then
+        local http_listening=$(ss -tlnp 2>/dev/null | grep -q ":80 " && echo "yes" || echo "no")
+        local https_listening=$(ss -tlnp 2>/dev/null | grep -q ":443 " && echo "yes" || echo "no")
+        
+        if [ "$http_listening" = "yes" ]; then
+            echo -e "  Port 80 (HTTP):    ${GREEN}✓ Listening${NC}"
+        else
+            echo -e "  Port 80 (HTTP):    ${YELLOW}○ Not listening${NC}"
+        fi
+        
+        if [ "$https_listening" = "yes" ]; then
+            echo -e "  Port 443 (HTTPS):  ${GREEN}✓ Listening${NC}"
+        else
+            echo -e "  Port 443 (HTTPS):  ${YELLOW}○ Not listening${NC}"
+        fi
+    fi
+    echo ""
+}
+
+# =============================================================================
+# MAINTENANCE MODE - SERVICE MANAGEMENT
+# =============================================================================
+
+service_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    SERVICE MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Current Service Status${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        printf "  %-20s %s\n" "Nginx:" "$(get_service_status nginx)"
+        printf "  %-20s %s\n" "Fail2Ban:" "$(get_service_status fail2ban)"
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Actions${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "  ${WHITE}Nginx${NC}"
+        echo "    1) Start Nginx"
+        echo "    2) Stop Nginx"
+        echo "    3) Restart Nginx"
+        echo "    4) Reload Nginx (graceful)"
+        echo "    5) Test Nginx Configuration"
+        echo ""
+        echo "  ${WHITE}Fail2Ban${NC}"
+        echo "    6) Start Fail2Ban"
+        echo "    7) Stop Fail2Ban"
+        echo "    8) Restart Fail2Ban"
+        echo "    9) Reload Fail2Ban"
+        echo ""
+        echo "  ${WHITE}All Services${NC}"
+        echo "    a) Start All"
+        echo "    x) Stop All"
+        echo "    r) Restart All"
+        echo ""
+        echo "    0) Back to maintenance menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) systemctl start nginx && print_success "Nginx started" || print_error "Failed to start Nginx"; press_enter ;;
+            2) systemctl stop nginx && print_success "Nginx stopped" || print_error "Failed to stop Nginx"; press_enter ;;
+            3) systemctl restart nginx && print_success "Nginx restarted" || print_error "Failed to restart Nginx"; press_enter ;;
+            4) systemctl reload nginx && print_success "Nginx reloaded" || print_error "Failed to reload Nginx"; press_enter ;;
+            5)
+                echo ""
+                echo -e "${CYAN}Testing Nginx configuration...${NC}"
+                nginx -t
+                press_enter
+                ;;
+            6) systemctl start fail2ban && print_success "Fail2Ban started" || print_error "Failed to start Fail2Ban"; press_enter ;;
+            7) systemctl stop fail2ban && print_success "Fail2Ban stopped" || print_error "Failed to stop Fail2Ban"; press_enter ;;
+            8) systemctl restart fail2ban && print_success "Fail2Ban restarted" || print_error "Failed to restart Fail2Ban"; press_enter ;;
+            9) systemctl reload fail2ban && print_success "Fail2Ban reloaded" || print_error "Failed to reload Fail2Ban"; press_enter ;;
+            a|A)
+                echo ""
+                echo -e "${CYAN}Starting all services...${NC}"
+                systemctl start nginx 2>/dev/null && echo -e "  ${GREEN}✓${NC} Nginx started" || echo -e "  ${RED}✗${NC} Nginx failed"
+                systemctl start fail2ban 2>/dev/null && echo -e "  ${GREEN}✓${NC} Fail2Ban started" || echo -e "  ${RED}✗${NC} Fail2Ban failed"
+                press_enter
+                ;;
+            x|X)
+                echo ""
+                echo -e "${CYAN}Stopping all services...${NC}"
+                systemctl stop nginx 2>/dev/null && echo -e "  ${GREEN}✓${NC} Nginx stopped" || echo -e "  ${RED}✗${NC} Nginx failed"
+                systemctl stop fail2ban 2>/dev/null && echo -e "  ${GREEN}✓${NC} Fail2Ban stopped" || echo -e "  ${RED}✗${NC} Fail2Ban failed"
+                press_enter
+                ;;
+            r|R)
+                echo ""
+                echo -e "${CYAN}Restarting all services...${NC}"
+                systemctl restart nginx 2>/dev/null && echo -e "  ${GREEN}✓${NC} Nginx restarted" || echo -e "  ${RED}✗${NC} Nginx failed"
+                systemctl restart fail2ban 2>/dev/null && echo -e "  ${GREEN}✓${NC} Fail2Ban restarted" || echo -e "  ${RED}✗${NC} Fail2Ban failed"
+                press_enter
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MAINTENANCE MODE - SITE MANAGEMENT
+# =============================================================================
+
+site_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    NGINX SITE MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        # List enabled sites
+        echo -e "${WHITE}${BOLD}Enabled Sites${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        if [ -d "/etc/nginx/sites-enabled" ]; then
+            local i=1
+            for site in /etc/nginx/sites-enabled/*; do
+                if [ -f "$site" ]; then
+                    local name=$(basename "$site")
+                    printf "  ${GREEN}●${NC} %d) %s\n" "$i" "$name"
+                    ((i++))
+                fi
+            done
+            [ "$i" -eq 1 ] && echo -e "  ${DIM}No sites enabled${NC}"
+        else
+            echo -e "  ${DIM}sites-enabled directory not found${NC}"
+        fi
+        echo ""
+        
+        # List available (disabled) sites
+        echo -e "${WHITE}${BOLD}Available (Disabled) Sites${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        if [ -d "/etc/nginx/sites-available" ]; then
+            local has_disabled=false
+            for site in /etc/nginx/sites-available/*; do
+                if [ -f "$site" ]; then
+                    local name=$(basename "$site")
+                    if [ ! -L "/etc/nginx/sites-enabled/$name" ]; then
+                        echo -e "  ${YELLOW}○${NC} $name"
+                        has_disabled=true
+                    fi
+                fi
+            done
+            [ "$has_disabled" = false ] && echo -e "  ${DIM}All sites are enabled${NC}"
+        fi
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Actions${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "    1) Enable a site"
+        echo "    2) Disable a site"
+        echo "    3) View site configuration"
+        echo "    4) Edit site configuration"
+        echo "    5) Add new Aegis site (runs setup for single site)"
+        echo "    6) Delete site"
+        echo ""
+        echo "    t) Test configuration"
+        echo "    r) Reload Nginx"
+        echo ""
+        echo "    0) Back to maintenance menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) enable_site ;;
+            2) disable_site ;;
+            3) view_site_config ;;
+            4) edit_site_config ;;
+            5) add_new_site ;;
+            6) delete_site ;;
+            t|T)
+                echo ""
+                nginx -t
+                press_enter
+                ;;
+            r|R)
+                echo ""
+                systemctl reload nginx && print_success "Nginx reloaded" || print_error "Reload failed"
+                press_enter
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+enable_site() {
+    echo ""
+    echo -e "${WHITE}Available sites to enable:${NC}"
+    
+    local sites=()
+    local i=1
+    for site in /etc/nginx/sites-available/*; do
+        if [ -f "$site" ]; then
+            local name=$(basename "$site")
+            if [ ! -L "/etc/nginx/sites-enabled/$name" ]; then
+                printf "  %d) %s\n" "$i" "$name"
+                sites+=("$name")
+                ((i++))
+            fi
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "  ${DIM}No sites available to enable${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    read -p "  Enter site number to enable (0 to cancel): " num
+    
+    if [ "$num" -gt 0 ] 2>/dev/null && [ "$num" -le ${#sites[@]} ] 2>/dev/null; then
+        local site="${sites[$((num-1))]}"
+        ln -sf "/etc/nginx/sites-available/$site" "/etc/nginx/sites-enabled/$site"
+        print_success "Site '$site' enabled"
+        
+        echo ""
+        read -p "  Test and reload Nginx? (y/n) [y]: " reload
+        reload=${reload:-y}
+        if [ "$reload" = "y" ] || [ "$reload" = "Y" ]; then
+            nginx -t && systemctl reload nginx && print_success "Nginx reloaded"
+        fi
+    fi
+    press_enter
+}
+
+disable_site() {
+    echo ""
+    echo -e "${WHITE}Enabled sites to disable:${NC}"
+    
+    local sites=()
+    local i=1
+    for site in /etc/nginx/sites-enabled/*; do
+        if [ -L "$site" ] || [ -f "$site" ]; then
+            local name=$(basename "$site")
+            printf "  %d) %s\n" "$i" "$name"
+            sites+=("$name")
+            ((i++))
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "  ${DIM}No sites to disable${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    read -p "  Enter site number to disable (0 to cancel): " num
+    
+    if [ "$num" -gt 0 ] 2>/dev/null && [ "$num" -le ${#sites[@]} ] 2>/dev/null; then
+        local site="${sites[$((num-1))]}"
+        
+        if [ "$site" = "default" ]; then
+            echo -e "${YELLOW}Warning: Disabling the default site${NC}"
+            read -p "  Are you sure? (y/n) [n]: " confirm
+            [ "$confirm" != "y" ] && [ "$confirm" != "Y" ] && return
+        fi
+        
+        rm -f "/etc/nginx/sites-enabled/$site"
+        print_success "Site '$site' disabled"
+        
+        echo ""
+        read -p "  Reload Nginx? (y/n) [y]: " reload
+        reload=${reload:-y}
+        if [ "$reload" = "y" ] || [ "$reload" = "Y" ]; then
+            nginx -t && systemctl reload nginx && print_success "Nginx reloaded"
+        fi
+    fi
+    press_enter
+}
+
+view_site_config() {
+    echo ""
+    echo -e "${WHITE}Select site to view:${NC}"
+    
+    local sites=()
+    local i=1
+    for site in /etc/nginx/sites-available/*; do
+        if [ -f "$site" ]; then
+            local name=$(basename "$site")
+            printf "  %d) %s\n" "$i" "$name"
+            sites+=("$name")
+            ((i++))
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "  ${DIM}No sites found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    read -p "  Enter site number (0 to cancel): " num
+    
+    if [ "$num" -gt 0 ] 2>/dev/null && [ "$num" -le ${#sites[@]} ] 2>/dev/null; then
+        local site="${sites[$((num-1))]}"
+        clear
+        echo ""
+        echo -e "${CYAN}━━━ /etc/nginx/sites-available/$site ━━━${NC}"
+        echo ""
+        
+        # Show with less for scrolling
+        if command -v less &>/dev/null; then
+            echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}q${NC} to quit, ${GREEN}arrows${NC} to scroll                       ${DIM}║${NC}"
+            echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+            sleep 1
+            less "/etc/nginx/sites-available/$site"
+        else
+            cat "/etc/nginx/sites-available/$site"
+            press_enter
+        fi
+    fi
+}
+
+edit_site_config() {
+    echo ""
+    echo -e "${WHITE}Select site to edit:${NC}"
+    
+    local sites=()
+    local i=1
+    for site in /etc/nginx/sites-available/*; do
+        if [ -f "$site" ]; then
+            local name=$(basename "$site")
+            printf "  %d) %s\n" "$i" "$name"
+            sites+=("$name")
+            ((i++))
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "  ${DIM}No sites found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    read -p "  Enter site number (0 to cancel): " num
+    
+    if [ "$num" -gt 0 ] 2>/dev/null && [ "$num" -le ${#sites[@]} ] 2>/dev/null; then
+        local site="${sites[$((num-1))]}"
+        local editor="${EDITOR:-nano}"
+        
+        # Check for available editors
+        if ! command -v "$editor" &>/dev/null; then
+            if command -v nano &>/dev/null; then
+                editor="nano"
+            elif command -v vim &>/dev/null; then
+                editor="vim"
+            elif command -v vi &>/dev/null; then
+                editor="vi"
+            else
+                print_error "No text editor found. Install nano: apt install nano"
+                press_enter
+                return
+            fi
+        fi
+        
+        echo ""
+        echo -e "${CYAN}Opening $site with $editor...${NC}"
+        echo -e "${DIM}Save and exit to return to menu${NC}"
+        sleep 1
+        
+        $editor "/etc/nginx/sites-available/$site"
+        
+        echo ""
+        read -p "  Test Nginx configuration? (y/n) [y]: " test_it
+        test_it=${test_it:-y}
+        if [ "$test_it" = "y" ] || [ "$test_it" = "Y" ]; then
+            nginx -t
+            if [ $? -eq 0 ]; then
+                read -p "  Reload Nginx? (y/n) [y]: " reload
+                reload=${reload:-y}
+                if [ "$reload" = "y" ] || [ "$reload" = "Y" ]; then
+                    systemctl reload nginx && print_success "Nginx reloaded"
+                fi
+            fi
+        fi
+    fi
+    press_enter
+}
+
+add_new_site() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    ADD NEW NGINX SITE"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${WHITE}This will run the site creation wizard for a new Aegis service.${NC}"
+    echo ""
+    echo "  Available site templates:"
+    echo "    1) Aegis service proxy (ReactMap, Dragonite, etc.)"
+    echo "    2) Custom reverse proxy"
+    echo "    3) Static file site"
+    echo ""
+    echo "    0) Cancel"
+    echo ""
+    read -p "  Select template: " template
+    
+    case $template in
+        1)
+            echo ""
+            echo -e "${WHITE}${BOLD}Aegis Service Proxy Setup${NC}"
+            echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+            echo ""
+            
+            read -p "  Site name (e.g., 'map', 'admin'): " site_name
+            [ -z "$site_name" ] && return
+            
+            read -p "  Backend port (e.g., 6001 for ReactMap): " backend_port
+            [ -z "$backend_port" ] && return
+            
+            read -p "  Domain or subdomain (e.g., map.example.com): " domain
+            [ -z "$domain" ] && return
+            
+            echo ""
+            echo -e "${CYAN}Creating site configuration...${NC}"
+            
+            create_simple_proxy_site "$site_name" "$backend_port" "$domain"
+            ;;
+        2)
+            echo ""
+            read -p "  Site name: " site_name
+            [ -z "$site_name" ] && return
+            
+            read -p "  Backend URL (e.g., http://localhost:8080): " backend_url
+            [ -z "$backend_url" ] && return
+            
+            read -p "  Server name/domain: " domain
+            [ -z "$domain" ] && return
+            
+            create_custom_proxy_site "$site_name" "$backend_url" "$domain"
+            ;;
+        3)
+            echo ""
+            read -p "  Site name: " site_name
+            [ -z "$site_name" ] && return
+            
+            read -p "  Document root path: " doc_root
+            [ -z "$doc_root" ] && return
+            
+            read -p "  Server name/domain: " domain
+            [ -z "$domain" ] && return
+            
+            create_static_site "$site_name" "$doc_root" "$domain"
+            ;;
+        0|"") return ;;
+    esac
+    
+    press_enter
+}
+
+create_simple_proxy_site() {
+    local name=$1
+    local port=$2
+    local domain=$3
+    
+    cat > "/etc/nginx/sites-available/aegis-$name" << EOF
+# Aegis $name site - Auto-generated
+server {
+    listen 80;
+    server_name $domain;
+    
+    location / {
+        proxy_pass http://127.0.0.1:$port;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_read_timeout 300;
+        proxy_connect_timeout 300;
+    }
+}
+EOF
+    
+    print_success "Site configuration created: /etc/nginx/sites-available/aegis-$name"
+    
+    echo ""
+    read -p "  Enable this site now? (y/n) [y]: " enable_it
+    enable_it=${enable_it:-y}
+    if [ "$enable_it" = "y" ] || [ "$enable_it" = "Y" ]; then
+        ln -sf "/etc/nginx/sites-available/aegis-$name" "/etc/nginx/sites-enabled/aegis-$name"
+        nginx -t && systemctl reload nginx && print_success "Site enabled and Nginx reloaded"
+    fi
+    
+    echo ""
+    read -p "  Set up SSL with Let's Encrypt? (y/n) [n]: " setup_ssl
+    if [ "$setup_ssl" = "y" ] || [ "$setup_ssl" = "Y" ]; then
+        if command -v certbot &>/dev/null; then
+            certbot --nginx -d "$domain"
+        else
+            print_warning "Certbot not installed. Install with: apt install certbot python3-certbot-nginx"
+        fi
+    fi
+}
+
+create_custom_proxy_site() {
+    local name=$1
+    local backend=$2
+    local domain=$3
+    
+    cat > "/etc/nginx/sites-available/$name" << EOF
+# Custom proxy site - $name
+server {
+    listen 80;
+    server_name $domain;
+    
+    location / {
+        proxy_pass $backend;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+    }
+}
+EOF
+    
+    print_success "Site configuration created: /etc/nginx/sites-available/$name"
+    
+    read -p "  Enable this site now? (y/n) [y]: " enable_it
+    enable_it=${enable_it:-y}
+    if [ "$enable_it" = "y" ] || [ "$enable_it" = "Y" ]; then
+        ln -sf "/etc/nginx/sites-available/$name" "/etc/nginx/sites-enabled/$name"
+        nginx -t && systemctl reload nginx && print_success "Site enabled and Nginx reloaded"
+    fi
+}
+
+create_static_site() {
+    local name=$1
+    local root=$2
+    local domain=$3
+    
+    cat > "/etc/nginx/sites-available/$name" << EOF
+# Static site - $name
+server {
+    listen 80;
+    server_name $domain;
+    root $root;
+    index index.html index.htm;
+    
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+EOF
+    
+    print_success "Site configuration created: /etc/nginx/sites-available/$name"
+    
+    read -p "  Enable this site now? (y/n) [y]: " enable_it
+    enable_it=${enable_it:-y}
+    if [ "$enable_it" = "y" ] || [ "$enable_it" = "Y" ]; then
+        ln -sf "/etc/nginx/sites-available/$name" "/etc/nginx/sites-enabled/$name"
+        nginx -t && systemctl reload nginx && print_success "Site enabled and Nginx reloaded"
+    fi
+}
+
+delete_site() {
+    echo ""
+    echo -e "${RED}${BOLD}DELETE SITE${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo -e "${WHITE}Select site to delete:${NC}"
+    
+    local sites=()
+    local i=1
+    for site in /etc/nginx/sites-available/*; do
+        if [ -f "$site" ]; then
+            local name=$(basename "$site")
+            printf "  %d) %s\n" "$i" "$name"
+            sites+=("$name")
+            ((i++))
+        fi
+    done
+    
+    if [ ${#sites[@]} -eq 0 ]; then
+        echo -e "  ${DIM}No sites found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    read -p "  Enter site number to DELETE (0 to cancel): " num
+    
+    if [ "$num" -gt 0 ] 2>/dev/null && [ "$num" -le ${#sites[@]} ] 2>/dev/null; then
+        local site="${sites[$((num-1))]}"
+        
+        echo ""
+        echo -e "${RED}WARNING: This will permanently delete '$site'${NC}"
+        read -p "  Type 'DELETE' to confirm: " confirm
+        
+        if [ "$confirm" = "DELETE" ]; then
+            rm -f "/etc/nginx/sites-enabled/$site"
+            rm -f "/etc/nginx/sites-available/$site"
+            print_success "Site '$site' deleted"
+            nginx -t && systemctl reload nginx
+        else
+            echo -e "${DIM}Cancelled${NC}"
+        fi
+    fi
+    press_enter
+}
+
+# =============================================================================
+# MAINTENANCE MODE - SSL/CERTIFICATE MANAGEMENT
+# =============================================================================
+
+ssl_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    SSL CERTIFICATE MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        # Show current certificates
+        echo -e "${WHITE}${BOLD}Current Certificates${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        
+        if command -v certbot &>/dev/null; then
+            certbot certificates 2>/dev/null | grep -E "Certificate Name:|Domains:|Expiry Date:" | while read line; do
+                echo "  $line"
+            done
+            [ -z "$(certbot certificates 2>/dev/null | grep 'Certificate Name:')" ] && echo -e "  ${DIM}No certificates found${NC}"
+        else
+            echo -e "  ${YELLOW}Certbot not installed${NC}"
+        fi
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Actions${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "    1) Request new certificate"
+        echo "    2) Renew all certificates"
+        echo "    3) Test renewal (dry-run)"
+        echo "    4) Revoke certificate"
+        echo "    5) Delete certificate"
+        echo "    6) Install Certbot (if not installed)"
+        echo ""
+        echo "    0) Back to maintenance menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                read -p "  Enter domain name: " domain
+                if [ -n "$domain" ]; then
+                    certbot --nginx -d "$domain"
+                fi
+                press_enter
+                ;;
+            2)
+                echo ""
+                certbot renew
+                press_enter
+                ;;
+            3)
+                echo ""
+                certbot renew --dry-run
+                press_enter
+                ;;
+            4)
+                echo ""
+                read -p "  Enter certificate name to revoke: " cert_name
+                if [ -n "$cert_name" ]; then
+                    certbot revoke --cert-name "$cert_name"
+                fi
+                press_enter
+                ;;
+            5)
+                echo ""
+                read -p "  Enter certificate name to delete: " cert_name
+                if [ -n "$cert_name" ]; then
+                    certbot delete --cert-name "$cert_name"
+                fi
+                press_enter
+                ;;
+            6)
+                echo ""
+                if command -v apt-get &>/dev/null; then
+                    apt-get update && apt-get install -y certbot python3-certbot-nginx
+                elif command -v yum &>/dev/null; then
+                    yum install -y certbot python3-certbot-nginx
+                fi
+                press_enter
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MAINTENANCE MODE - FAIL2BAN MANAGEMENT
+# =============================================================================
+
+fail2ban_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    FAIL2BAN MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        if ! command -v fail2ban-client &>/dev/null; then
+            echo -e "  ${YELLOW}Fail2Ban is not installed${NC}"
+            echo ""
+            read -p "  Install Fail2Ban? (y/n): " install_it
+            if [ "$install_it" = "y" ] || [ "$install_it" = "Y" ]; then
+                install_fail2ban
+            fi
+            press_enter
+            return
+        fi
+        
+        # Show jail status
+        echo -e "${WHITE}${BOLD}Jail Status${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        
+        fail2ban-client status 2>/dev/null | head -20
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Actions${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "    1) View jail details"
+        echo "    2) Unban IP address"
+        echo "    3) Ban IP address"
+        echo "    4) View banned IPs"
+        echo "    5) Reload Fail2Ban"
+        echo "    6) View Fail2Ban log"
+        echo ""
+        echo "    0) Back to maintenance menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                echo "  Available jails:"
+                fail2ban-client status 2>/dev/null | grep "Jail list:" | sed 's/.*://; s/,/\n/g' | while read jail; do
+                    echo "    - $jail"
+                done
+                echo ""
+                read -p "  Enter jail name: " jail_name
+                if [ -n "$jail_name" ]; then
+                    fail2ban-client status "$jail_name"
+                fi
+                press_enter
+                ;;
+            2)
+                echo ""
+                read -p "  Enter IP to unban: " ip_addr
+                read -p "  Enter jail name (or 'all'): " jail_name
+                if [ -n "$ip_addr" ]; then
+                    if [ "$jail_name" = "all" ]; then
+                        fail2ban-client unban "$ip_addr"
+                    else
+                        fail2ban-client set "$jail_name" unbanip "$ip_addr"
+                    fi
+                fi
+                press_enter
+                ;;
+            3)
+                echo ""
+                read -p "  Enter IP to ban: " ip_addr
+                read -p "  Enter jail name: " jail_name
+                if [ -n "$ip_addr" ] && [ -n "$jail_name" ]; then
+                    fail2ban-client set "$jail_name" banip "$ip_addr"
+                fi
+                press_enter
+                ;;
+            4)
+                echo ""
+                echo -e "${WHITE}Banned IPs by jail:${NC}"
+                fail2ban-client status 2>/dev/null | grep "Jail list:" | sed 's/.*://; s/,/\n/g' | while read jail; do
+                    jail=$(echo "$jail" | tr -d ' ')
+                    [ -z "$jail" ] && continue
+                    local banned=$(fail2ban-client status "$jail" 2>/dev/null | grep "Banned IP list:" | sed 's/.*://')
+                    if [ -n "$banned" ] && [ "$banned" != " " ]; then
+                        echo "  $jail: $banned"
+                    fi
+                done
+                press_enter
+                ;;
+            5)
+                fail2ban-client reload && print_success "Fail2Ban reloaded"
+                press_enter
+                ;;
+            6)
+                echo ""
+                echo -e "${DIM}Press q to quit viewer${NC}"
+                sleep 1
+                less /var/log/fail2ban.log
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MAINTENANCE MODE - FIREWALL MANAGEMENT
+# =============================================================================
+
+firewall_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    UFW FIREWALL MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        if ! command -v ufw &>/dev/null; then
+            echo -e "  ${YELLOW}UFW is not installed${NC}"
+            echo ""
+            read -p "  Install UFW? (y/n): " install_it
+            if [ "$install_it" = "y" ] || [ "$install_it" = "Y" ]; then
+                apt-get install -y ufw 2>/dev/null || yum install -y ufw 2>/dev/null
+            fi
+            press_enter
+            return
+        fi
+        
+        # Show current status
+        echo -e "${WHITE}${BOLD}Current Status${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        ufw status verbose 2>/dev/null | head -20
+        echo ""
+        
+        echo -e "${WHITE}${BOLD}Actions${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "    1) Enable firewall"
+        echo "    2) Disable firewall"
+        echo "    3) Allow port"
+        echo "    4) Deny port"
+        echo "    5) Delete rule"
+        echo "    6) View numbered rules"
+        echo "    7) Reset firewall (removes all rules)"
+        echo ""
+        echo "    0) Back to maintenance menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                echo -e "${YELLOW}WARNING: Make sure SSH is allowed before enabling!${NC}"
+                read -p "  Enable UFW? (y/n): " confirm
+                if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+                    ufw --force enable
+                fi
+                press_enter
+                ;;
+            2)
+                ufw disable
+                press_enter
+                ;;
+            3)
+                echo ""
+                read -p "  Enter port to allow (e.g., 80, 443, 22): " port
+                if [ -n "$port" ]; then
+                    ufw allow "$port"
+                fi
+                press_enter
+                ;;
+            4)
+                echo ""
+                read -p "  Enter port to deny: " port
+                if [ -n "$port" ]; then
+                    ufw deny "$port"
+                fi
+                press_enter
+                ;;
+            5)
+                echo ""
+                ufw status numbered
+                echo ""
+                read -p "  Enter rule number to delete: " rule_num
+                if [ -n "$rule_num" ]; then
+                    ufw delete "$rule_num"
+                fi
+                press_enter
+                ;;
+            6)
+                echo ""
+                ufw status numbered
+                press_enter
+                ;;
+            7)
+                echo ""
+                echo -e "${RED}WARNING: This will remove ALL firewall rules!${NC}"
+                read -p "  Type 'RESET' to confirm: " confirm
+                if [ "$confirm" = "RESET" ]; then
+                    ufw reset
+                fi
+                press_enter
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MAINTENANCE MODE - MAIN MENU
+# =============================================================================
+
+maintenance_mode() {
+    while true; do
+        show_status_dashboard
+        
+        echo -e "${WHITE}${BOLD}Maintenance Options${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo "    1) Service Management      - Start, stop, restart services"
+        echo "    2) Site Management         - Enable, disable, add, edit sites"
+        echo "    3) SSL Certificates        - Manage Let's Encrypt certificates"
+        echo "    4) Fail2Ban Management     - Manage bans and jails"
+        echo "    5) Firewall (UFW)          - Manage firewall rules"
+        echo ""
+        echo "    v) View Nginx Error Log"
+        echo "    t) Test Nginx Configuration"
+        echo "    r) Refresh Status"
+        echo ""
+        echo "    0) Exit / Return to Main Menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) service_management_menu ;;
+            2) site_management_menu ;;
+            3) ssl_management_menu ;;
+            4) fail2ban_management_menu ;;
+            5) firewall_management_menu ;;
+            v|V)
+                clear
+                echo ""
+                echo -e "${CYAN}━━━ Nginx Error Log (last 50 lines) ━━━${NC}"
+                echo -e "${DIM}Press q to quit viewer${NC}"
+                sleep 1
+                tail -50 /var/log/nginx/error.log 2>/dev/null | less -R
+                ;;
+            t|T)
+                echo ""
+                nginx -t
+                press_enter
+                ;;
+            r|R) continue ;;
+            0|"")
+                return_to_main
+                ;;
+        esac
+    done
+}
+
+# =============================================================================
+# MODE SELECTION
+# =============================================================================
+
+show_mode_selection() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "          AEGIS NGINX SECURITY & MANAGEMENT SCRIPT"
+    draw_box_divider
+    draw_box_line "  Choose how you want to use this script:"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${WHITE}${BOLD}1) Setup Mode${NC}"
+    echo -e "     ${DIM}First-time setup of Nginx reverse proxy, SSL, Fail2Ban, UFW${NC}"
+    echo -e "     ${DIM}Run this for initial configuration of your Aegis stack${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}2) Maintenance Mode${NC}"
+    echo -e "     ${DIM}Manage existing Nginx configuration, services, and security${NC}"
+    echo -e "     ${DIM}Status dashboard, service control, site management${NC}"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}0) Exit${NC}"
+    echo ""
+    read -p "  Select mode: " mode_choice
+    
+    case $mode_choice in
+        1)
+            SCRIPT_MODE="setup"
+            ;;
+        2)
+            SCRIPT_MODE="maintenance"
+            ;;
+        0|"")
+            return_to_main
+            ;;
+        *)
+            show_mode_selection
+            ;;
+    esac
+}
 
 # Return to main menu function
 return_to_main() {
@@ -2462,11 +3651,11 @@ print_summary() {
     echo ""
 }
 
-# Main execution
-main() {
+# Setup mode execution (original main function renamed)
+run_setup_mode() {
     clear
     echo "=============================================="
-    echo "  Aegis All-in-One Nginx Reverse Proxy Setup"
+    echo "  Aegis Nginx Reverse Proxy Setup"
     echo "  By The Pokemod Group"
     echo "  https://pokemod.dev/"
     echo "=============================================="
@@ -2608,6 +3797,60 @@ main() {
     fi
 }
 
+# Main execution
+main() {
+    # Check for command line arguments
+    case "${1:-}" in
+        --setup|-s)
+            check_root
+            run_setup_mode
+            return
+            ;;
+        --maintenance|-m)
+            check_root
+            maintenance_mode
+            return
+            ;;
+        --status)
+            check_root
+            show_status_dashboard
+            press_enter
+            return
+            ;;
+        --help|-h)
+            echo ""
+            echo "Aegis Nginx Security & Management Script"
+            echo ""
+            echo "Usage: $0 [option]"
+            echo ""
+            echo "Options:"
+            echo "  (none)           Interactive mode selection"
+            echo "  -s, --setup      Run setup mode directly"
+            echo "  -m, --maintenance  Run maintenance mode directly"
+            echo "  --status         Show status dashboard only"
+            echo "  -h, --help       Show this help"
+            echo ""
+            exit 0
+            ;;
+    esac
+    
+    # Check root first
+    check_root
+    
+    # Show mode selection
+    show_mode_selection
+    
+    # Run selected mode
+    case "$SCRIPT_MODE" in
+        setup)
+            run_setup_mode
+            ;;
+        maintenance)
+            maintenance_mode
+            ;;
+    esac
+}
+
 # Run main function
-main
+main "$@"
 

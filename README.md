@@ -96,7 +96,7 @@ Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/T
 1. **Docker Engine** (version 20.10+)
 2. **Docker Compose Plugin** (v2)
 
-> 💡 **Tip**: The setup script (`setup.sh`) can automatically install Docker and Docker Compose for you if they're not already installed.
+> 💡 **Tip**: The setup script (`setup.sh`) can automatically install Docker, Docker Compose, and add your user to the docker group - no manual steps required!
 
 ### Database Compatibility
 
@@ -113,6 +113,8 @@ sudo usermod -aG docker $USER
 
 # Log out and back in for group changes to take effect
 ```
+
+> 💡 **Note**: The setup script automatically adds your user to the docker group if not already a member, and reminds you to log out/in to activate it.
 
 ### Configure Docker Logging (Recommended)
 
@@ -186,6 +188,7 @@ sudo bash ./aegis.sh
 - Nginx configuration status
 - Available scripts detection
 - Git repository update status
+- **Container image update availability**
 
 **Main Menu Options:**
 
@@ -207,8 +210,9 @@ sudo bash ./aegis.sh
 | | -) Stop Service(s) | Stop individual services |
 | | *) Restart Service(s) | Restart individual services |
 | **Updates** | i) Pull Images Only | Pull latest images (no restart) |
-| | p) Pull Latest | Git pull only |
+| | p) Pull Latest | Git pull only (auto-preserves configs) |
 | | u) Update & Rebuild | Pull, rebuild, restart |
+| | b) Force Rebuild | Rebuild containers from scratch |
 | **Maintenance** | d) Docker Purge | Clean up Docker resources |
 | | z) Uninstall Stack | Remove Aegis stack |
 | **Other** | h) Help | Documentation for all options |
@@ -221,8 +225,9 @@ sudo bash ./aegis.sh
 ./aegis.sh --stop       # Stop all containers
 ./aegis.sh --restart    # Restart all containers
 ./aegis.sh --pull-images # Pull latest Docker images (no restart)
-./aegis.sh --pull       # Git pull latest changes
+./aegis.sh --pull       # Git pull latest changes (auto-preserves configs)
 ./aegis.sh --update     # Pull, rebuild, restart stack
+./aegis.sh --rebuild    # Force rebuild all containers
 ./aegis.sh --dashboard  # Detailed container dashboard
 ./aegis.sh --help       # Help
 ```
@@ -265,6 +270,7 @@ sudo bash ./setup.sh
 
 **What it does:**
 - ✅ Installs Docker and Docker Compose if missing
+- ✅ **Automatically adds user to docker group** (no more sudo for docker commands)
 - ✅ Configures Docker log rotation (prevents disk space issues)
 - ✅ **Checks port availability** for all stack services with remediation options
 - ✅ Detects system resources (RAM, CPU, storage type)
@@ -277,15 +283,19 @@ sudo bash ./setup.sh
 
 ---
 
-### `nginx-setup.sh` - Security Setup
+### `nginx-setup.sh` - Security Setup & Management
 
-Comprehensive security script for external access.
+**Dual-mode script** for initial security setup AND ongoing maintenance.
 
 ```bash
 sudo bash ./nginx-setup.sh
 ```
 
-**What it does:**
+**Two Modes:**
+
+#### Setup Mode
+First-time configuration of Nginx reverse proxy, SSL, and security:
+
 - 🔒 Configures Nginx reverse proxy (subdomain or path-based routing)
 - 🔐 Sets up SSL/TLS with Let's Encrypt (free certificates)
 - 🛡️ Configures authentication (Basic Auth or Authelia SSO)
@@ -294,7 +304,7 @@ sudo bash ./nginx-setup.sh
 - 🐳 Secures Docker ports (binds to localhost, forces traffic through Nginx)
 - 📱 Sets up Rotom device WebSocket proxy
 
-**11-Step Process:**
+**11-Step Setup Process:**
 1. Permission verification
 2. Web server detection/installation
 3. Domain configuration
@@ -306,6 +316,42 @@ sudo bash ./nginx-setup.sh
 9. Fail2Ban installation
 10. UFW firewall configuration
 11. Docker port security
+
+#### Maintenance Mode
+Manage existing security configuration with colorful status dashboard:
+
+**Status Dashboard Shows:**
+- Nginx, Fail2Ban, UFW service status
+- Enabled/available sites count
+- SSL certificate status and expiry
+- Active Fail2Ban jails and banned IPs
+- Port listening status (80/443)
+- Configuration health check
+
+**Maintenance Menu Options:**
+
+| Category | Options |
+|----------|---------|
+| **Service Management** | Start, stop, restart, reload Nginx and Fail2Ban |
+| **Site Management** | Enable/disable sites, view/edit configs, add new sites |
+| **SSL Certificates** | Request, renew, revoke, delete certificates |
+| **Fail2Ban** | View jails, ban/unban IPs, view logs |
+| **UFW Firewall** | Enable/disable, allow/deny ports, manage rules |
+
+**Add New Sites:**
+- Aegis service proxy template (ReactMap, Dragonite, etc.)
+- Custom reverse proxy
+- Static file site
+- Auto-enable and optional SSL setup
+
+**Command Line Options:**
+```bash
+./nginx-setup.sh              # Interactive mode selection
+./nginx-setup.sh -s           # Setup mode directly
+./nginx-setup.sh -m           # Maintenance mode directly
+./nginx-setup.sh --status     # Show status dashboard only
+./nginx-setup.sh --help       # Help
+```
 
 ---
 
@@ -485,8 +531,14 @@ sudo bash ./logs.sh
 **Main Dashboard Shows:**
 - All services with running/stopped status
 - Log size for each container
-- Error counts (total, warnings, critical)
+- Error counts (total, warnings, critical) with **smart filtering** (excludes info messages)
 - Color-coded health indicators
+
+**Log Search Feature (Press 's'):**
+- Search all containers or specific container by keyword
+- Configurable context lines (default 3)
+- Results summary showing matches per container
+- User-friendly navigation with clear quit instructions
 
 **Service Detail View:**
 - Container uptime and status
@@ -542,6 +594,12 @@ sudo bash ./logs.sh
 **Error Analysis Features:**
 - View errors by category with context
 - Color-coded log output (errors=red, warnings=yellow)
+- **Smart error filtering** - excludes info messages like:
+  - `ℹ` prefixed lines, `level=info` Grafana logs
+  - Database bound/migration messages
+  - "Successfully" and "completed" messages
+  - ReactMap `[CONFIG]`, `[API]`, `[STATS]` etc.
+- **Startup error annotation** - marks errors that occurred during container startup
 - **Numbered Error List** (press `e` in service detail):
   - Paginated view of all errors (20 per page)
   - Shows error number, log line number, and message
@@ -555,6 +613,15 @@ sudo bash ./logs.sh
   - Database errors
   - Connection issues
   - Custom regex search
+
+**User-Friendly Navigation:**
+All log viewers display clear instructions:
+```
+╔══════════════════════════════════════════════════════════════════════════╗
+║  Navigation: Press Enter to scroll, q to quit, / to search              ║
+║  Arrows: ↑/↓ scroll line, PgUp/PgDn scroll page                         ║
+╚══════════════════════════════════════════════════════════════════════════╝
+```
 
 **Device Disconnect Monitor:**
 - Scans Rotom and Dragonite logs
@@ -1045,6 +1112,19 @@ The security script guides you through 11 steps:
 10. **UFW Firewall** - Port management
 11. **Docker Security** - Localhost port binding
 
+### Ongoing Security Management
+
+After initial setup, use **Maintenance Mode** to manage your security configuration:
+
+```bash
+sudo bash ./nginx-setup.sh -m
+```
+
+This provides a colorful dashboard showing:
+- All service statuses at a glance
+- Quick health checks
+- Easy access to common tasks (restart services, add sites, manage certificates)
+
 ---
 
 ## Configuration
@@ -1226,6 +1306,27 @@ docker system df
 # Clean up unused resources
 docker system prune -a
 ```
+
+### Pulling Updates
+
+The scripts automatically preserve your configuration when pulling updates:
+
+```bash
+# Via aegis.sh (recommended)
+sudo bash ./aegis.sh
+# Select p) Pull Latest
+
+# Or directly via git
+git pull  # May prompt about local changes
+```
+
+**What happens automatically:**
+1. Your local config changes (`.env`, `*.toml`, etc.) are saved
+2. Updates are pulled from GitHub
+3. Your configs are restored
+4. No manual stashing required!
+
+> 💡 **Tip**: If you see merge conflicts after pulling, run `setup.sh` again to regenerate configs, or manually edit the conflicting files.
 
 ---
 
