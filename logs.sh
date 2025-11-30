@@ -922,6 +922,622 @@ EOF
 }
 
 # =============================================================================
+# XILRIWS STATUS & MONITORING
+# =============================================================================
+
+# Xilriws log patterns
+XILRIWS_PATTERNS=(
+    ["success"]="Successfully obtained cookies|cookie.*success|login.*success"
+    ["auth_banned"]="auth.banned|auth_banned|authentication.*banned"
+    ["invalid_cred"]="invalid.*credential|wrong.*password|incorrect.*login|invalid.*password"
+    ["tunnel_error"]="tunnel.*error|tunneling.*failed|proxy.*tunnel|CONNECT.*failed"
+    ["code_15"]="code.*15|error.*15|status.*15"
+    ["perm_banned"]="permanently.*banned|permanent.*ban|IP.*banned|banned.*IP"
+    ["rate_limit"]="rate.*limit|too.*many.*requests|429"
+    ["timeout"]="timeout|timed.*out|ETIMEDOUT"
+    ["conn_refused"]="connection.*refused|ECONNREFUSED"
+    ["proxy_error"]="proxy.*error|proxy.*failed|bad.*proxy"
+)
+
+# Get Xilriws stats from logs
+get_xilriws_stats() {
+    local container="xilriws"
+    local status=$(get_container_status "$container")
+    
+    if [ "$status" != "running" ]; then
+        return 1
+    fi
+    
+    # Get log content once for efficiency
+    local log_content=$(docker logs "$container" 2>&1)
+    
+    # Count various events
+    XILRIWS_SUCCESS=$(echo "$log_content" | grep -iEc "Successfully obtained cookies|cookie.*success|login.*success" || echo "0")
+    XILRIWS_AUTH_BANNED=$(echo "$log_content" | grep -iEc "auth.banned|auth_banned|authentication.*banned" || echo "0")
+    XILRIWS_INVALID_CRED=$(echo "$log_content" | grep -iEc "invalid.*credential|wrong.*password|incorrect.*login|invalid.*password" || echo "0")
+    XILRIWS_TUNNEL_ERROR=$(echo "$log_content" | grep -iEc "tunnel.*error|tunneling.*failed|proxy.*tunnel|CONNECT.*failed" || echo "0")
+    XILRIWS_CODE_15=$(echo "$log_content" | grep -iEc "code.*15|error.*15|status.*15|code\":15" || echo "0")
+    XILRIWS_PERM_BANNED=$(echo "$log_content" | grep -iEc "permanently.*banned|permanent.*ban|IP.*banned" || echo "0")
+    XILRIWS_RATE_LIMIT=$(echo "$log_content" | grep -iEc "rate.*limit|too.*many.*requests|429" || echo "0")
+    XILRIWS_TIMEOUT=$(echo "$log_content" | grep -iEc "timeout|timed.*out|ETIMEDOUT" || echo "0")
+    XILRIWS_CONN_REFUSED=$(echo "$log_content" | grep -iEc "connection.*refused|ECONNREFUSED" || echo "0")
+    XILRIWS_PROXY_ERROR=$(echo "$log_content" | grep -iEc "proxy.*error|proxy.*failed|bad.*proxy" || echo "0")
+    XILRIWS_TOTAL_ERRORS=$(echo "$log_content" | grep -iEc "error|failed|exception" || echo "0")
+    
+    # Calculate other errors
+    local known_errors=$((XILRIWS_AUTH_BANNED + XILRIWS_INVALID_CRED + XILRIWS_TUNNEL_ERROR + XILRIWS_CODE_15 + XILRIWS_PERM_BANNED + XILRIWS_RATE_LIMIT + XILRIWS_TIMEOUT + XILRIWS_CONN_REFUSED + XILRIWS_PROXY_ERROR))
+    XILRIWS_OTHER_ERRORS=$((XILRIWS_TOTAL_ERRORS - known_errors))
+    [ "$XILRIWS_OTHER_ERRORS" -lt 0 ] && XILRIWS_OTHER_ERRORS=0
+    
+    return 0
+}
+
+# Find IPs that appear banned in logs
+get_banned_ips_from_logs() {
+    local container="xilriws"
+    # Look for IP patterns associated with ban messages
+    docker logs "$container" 2>&1 | grep -iE "banned.*([0-9]{1,3}\.){3}[0-9]{1,3}|([0-9]{1,3}\.){3}[0-9]{1,3}.*banned" | \
+        grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort | uniq -c | sort -rn
+}
+
+# Find IPs with many failures and no success
+get_failing_ips() {
+    local container="xilriws"
+    local threshold=${1:-25}
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        echo "proxy.txt not found"
+        return 1
+    fi
+    
+    # Get IPs from logs with failure counts
+    local failing_ips=$(docker logs "$container" 2>&1 | grep -iE "error|failed|timeout|refused" | \
+        grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort | uniq -c | sort -rn | \
+        awk -v thresh="$threshold" '$1 >= thresh {print $2}')
+    
+    # Get IPs with successful logins
+    local success_ips=$(docker logs "$container" 2>&1 | grep -iE "success|obtained.*cookie" | \
+        grep -oE "([0-9]{1,3}\.){3}[0-9]{1,3}" | sort -u)
+    
+    # Return IPs that have failures but no successes
+    echo "$failing_ips" | while read ip; do
+        if [ -n "$ip" ] && ! echo "$success_ips" | grep -q "^$ip$"; then
+            # Check if IP is in proxy.txt
+            if grep -q "$ip" "$proxy_file" 2>/dev/null; then
+                local count=$(docker logs "$container" 2>&1 | grep -E "error|failed" | grep -c "$ip" 2>/dev/null || echo "0")
+                echo "$ip ($count failures)"
+            fi
+        fi
+    done
+}
+
+# Show Xilriws status dashboard
+show_xilriws_status() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    XILRIWS STATUS DASHBOARD"
+    draw_box_bottom
+    echo ""
+    
+    local status=$(get_container_status "xilriws")
+    
+    if [ "$status" = "not_found" ]; then
+        echo -e "  ${RED}Xilriws container not found${NC}"
+        press_enter
+        return
+    fi
+    
+    if [ "$status" = "stopped" ]; then
+        echo -e "  ${RED}Xilriws container is not running${NC}"
+        echo ""
+        read -p "  Would you like to start it? (y/n): " start_it
+        if [ "$start_it" = "y" ]; then
+            docker start xilriws
+            print_success "Container started"
+            sleep 2
+        else
+            press_enter
+            return
+        fi
+    fi
+    
+    echo -e "  ${CYAN}Analyzing Xilriws logs...${NC}"
+    
+    # Get stats
+    get_xilriws_stats
+    
+    # Get log size
+    local log_size=$(get_log_size "xilriws")
+    local log_size_fmt=$(format_bytes "$log_size")
+    
+    # Get uptime
+    local uptime=$(docker ps --filter "name=xilriws" --format "{{.Status}}" 2>/dev/null | head -1)
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    XILRIWS STATUS DASHBOARD"
+    draw_box_divider
+    
+    printf "${CYAN}║${NC}  Container Status: ${GREEN}%-53s${NC} ${CYAN}║${NC}\n" "$uptime"
+    printf "${CYAN}║${NC}  Log Size:         %-54s ${CYAN}║${NC}\n" "$log_size_fmt"
+    
+    draw_box_divider
+    draw_box_line "  LOGIN STATISTICS"
+    draw_box_divider
+    
+    printf "${CYAN}║${NC}    ${GREEN}✓ Successful Logins:${NC}    %-49s ${CYAN}║${NC}\n" "$XILRIWS_SUCCESS"
+    printf "${CYAN}║${NC}    ${RED}✗ Auth-Banned:${NC}           %-49s ${CYAN}║${NC}\n" "$XILRIWS_AUTH_BANNED"
+    printf "${CYAN}║${NC}    ${RED}✗ Invalid Credentials:${NC}   %-49s ${CYAN}║${NC}\n" "$XILRIWS_INVALID_CRED"
+    
+    draw_box_divider
+    draw_box_line "  ERROR BREAKDOWN"
+    draw_box_divider
+    
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Tunneling Errors:${NC}      %-49s ${CYAN}║${NC}\n" "$XILRIWS_TUNNEL_ERROR"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Code 15 Errors:${NC}        %-49s ${CYAN}║${NC}\n" "$XILRIWS_CODE_15"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Rate Limited:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_RATE_LIMIT"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Timeouts:${NC}              %-49s ${CYAN}║${NC}\n" "$XILRIWS_TIMEOUT"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Connection Refused:${NC}    %-49s ${CYAN}║${NC}\n" "$XILRIWS_CONN_REFUSED"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Proxy Errors:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_PROXY_ERROR"
+    printf "${CYAN}║${NC}    ${RED}✗ Permanently Banned IPs:${NC} %-49s ${CYAN}║${NC}\n" "$XILRIWS_PERM_BANNED"
+    printf "${CYAN}║${NC}    ${DIM}○ Other Errors:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_OTHER_ERRORS"
+    
+    draw_box_divider
+    printf "${CYAN}║${NC}    ${WHITE}TOTAL ERRORS:${NC}            %-49s ${CYAN}║${NC}\n" "$XILRIWS_TOTAL_ERRORS"
+    
+    # Calculate success rate
+    local total_attempts=$((XILRIWS_SUCCESS + XILRIWS_AUTH_BANNED + XILRIWS_INVALID_CRED))
+    if [ "$total_attempts" -gt 0 ]; then
+        local success_rate=$((XILRIWS_SUCCESS * 100 / total_attempts))
+        printf "${CYAN}║${NC}    ${WHITE}Success Rate:${NC}            %-49s ${CYAN}║${NC}\n" "${success_rate}%"
+    fi
+    
+    draw_box_bottom
+    echo ""
+}
+
+# Xilriws menu
+show_xilriws_menu() {
+    while true; do
+        show_xilriws_status
+        
+        echo -e "${WHITE}${BOLD}Xilriws Options${NC}"
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+        echo "    1) View recent errors"
+        echo "    2) View banned IP addresses from logs"
+        echo "    3) Find failing proxies (25+ failures, no success)"
+        echo "    4) Remove banned IPs from proxy.txt"
+        echo "    5) Remove failing proxies from proxy.txt"
+        echo "    6) Live monitoring mode (auto-restart on failure)"
+        echo "    7) Clear Xilriws logs"
+        echo "    8) Restart Xilriws container"
+        echo "    r) Refresh"
+        echo "    0) Back to main menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) view_xilriws_errors ;;
+            2) view_banned_ips ;;
+            3) find_failing_proxies ;;
+            4) remove_banned_ips ;;
+            5) remove_failing_proxies ;;
+            6) xilriws_live_monitor ;;
+            7) clear_xilriws_logs ;;
+            8) restart_xilriws ;;
+            r|R) continue ;;
+            0) return ;;
+        esac
+    done
+}
+
+# View recent Xilriws errors
+view_xilriws_errors() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    XILRIWS RECENT ERRORS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${CYAN}Last 50 error entries:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    docker logs xilriws 2>&1 | grep -iE "error|failed|banned|invalid|timeout" | tail -50
+    
+    press_enter
+}
+
+# View banned IPs
+view_banned_ips() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    BANNED IP ADDRESSES"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "${CYAN}IPs associated with ban messages (count | IP):${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local banned=$(get_banned_ips_from_logs)
+    
+    if [ -z "$banned" ]; then
+        echo "  No banned IPs detected in logs"
+    else
+        echo "$banned" | head -30
+        local total=$(echo "$banned" | wc -l)
+        echo ""
+        echo -e "  ${YELLOW}Total unique IPs with ban indicators: $total${NC}"
+    fi
+    
+    press_enter
+}
+
+# Find failing proxies
+find_failing_proxies() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    FAILING PROXIES"
+    draw_box_bottom
+    echo ""
+    
+    read -p "  Failure threshold (default 25): " threshold
+    threshold=${threshold:-25}
+    
+    echo ""
+    echo -e "${CYAN}IPs with $threshold+ failures and NO successful logins:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local failing=$(get_failing_ips "$threshold")
+    
+    if [ -z "$failing" ]; then
+        echo "  No proxies found matching criteria"
+    else
+        echo "$failing"
+        local total=$(echo "$failing" | grep -c "." || echo "0")
+        echo ""
+        echo -e "  ${YELLOW}Total failing proxies: $total${NC}"
+    fi
+    
+    press_enter
+}
+
+# Remove banned IPs from proxy.txt
+remove_banned_ips() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    REMOVE BANNED IPs"
+    draw_box_bottom
+    echo ""
+    
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found in current directory"
+        press_enter
+        return
+    fi
+    
+    # Get banned IPs
+    local banned_ips=$(get_banned_ips_from_logs | awk '{print $2}')
+    
+    if [ -z "$banned_ips" ]; then
+        echo "  No banned IPs detected in logs"
+        press_enter
+        return
+    fi
+    
+    local count=$(echo "$banned_ips" | wc -l)
+    echo -e "  Found ${RED}$count${NC} IPs with ban indicators"
+    echo ""
+    
+    # Show IPs that would be removed
+    echo -e "${CYAN}IPs to be removed from proxy.txt:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    local found_in_proxy=0
+    while IFS= read -r ip; do
+        if [ -n "$ip" ] && grep -q "$ip" "$proxy_file" 2>/dev/null; then
+            echo "  - $ip"
+            ((found_in_proxy++))
+        fi
+    done <<< "$banned_ips"
+    
+    if [ "$found_in_proxy" -eq 0 ]; then
+        echo "  None of the banned IPs are in proxy.txt"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    echo -e "  ${YELLOW}$found_in_proxy IPs will be removed from proxy.txt${NC}"
+    echo ""
+    
+    read -p "  Proceed with removal? (y/n): " confirm
+    
+    if [ "$confirm" = "y" ]; then
+        # Backup
+        cp "$proxy_file" "${proxy_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        print_success "Backup created"
+        
+        # Remove IPs
+        local removed=0
+        while IFS= read -r ip; do
+            if [ -n "$ip" ]; then
+                if grep -q "$ip" "$proxy_file" 2>/dev/null; then
+                    sed -i "/$ip/d" "$proxy_file"
+                    ((removed++))
+                fi
+            fi
+        done <<< "$banned_ips"
+        
+        # Restore ownership
+        if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+            chown "$REAL_USER:$REAL_GROUP" "$proxy_file" 2>/dev/null || true
+            chown "$REAL_USER:$REAL_GROUP" "${proxy_file}.backup."* 2>/dev/null || true
+        fi
+        
+        print_success "Removed $removed IPs from proxy.txt"
+    else
+        print_info "Operation cancelled"
+    fi
+    
+    press_enter
+}
+
+# Remove failing proxies from proxy.txt
+remove_failing_proxies() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    REMOVE FAILING PROXIES"
+    draw_box_bottom
+    echo ""
+    
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found in current directory"
+        press_enter
+        return
+    fi
+    
+    read -p "  Failure threshold (default 25): " threshold
+    threshold=${threshold:-25}
+    
+    echo ""
+    echo -e "${CYAN}Finding proxies with $threshold+ failures and no successful logins...${NC}"
+    
+    # Get failing IPs (just the IP part)
+    local failing_ips=$(get_failing_ips "$threshold" | sed 's/ (.*//')
+    
+    if [ -z "$failing_ips" ]; then
+        echo "  No failing proxies found matching criteria"
+        press_enter
+        return
+    fi
+    
+    local count=$(echo "$failing_ips" | grep -c "." || echo "0")
+    echo ""
+    echo -e "  Found ${RED}$count${NC} failing proxies"
+    echo ""
+    
+    # Show IPs that would be removed
+    echo -e "${CYAN}Proxies to be removed:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    echo "$failing_ips" | head -20
+    [ "$count" -gt 20 ] && echo "  ... and $((count - 20)) more"
+    echo ""
+    
+    read -p "  Proceed with removal? (y/n): " confirm
+    
+    if [ "$confirm" = "y" ]; then
+        # Backup
+        cp "$proxy_file" "${proxy_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        print_success "Backup created"
+        
+        # Remove IPs
+        local removed=0
+        while IFS= read -r ip; do
+            if [ -n "$ip" ]; then
+                if grep -q "$ip" "$proxy_file" 2>/dev/null; then
+                    sed -i "/$ip/d" "$proxy_file"
+                    ((removed++))
+                fi
+            fi
+        done <<< "$failing_ips"
+        
+        # Restore ownership
+        if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+            chown "$REAL_USER:$REAL_GROUP" "$proxy_file" 2>/dev/null || true
+            chown "$REAL_USER:$REAL_GROUP" "${proxy_file}.backup."* 2>/dev/null || true
+        fi
+        
+        print_success "Removed $removed proxies from proxy.txt"
+    else
+        print_info "Operation cancelled"
+    fi
+    
+    press_enter
+}
+
+# Clear Xilriws logs
+clear_xilriws_logs() {
+    echo ""
+    read -p "  Clear Xilriws logs? (y/n): " confirm
+    if [ "$confirm" = "y" ]; then
+        local log_path=$(docker inspect --format='{{.LogPath}}' xilriws 2>/dev/null)
+        if [ -n "$log_path" ] && [ -f "$log_path" ]; then
+            sudo truncate -s 0 "$log_path"
+            print_success "Xilriws logs cleared"
+        else
+            print_error "Could not find log file"
+        fi
+    fi
+    sleep 1
+}
+
+# Restart Xilriws
+restart_xilriws() {
+    echo ""
+    read -p "  Restart Xilriws container? (y/n): " confirm
+    if [ "$confirm" = "y" ]; then
+        print_info "Restarting Xilriws..."
+        docker restart xilriws
+        if [ $? -eq 0 ]; then
+            print_success "Xilriws restarted successfully"
+        else
+            print_error "Failed to restart Xilriws"
+        fi
+    fi
+    sleep 2
+}
+
+# Xilriws live monitoring mode
+xilriws_live_monitor() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "             XILRIWS LIVE MONITORING MODE"
+    draw_box_divider
+    draw_box_line "  This mode monitors Xilriws logs in real-time and will:"
+    draw_box_line "    • Display live statistics"
+    draw_box_line "    • Track consecutive failures"
+    draw_box_line "    • Auto-restart container after 30 consecutive failures"
+    draw_box_line ""
+    draw_box_line "  Press Ctrl+C to exit monitoring mode"
+    draw_box_bottom
+    echo ""
+    
+    read -p "  Start live monitoring? (y/n): " confirm
+    if [ "$confirm" != "y" ]; then
+        return
+    fi
+    
+    echo ""
+    print_info "Starting live monitor... (Ctrl+C to stop)"
+    sleep 2
+    
+    local consecutive_failures=0
+    local failure_threshold=30
+    local last_line=""
+    local total_success=0
+    local total_failures=0
+    local session_start=$(date +%s)
+    
+    # Trap Ctrl+C
+    trap 'echo ""; print_info "Monitoring stopped"; sleep 1; return' INT
+    
+    # Clear screen and start monitoring
+    while true; do
+        clear
+        local current_time=$(date "+%Y-%m-%d %H:%M:%S")
+        local uptime_secs=$(($(date +%s) - session_start))
+        local uptime_mins=$((uptime_secs / 60))
+        
+        echo ""
+        draw_box_top
+        printf "${CYAN}║${NC} %-30s %43s ${CYAN}║${NC}\n" "XILRIWS LIVE MONITOR" "$current_time"
+        draw_box_divider
+        
+        # Get current stats
+        get_xilriws_stats 2>/dev/null
+        
+        local status=$(get_container_status "xilriws")
+        local status_color="${GREEN}"
+        [ "$status" != "running" ] && status_color="${RED}"
+        
+        printf "${CYAN}║${NC}  Container:          ${status_color}%-52s${NC} ${CYAN}║${NC}\n" "$status"
+        printf "${CYAN}║${NC}  Monitor Uptime:     %-53s ${CYAN}║${NC}\n" "${uptime_mins}m ${uptime_secs}s"
+        printf "${CYAN}║${NC}  Consecutive Fails:  "
+        
+        if [ "$consecutive_failures" -ge 20 ]; then
+            printf "${RED}%-53s${NC}" "$consecutive_failures / $failure_threshold"
+        elif [ "$consecutive_failures" -ge 10 ]; then
+            printf "${YELLOW}%-53s${NC}" "$consecutive_failures / $failure_threshold"
+        else
+            printf "${GREEN}%-53s${NC}" "$consecutive_failures / $failure_threshold"
+        fi
+        printf " ${CYAN}║${NC}\n"
+        
+        draw_box_divider
+        draw_box_line "  SESSION STATISTICS"
+        draw_box_divider
+        
+        printf "${CYAN}║${NC}    ${GREEN}✓ Successful:${NC}     %-55s ${CYAN}║${NC}\n" "$XILRIWS_SUCCESS"
+        printf "${CYAN}║${NC}    ${RED}✗ Auth-Banned:${NC}    %-55s ${CYAN}║${NC}\n" "$XILRIWS_AUTH_BANNED"
+        printf "${CYAN}║${NC}    ${RED}✗ Invalid Creds:${NC}  %-55s ${CYAN}║${NC}\n" "$XILRIWS_INVALID_CRED"
+        printf "${CYAN}║${NC}    ${YELLOW}⚠ Tunnel Errors:${NC} %-55s ${CYAN}║${NC}\n" "$XILRIWS_TUNNEL_ERROR"
+        printf "${CYAN}║${NC}    ${YELLOW}⚠ Code 15:${NC}       %-55s ${CYAN}║${NC}\n" "$XILRIWS_CODE_15"
+        printf "${CYAN}║${NC}    ${YELLOW}⚠ Total Errors:${NC}  %-55s ${CYAN}║${NC}\n" "$XILRIWS_TOTAL_ERRORS"
+        
+        draw_box_divider
+        draw_box_line "  LAST LOG ENTRIES"
+        draw_box_divider
+        
+        # Get last 5 log entries
+        local recent_logs=$(docker logs xilriws --tail 5 2>&1)
+        while IFS= read -r line; do
+            # Truncate long lines
+            local short_line="${line:0:72}"
+            printf "${CYAN}║${NC}  %-73s ${CYAN}║${NC}\n" "$short_line"
+        done <<< "$recent_logs"
+        
+        draw_box_bottom
+        
+        # Check for consecutive failures
+        local latest=$(docker logs xilriws --tail 1 2>&1)
+        
+        if echo "$latest" | grep -qiE "error|failed|banned|timeout|refused"; then
+            if [ "$latest" != "$last_line" ]; then
+                ((consecutive_failures++))
+                ((total_failures++))
+                last_line="$latest"
+            fi
+        elif echo "$latest" | grep -qiE "success|obtained.*cookie"; then
+            if [ "$latest" != "$last_line" ]; then
+                consecutive_failures=0
+                ((total_success++))
+                last_line="$latest"
+            fi
+        fi
+        
+        # Check if threshold exceeded
+        if [ "$consecutive_failures" -ge "$failure_threshold" ]; then
+            echo ""
+            echo -e "  ${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${RED}║        ⚠️  CRITICAL: 30 CONSECUTIVE FAILURES DETECTED! ⚠️          ║${NC}"
+            echo -e "  ${RED}║              AUTO-RESTARTING XILRIWS CONTAINER                    ║${NC}"
+            echo -e "  ${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
+            
+            print_warning "This is really bad! Restarting Xilriws container..."
+            docker restart xilriws
+            
+            if [ $? -eq 0 ]; then
+                print_success "Container restarted successfully"
+                consecutive_failures=0
+            else
+                print_error "Failed to restart container!"
+            fi
+            
+            sleep 5
+        fi
+        
+        # Wait before next refresh
+        sleep 3
+    done
+    
+    trap - INT
+}
+
+# =============================================================================
 # QUICK ANALYSIS
 # =============================================================================
 
@@ -998,6 +1614,7 @@ show_main_menu() {
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
         echo "    1-${#SERVICES[@]}) Select service for details"
         echo "    q) Quick health check"
+        echo "    x) Xilriws status & proxy management"
         echo "    d) Device disconnect monitor"
         echo "    m) Log maintenance"
         echo "    c) Docker configuration"
@@ -1013,6 +1630,7 @@ show_main_menu() {
                 fi
                 ;;
             q|Q) quick_health_check ;;
+            x|X) show_xilriws_menu ;;
             d|D) show_device_disconnects ;;
             m|M) log_maintenance_menu ;;
             c|C) docker_config_menu ;;
@@ -1038,6 +1656,12 @@ main() {
         --health|-h)
             quick_health_check
             ;;
+        --xilriws|-x)
+            show_xilriws_menu
+            ;;
+        --xilriws-monitor)
+            xilriws_live_monitor
+            ;;
         --clear-all)
             echo "Clearing all logs..."
             for service in "${SERVICES[@]}"; do
@@ -1054,10 +1678,12 @@ main() {
             echo "Usage: $0 [option]"
             echo ""
             echo "Options:"
-            echo "  (none)       Interactive menu"
-            echo "  -h           Quick health check"
-            echo "  --clear-all  Clear all logs (requires sudo)"
-            echo "  --help       This help message"
+            echo "  (none)           Interactive menu"
+            echo "  -h               Quick health check"
+            echo "  -x, --xilriws    Xilriws status & proxy management"
+            echo "  --xilriws-monitor  Xilriws live monitor mode"
+            echo "  --clear-all      Clear all logs (requires sudo)"
+            echo "  --help           This help message"
             echo ""
             exit 0
             ;;

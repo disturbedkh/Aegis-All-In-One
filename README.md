@@ -437,7 +437,7 @@ sudo bash ./docker-osm-importer.sh
 
 ### `logs.sh` - Docker Log Manager & Analyzer
 
-Comprehensive log analysis, monitoring, and maintenance tool.
+Comprehensive log analysis, monitoring, and maintenance tool with special Xilriws management.
 
 ```bash
 sudo bash ./logs.sh
@@ -461,6 +461,30 @@ sudo bash ./logs.sh
   - Device errors (worker, disconnect)
   - Critical errors (fatal, panic)
 - Recent log activity preview
+
+**Xilriws Status & Proxy Management (Press 'x'):**
+- Login Statistics:
+  - Successful logins count
+  - Auth-banned account count
+  - Invalid credential count
+- Error Breakdown:
+  - Tunneling errors
+  - Code 15 errors
+  - Rate limiting incidents
+  - Timeouts and connection refused
+  - Proxy errors
+  - Permanently banned IPs
+- Proxy Management:
+  - View banned IP addresses from logs
+  - Find failing proxies (25+ failures with no success)
+  - Remove banned IPs from proxy.txt
+  - Remove failing proxies from proxy.txt
+  - Auto-backup before modifications
+- Live Monitoring Mode:
+  - Real-time statistics display
+  - Consecutive failure tracking
+  - **Auto-restart container after 30 consecutive failures**
+  - Visual alerts for critical states
 
 **Error Analysis Features:**
 - View errors by category with context
@@ -491,10 +515,12 @@ sudo bash ./logs.sh
 
 **Command Line Options:**
 ```bash
-./logs.sh           # Interactive menu
-./logs.sh -h        # Quick health check
-./logs.sh --clear-all   # Clear all logs
-./logs.sh --help    # Help
+./logs.sh              # Interactive menu
+./logs.sh -h           # Quick health check
+./logs.sh -x           # Xilriws status & proxy management
+./logs.sh --xilriws-monitor  # Xilriws live monitor mode
+./logs.sh --clear-all  # Clear all logs
+./logs.sh --help       # Help
 ```
 
 ---
