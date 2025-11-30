@@ -321,17 +321,67 @@ count_errors_by_pattern() {
     echo "$count"
 }
 
-# Count total errors in log
+# Count total errors in log (with exclusion filtering)
 count_total_errors() {
     local container=$1
-    local count=$(docker logs "$container" 2>&1 | grep -iEc "error|err|fatal|panic|critical|failed|exception" 2>/dev/null || echo "0")
+    local count=0
+    
+    # Build exclusion grep pattern
+    local exclusion_pattern=""
+    for excl in "${EXCLUSION_PATTERNS[@]}"; do
+        if [ -z "$exclusion_pattern" ]; then
+            exclusion_pattern="$excl"
+        else
+            exclusion_pattern="$exclusion_pattern|$excl"
+        fi
+    done
+    
+    # Count lines matching error patterns but NOT matching exclusions
+    # BUT always include lines with error="/failed=" even if they match exclusions
+    local temp_file=$(mktemp)
+    docker logs "$container" 2>&1 | grep -iE "error|err\]|fatal|panic|critical|failed|exception|ERRO|FATL" 2>/dev/null > "$temp_file" || true
+    
+    while IFS= read -r line; do
+        # Always count if it has actual error indicators like error="..."
+        if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+            ((count++))
+        # Otherwise check exclusions
+        elif ! echo "$line" | grep -qiE "$exclusion_pattern"; then
+            ((count++))
+        fi
+    done < "$temp_file"
+    
+    rm -f "$temp_file"
     echo "$count"
 }
 
-# Count warnings in log
+# Count warnings in log (with exclusion filtering)
 count_warnings() {
     local container=$1
-    local count=$(docker logs "$container" 2>&1 | grep -iEc "warn|warning" 2>/dev/null || echo "0")
+    local count=0
+    
+    # Build exclusion grep pattern
+    local exclusion_pattern=""
+    for excl in "${EXCLUSION_PATTERNS[@]}"; do
+        if [ -z "$exclusion_pattern" ]; then
+            exclusion_pattern="$excl"
+        else
+            exclusion_pattern="$exclusion_pattern|$excl"
+        fi
+    done
+    
+    # Count lines matching warning patterns but NOT matching exclusions
+    local temp_file=$(mktemp)
+    docker logs "$container" 2>&1 | grep -iE "warn|warning" 2>/dev/null > "$temp_file" || true
+    
+    while IFS= read -r line; do
+        # Skip if matches exclusion patterns
+        if ! echo "$line" | grep -qiE "$exclusion_pattern"; then
+            ((count++))
+        fi
+    done < "$temp_file"
+    
+    rm -f "$temp_file"
     echo "$count"
 }
 
