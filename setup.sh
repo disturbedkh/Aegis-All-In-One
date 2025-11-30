@@ -1219,28 +1219,31 @@ if [ "$DOCKER_INSTALLED" = true ] && [ -n "$REAL_USER" ] && [ "$REAL_USER" != "r
     
     if [ "$DOCKER_ACCESSIBLE" = false ]; then
         echo ""
-        print_warning "User '$REAL_USER' is NOT in the docker group."
-        print_info "Without docker group membership, you'll need to use 'sudo' for all Docker commands."
-        print_info "Adding to docker group is recommended for proper permissions."
+        print_info "Adding user '$REAL_USER' to docker group for proper permissions..."
         echo ""
-        read -p "  Add user '$REAL_USER' to docker group? (Recommended) (y/n) [y]: " ADD_TO_GROUP
-        ADD_TO_GROUP=${ADD_TO_GROUP:-y}
         
-        if [ "$ADD_TO_GROUP" = "y" ] || [ "$ADD_TO_GROUP" = "Y" ]; then
-            if add_user_to_docker_group "$REAL_USER"; then
-                DOCKER_ACCESSIBLE=true
-                NEEDS_RELOGIN=true
-                echo ""
-                print_warning "════════════════════════════════════════════════════════════"
-                print_warning "  IMPORTANT: Group changes require a new login session!"
-                print_warning "  User '$REAL_USER' must log out and back in after setup."
-                print_warning "════════════════════════════════════════════════════════════"
-                echo ""
-            fi
+        if add_user_to_docker_group "$REAL_USER"; then
+            DOCKER_ACCESSIBLE=true
+            NEEDS_RELOGIN=true
+            print_success "User '$REAL_USER' added to docker group!"
+            echo ""
+            echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════════════════╗${NC}"
+            echo -e "  ${YELLOW}║${NC}  ${WHITE}IMPORTANT: You must log out and back in after setup completes${NC}    ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}║${NC}  ${DIM}This activates your new docker group membership${NC}                  ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}║${NC}                                                                    ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}║${NC}  ${WHITE}After logging back in, you can run docker without sudo:${NC}          ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}║${NC}    ${CYAN}docker compose up -d${NC}                                            ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}║${NC}    ${CYAN}docker ps${NC}                                                        ${YELLOW}║${NC}"
+            echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════════════════╝${NC}"
+            echo ""
         else
-            print_warning "User '$REAL_USER' will need to use 'sudo' for Docker commands."
-            print_info "You can add yourself later with: sudo usermod -aG docker $REAL_USER"
+            print_warning "Could not add user to docker group automatically."
+            print_info "You can add yourself manually with:"
+            echo -e "    ${CYAN}sudo usermod -aG docker $REAL_USER${NC}"
+            echo ""
         fi
+    else
+        print_success "User '$REAL_USER' is already in docker group."
     fi
 elif [ "$REAL_USER" = "root" ]; then
     DOCKER_ACCESSIBLE=true
