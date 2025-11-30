@@ -1940,9 +1940,37 @@ fi
 echo ""
 
 # =============================================================================
-# Step 6: Copy default config files
+# Step 6: Create required directories with proper permissions
 # =============================================================================
-echo "[6/9] Copying default config files..."
+echo "[6/9] Creating directories and copying config files..."
+
+# Get user's UID/GID for directory permissions
+USER_UID=$(id -u "$REAL_USER" 2>/dev/null || echo "1000")
+USER_GID=$(id -g "$REAL_USER" 2>/dev/null || echo "1000")
+
+# Create directories that Docker containers need to write to
+# These need proper ownership for container users (PUID/PGID from .env)
+print_info "Creating data directories with proper permissions..."
+
+# Grafana directory - container runs as PUID:PGID (default 1000:1000)
+mkdir -p grafana
+chown -R "$USER_UID:$USER_GID" grafana
+chmod 775 grafana
+
+# VictoriaMetrics directories
+mkdir -p victoriametrics/data
+chown -R "$USER_UID:$USER_GID" victoriametrics
+chmod -R 775 victoriametrics
+
+# vmagent directory
+mkdir -p vmagent/data
+chown -R "$USER_UID:$USER_GID" vmagent
+chmod -R 775 vmagent
+
+# MySQL data directory
+mkdir -p mysql_data
+
+print_success "Directories created."
 
 # Force copy with -f to overwrite any existing files
 cp -f env-default .env && track_file ".env"
@@ -2021,6 +2049,10 @@ sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.t
 
 # MySQL root password
 sed -i "s/V3ryS3cUr3MYSQL_ROOT_P4ssw0rd/${MYSQL_ROOT_PASSWORD}/g" .env
+
+# Update PUID/PGID to match current user (important for Grafana, etc.)
+sed -i "s/^PUID=.*/PUID=${USER_UID}/" .env
+sed -i "s/^PGID=.*/PGID=${USER_GID}/" .env
 
 # Koji bearer token
 sed -i "s/SuperSecureKojiSecret/${KOJI_BEARER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
