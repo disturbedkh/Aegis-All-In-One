@@ -29,6 +29,20 @@ NC='\033[0m'
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
+# Get the original user who called sudo (to prevent files being locked to root)
+# This is critical - we need to pass this to sub-scripts
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
+
+# Export for sub-scripts to inherit
+export REAL_USER
+export REAL_GROUP
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
@@ -1768,8 +1782,11 @@ run_script() {
         echo ""
         sleep 1
         
-        # Run the script with environment variable to indicate it was launched from aegis.sh
-        sudo AEGIS_LAUNCHER=1 bash "$SCRIPT_DIR/$script"
+        # Run the script with environment variables to:
+        # - Indicate it was launched from aegis.sh (AEGIS_LAUNCHER)
+        # - Pass the original user info (REAL_USER, REAL_GROUP) to prevent root-locked files
+        # Note: We don't use sudo here because aegis.sh is already running as root
+        AEGIS_LAUNCHER=1 REAL_USER="$REAL_USER" REAL_GROUP="$REAL_GROUP" bash "$SCRIPT_DIR/$script"
         
         # Script completed - no need for extra prompt since scripts handle their own exit
     else

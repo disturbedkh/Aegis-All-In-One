@@ -53,12 +53,31 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Get the original user who called sudo (to fix file ownership later)
-if [ -n "$SUDO_USER" ]; then
+# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+  # REAL_USER was passed from aegis.sh - use it
+  # REAL_GROUP should also be set, but verify
+  if [ -z "$REAL_GROUP" ]; then
+    REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
+  fi
+elif [ -n "$SUDO_USER" ]; then
+  # Running directly with sudo - use SUDO_USER
   REAL_USER="$SUDO_USER"
   REAL_GROUP=$(id -gn "$SUDO_USER")
 else
+  # Fallback - try to get the actual user
   REAL_USER="$USER"
   REAL_GROUP=$(id -gn)
+fi
+
+# Ensure we have a valid user (not root or empty)
+if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+  # Last resort: check who owns the script directory
+  DIR_OWNER=$(stat -c '%U' "$PWD" 2>/dev/null || ls -ld "$PWD" | awk '{print $3}')
+  if [ -n "$DIR_OWNER" ] && [ "$DIR_OWNER" != "root" ]; then
+    REAL_USER="$DIR_OWNER"
+    REAL_GROUP=$(id -gn "$DIR_OWNER" 2>/dev/null || echo "$DIR_OWNER")
+  fi
 fi
 
 # Track if user needs to re-login for docker group
@@ -88,25 +107,58 @@ restore_all_ownership() {
             fi
         done
         
-        # Also restore ownership on common directories that may have been touched
+        # Explicitly fix ownership on specific config files that are commonly modified
+        local files_to_fix=(
+            ".env"
+            "setup.sh"
+            "aegis.sh"
+            "README.md"
+            "docker-compose.yaml"
+            "docker-compose.yml"
+            "fletchling.toml"
+            "reactmap/local.json"
+            "reactmap/env"
+            "unown/dragonite_config.toml"
+            "unown/golbat_config.toml"
+            "unown/rotom_config.json"
+            "unown/proxies.txt"
+            "mysql_data/mariadb.cnf"
+            "Poracle/config/local.json"
+            "Poracle/geofence/default.json"
+            "init/01.sql"
+            "vmagent/prometheus.yml"
+            "grafana/Dragonite-Emi-v5.json"
+        )
+        
+        for file in "${files_to_fix[@]}"; do
+            if [ -e "$file" ]; then
+                chown "$REAL_USER:$REAL_GROUP" "$file" 2>/dev/null || true
+            fi
+        done
+        
+        # Recursively fix ownership on directories and their contents
+        local dirs_to_fix_recursive=(
+            "unown"
+            "reactmap"
+            "Poracle"
+            "init"
+            "vmagent"
+            "fletchling"
+        )
+        
+        for dir in "${dirs_to_fix_recursive[@]}"; do
+            if [ -d "$dir" ]; then
+                chown -R "$REAL_USER:$REAL_GROUP" "$dir" 2>/dev/null || true
+            fi
+        done
+        
+        # Fix ownership on directories only (not recursive - these may have Docker-managed contents)
         local dirs_to_fix=(
             "."
             "mysql_data"
-            "unown"
-            "unown/logs"
-            "unown/golbat_cache"
-            "unown/rotom_jobs"
-            "reactmap"
             "grafana"
-            "Poracle"
-            "Poracle/config"
-            "Poracle/geofence"
             "victoriametrics"
             "victoriametrics/data"
-            "vmagent"
-            "vmagent/data"
-            "init"
-            "fletchling"
         )
         
         for dir in "${dirs_to_fix[@]}"; do
@@ -115,9 +167,35 @@ restore_all_ownership() {
             fi
         done
         
+        # Fix ownership on all shell scripts in current directory
+        for script in *.sh; do
+            if [ -f "$script" ]; then
+                chown "$REAL_USER:$REAL_GROUP" "$script" 2>/dev/null || true
+            fi
+        done
+        
+        # Fix ownership on all root-level config files
+        for config in *.toml *.yaml *.yml *.json *.md *.txt; do
+            if [ -f "$config" ]; then
+                chown "$REAL_USER:$REAL_GROUP" "$config" 2>/dev/null || true
+            fi
+        done
+        
         print_success "File ownership restored."
     fi
 }
+
+# Set up trap to restore ownership on exit (catches errors, interrupts, etc.)
+cleanup_on_exit() {
+    # Only run cleanup if we have a valid user
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        # Quick ownership fix on common files
+        chown "$REAL_USER:$REAL_GROUP" .env setup.sh aegis.sh README.md docker-compose.yaml 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" *.sh *.md *.yaml *.yml *.toml *.json *.txt 2>/dev/null || true
+        chown -R "$REAL_USER:$REAL_GROUP" unown reactmap Poracle 2>/dev/null || true
+    fi
+}
+trap cleanup_on_exit EXIT
 
 # =============================================================================
 # Port Checking Functions
