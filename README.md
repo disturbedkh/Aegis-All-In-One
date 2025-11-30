@@ -9,6 +9,7 @@
 - [Overview](#overview)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
+- [Scripts](#scripts)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Services](#services)
@@ -128,6 +129,209 @@ Docker can generate massive log files. The setup script (`setup.sh`) will automa
 This limits logs to 300MB total (3 files × 100MB each) with automatic rotation and compression.
 
 > 💡 **Tip**: The setup script lets you customize these values and will automatically restart Docker to apply the changes.
+
+---
+
+## Scripts
+
+This repository includes several scripts to help you set up, secure, and maintain your mapping stack.
+
+### Core Scripts
+
+| Script | Purpose | When to Run |
+|--------|---------|-------------|
+| `setup.sh` | Initial setup and configuration | First time setup |
+| `nginx-setup.sh` | Security, SSL, and firewall setup | After initial setup for external access |
+| `dbsetup.sh` | Database setup and maintenance | Initial setup or ongoing maintenance |
+| `check.sh` | Configuration validation | Troubleshooting or after changes |
+
+### Optional Feature Scripts
+
+| Script | Purpose | When to Run |
+|--------|---------|-------------|
+| `poracle.sh` | Discord/Telegram alert bot setup | When you want notifications |
+| `fletchling.sh` | Nest detection setup | After creating Koji project |
+| `docker-osm-importer.sh` | OpenStreetMap data import | For park/nest data |
+
+---
+
+### `setup.sh` - Initial Setup
+
+The main setup script that prepares your entire environment.
+
+```bash
+sudo bash ./setup.sh
+```
+
+**What it does:**
+- ✅ Installs Docker and Docker Compose if missing
+- ✅ Configures Docker log rotation (prevents disk space issues)
+- ✅ Detects system resources (RAM, CPU, storage type)
+- ✅ Generates secure random passwords for all services
+- ✅ Creates configuration files from templates
+- ✅ Tunes MariaDB settings for your hardware
+- ✅ Creates required databases and users
+- ✅ Sets up inter-service communication
+
+---
+
+### `nginx-setup.sh` - Security Setup
+
+Comprehensive security script for external access.
+
+```bash
+sudo bash ./nginx-setup.sh
+```
+
+**What it does:**
+- 🔒 Configures Nginx reverse proxy (subdomain or path-based routing)
+- 🔐 Sets up SSL/TLS with Let's Encrypt (free certificates)
+- 🛡️ Configures authentication (Basic Auth or Authelia SSO)
+- 🚫 Installs Fail2Ban (blocks brute-force attacks)
+- 🔥 Configures UFW firewall (only opens necessary ports)
+- 🐳 Secures Docker ports (binds to localhost, forces traffic through Nginx)
+- 📱 Sets up Rotom device WebSocket proxy
+
+**11-Step Process:**
+1. Permission verification
+2. Web server detection/installation
+3. Domain configuration
+4. Authentication setup
+5. Nginx site configuration
+6. Configuration testing
+7. Rotom device port setup
+8. SSL certificate generation
+9. Fail2Ban installation
+10. UFW firewall configuration
+11. Docker port security
+
+---
+
+### `dbsetup.sh` - Database Setup & Maintenance
+
+Dual-mode script for initial database setup and ongoing maintenance.
+
+```bash
+sudo bash ./dbsetup.sh
+```
+
+**Two Modes:**
+
+#### Setup Mode
+- Installs MariaDB if not present
+- Detects system resources and calculates optimal settings
+- Tunes MariaDB for your hardware (buffer pool, I/O, connections)
+- Creates all required databases (dragonite, golbat, reactmap, koji, poracle)
+- Creates database users with proper permissions
+
+#### Maintenance Mode
+Interactive dashboard with:
+
+**Status Dashboard:**
+- MariaDB server status and version
+- Database sizes and connection status
+- Account statistics (total, banned, invalid, warned)
+- Map data counts (pokestops, gyms, spawnpoints)
+- User permissions verification
+
+**Account Cleanup:**
+- Remove banned accounts
+- Remove invalid accounts
+- Remove auth-banned accounts
+- Remove warned/suspended accounts
+- Reset account flags (unban, clear warnings)
+
+**Map Data Cleanup:**
+- Remove stale pokestops (not seen in 24h)
+- Remove stale gyms (not seen in 24h)
+- Remove stale spawnpoints (not seen in 24h)
+- Custom staleness threshold
+- Truncate spawnpoint table (complete reset)
+- Purge expired Pokemon
+
+**Nest Management:**
+- List unknown/unnamed nests
+- Label unknown nests with area name or coordinates
+- Delete unknown nests
+- Reset all nests
+
+**General Maintenance:**
+- Optimize tables (reclaim disk space)
+- Analyze tables (update query statistics)
+- Check tables for errors
+- Repair corrupted tables
+- View table sizes
+- Purge old statistics data
+- Purge old quest/incident data
+- Flush query cache
+
+---
+
+### `check.sh` - Configuration Validator
+
+Validates your configuration to catch common issues.
+
+```bash
+sudo bash ./check.sh
+```
+
+**What it checks:**
+- ✅ Environment variables match across all configs
+- ✅ Database passwords are consistent
+- ✅ API secrets are properly configured
+- ✅ Docker containers are running
+- ✅ Required files exist
+- ✅ Service connectivity
+
+---
+
+### `poracle.sh` - Alert Bot Setup
+
+Sets up Poracle for Discord/Telegram notifications.
+
+```bash
+sudo bash ./poracle.sh
+```
+
+**What it does:**
+- Guides you through Discord/Telegram bot creation
+- Configures webhook connection from Golbat
+- Sets up notification filters and geofences
+
+**Prerequisites:** Running Golbat with webhook support enabled.
+
+---
+
+### `fletchling.sh` - Nest Detection Setup
+
+Configures Fletchling for Pokemon nest detection and display.
+
+```bash
+sudo bash ./fletchling.sh
+```
+
+**What it does:**
+- Configures Fletchling with your Koji project
+- Imports park data from OpenStreetMap
+- Enables automatic nest detection
+- Integrates with ReactMap for display
+
+**Prerequisites:** Create a project with geofences in Koji first.
+
+---
+
+### `docker-osm-importer.sh` - OpenStreetMap Import
+
+Imports OpenStreetMap data for park boundaries and features.
+
+```bash
+sudo bash ./docker-osm-importer.sh
+```
+
+**What it does:**
+- Downloads OSM data for your region
+- Imports park and natural area boundaries
+- Provides data for Fletchling nest detection
 
 ---
 
@@ -421,18 +625,26 @@ This validates:
 - ✅ Docker containers are running
 - ✅ Required files exist
 
-### Database Tuning
+### Database Management
 
-The setup script automatically tunes MariaDB based on your hardware:
-- Detects available RAM and allocates buffer pool
-- Configures I/O settings based on storage type (SSD/HDD)
-- Sets appropriate connection limits
-
-To re-run database tuning:
+The setup script automatically tunes MariaDB based on your hardware during initial setup. For ongoing database maintenance:
 
 ```bash
 sudo bash ./dbsetup.sh
 ```
+
+**Choose Maintenance Mode to:**
+- View status dashboard (accounts, data counts, database sizes)
+- Clean up banned/invalid accounts
+- Remove stale map data (pokestops, gyms, spawnpoints)
+- Manage unknown nests
+- Optimize and repair tables
+- Purge old statistics and expired data
+
+**Choose Setup Mode to:**
+- Re-tune MariaDB for your hardware
+- Create new databases or users
+- Reinstall MariaDB if needed
 
 ### Configuration Files
 
