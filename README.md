@@ -628,7 +628,11 @@ The setup script will:
 
 - ✅ Check and install Docker if needed
 - ✅ Configure Docker log rotation to prevent disk space issues
-- ✅ **Check port availability** (6001-6006, 7070, 5090) with options to free locked ports
+- ✅ **Check port availability** (6001-6006, 7070, 5090) with advanced remediation:
+  - Investigate containers bound to ports
+  - Remove/purge old containers
+  - Clean Docker networks
+  - Full Docker cleanup option
 - ✅ Generate secure random passwords for all services
 - ✅ Create configuration files from templates
 - ✅ Set up MariaDB with optimized settings for your hardware

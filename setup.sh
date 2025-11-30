@@ -245,12 +245,16 @@ check_all_ports() {
     
     echo "  Options:"
     echo "    1) Attempt to stop processes using these ports"
-    echo "    2) Stop existing Docker containers that may be using these ports"
-    echo "    3) Show detailed process information"
-    echo "    4) Continue anyway (may cause startup failures)"
-    echo "    5) Exit and resolve manually"
+    echo "    2) Stop existing Docker containers (docker compose down)"
+    echo "    3) Investigate Docker containers bound to ports"
+    echo "    4) Remove/purge old Docker containers"
+    echo "    5) Clean Docker networks"
+    echo "    6) Full Docker cleanup (containers + networks + volumes)"
+    echo "    7) Show detailed process information"
+    echo "    8) Continue anyway (may cause startup failures)"
+    echo "    9) Exit and resolve manually"
     echo ""
-    read -p "  Select option [1-5, default: 2]: " PORT_ACTION
+    read -p "  Select option [1-9, default: 2]: " PORT_ACTION
     PORT_ACTION=${PORT_ACTION:-2}
     
     case $PORT_ACTION in
@@ -273,6 +277,20 @@ check_all_ports() {
                     print_warning "Could not identify process for port $port"
                 fi
             done
+            # Re-check and show menu again if ports still in use
+            sleep 1
+            local remaining=()
+            for port in "${ports_in_use[@]}"; do
+                if check_port_in_use "$port"; then
+                    remaining+=("$port")
+                fi
+            done
+            if [ ${#remaining[@]} -gt 0 ]; then
+                print_warning "Some ports still in use. Showing options again..."
+                sleep 1
+                check_all_ports
+                return $?
+            fi
             ;;
         2)
             echo ""
@@ -307,15 +325,227 @@ check_all_ports() {
                 print_success "All ports are now free!"
             else
                 print_warning "Some ports are still in use: ${still_in_use[*]}"
-                print_info "These may be used by non-Docker processes."
-                read -p "  Continue anyway? (y/n) [n]: " CONTINUE_ANYWAY
-                if [ "$CONTINUE_ANYWAY" != "y" ] && [ "$CONTINUE_ANYWAY" != "Y" ]; then
-                    print_error "Please free the ports manually and re-run setup."
-                    exit 1
-                fi
+                print_info "Showing options again..."
+                sleep 1
+                check_all_ports
+                return $?
             fi
             ;;
         3)
+            echo ""
+            print_info "Investigating Docker containers bound to ports..."
+            echo ""
+            
+            # Show all containers with port bindings
+            echo "  ${CYAN}All Docker containers with port mappings:${NC}"
+            echo "  ─────────────────────────────────────────────────────────────────"
+            docker ps -a --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null | head -20
+            echo ""
+            
+            # Check specifically for containers using our ports
+            echo "  ${CYAN}Containers potentially using Aegis ports:${NC}"
+            echo "  ─────────────────────────────────────────────────────────────────"
+            for port in "${ports_in_use[@]}"; do
+                local container_on_port=$(docker ps -a --filter "publish=${port}" --format "{{.Names}} ({{.Status}})" 2>/dev/null)
+                if [ -n "$container_on_port" ]; then
+                    echo "    Port $port: $container_on_port"
+                else
+                    # Check if docker-proxy is using this port
+                    local proxy_check=$(ss -tulnp 2>/dev/null | grep ":${port} " | grep -o 'docker-proxy' || true)
+                    if [ -n "$proxy_check" ]; then
+                        echo "    Port $port: docker-proxy (orphaned or from old container)"
+                    fi
+                fi
+            done
+            echo ""
+            
+            # Show stopped containers that might have port conflicts
+            local stopped_containers=$(docker ps -a --filter "status=exited" --filter "status=created" --format "{{.Names}}" 2>/dev/null)
+            if [ -n "$stopped_containers" ]; then
+                echo "  ${YELLOW}Stopped/Created containers (may have reserved ports):${NC}"
+                echo "  ─────────────────────────────────────────────────────────────────"
+                docker ps -a --filter "status=exited" --filter "status=created" --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null
+                echo ""
+            fi
+            
+            read -p "  Press Enter to continue..."
+            check_all_ports
+            return $?
+            ;;
+        4)
+            echo ""
+            print_info "Docker Container Removal Options"
+            echo ""
+            echo "  1) Remove only stopped Aegis containers"
+            echo "  2) Remove ALL stopped containers"
+            echo "  3) Force remove ALL Aegis containers (running + stopped)"
+            echo "  4) Force remove ALL containers (running + stopped)"
+            echo "  0) Back to previous menu"
+            echo ""
+            read -p "  Select option [0-4]: " REMOVE_OPTION
+            
+            case $REMOVE_OPTION in
+                1)
+                    echo ""
+                    print_info "Removing stopped Aegis containers..."
+                    local aegis_containers=("reactmap" "admin" "dragonite" "golbat" "rotom" "koji" "pma" "grafana" "xilriws" "database" "vmagent" "victoriametrics" "poracle" "fletchling")
+                    for container in "${aegis_containers[@]}"; do
+                        if docker ps -aq -f "name=^${container}$" -f "status=exited" 2>/dev/null | grep -q .; then
+                            print_info "Removing: $container"
+                            docker rm "$container" 2>/dev/null || true
+                        fi
+                    done
+                    print_success "Stopped Aegis containers removed."
+                    ;;
+                2)
+                    echo ""
+                    print_info "Removing all stopped containers..."
+                    docker container prune -f
+                    print_success "All stopped containers removed."
+                    ;;
+                3)
+                    echo ""
+                    print_warning "This will FORCE STOP and REMOVE all Aegis containers!"
+                    read -p "  Are you sure? (y/n) [n]: " CONFIRM
+                    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                        local aegis_containers=("reactmap" "admin" "dragonite" "golbat" "rotom" "koji" "pma" "grafana" "xilriws" "database" "vmagent" "victoriametrics" "poracle" "fletchling")
+                        for container in "${aegis_containers[@]}"; do
+                            if docker ps -aq -f "name=^${container}$" 2>/dev/null | grep -q .; then
+                                print_info "Force removing: $container"
+                                docker rm -f "$container" 2>/dev/null || true
+                            fi
+                        done
+                        print_success "All Aegis containers removed."
+                    fi
+                    ;;
+                4)
+                    echo ""
+                    print_warning "This will FORCE STOP and REMOVE ALL Docker containers!"
+                    read -p "  Are you sure? (y/n) [n]: " CONFIRM
+                    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                        print_info "Stopping all containers..."
+                        docker stop $(docker ps -aq) 2>/dev/null || true
+                        print_info "Removing all containers..."
+                        docker rm $(docker ps -aq) 2>/dev/null || true
+                        print_success "All containers removed."
+                    fi
+                    ;;
+            esac
+            
+            sleep 1
+            check_all_ports
+            return $?
+            ;;
+        5)
+            echo ""
+            print_info "Docker Network Cleanup"
+            echo ""
+            
+            # Show current networks
+            echo "  ${CYAN}Current Docker networks:${NC}"
+            echo "  ─────────────────────────────────────────────────────────────────"
+            docker network ls
+            echo ""
+            
+            echo "  1) Remove unused networks (docker network prune)"
+            echo "  2) Remove specific Aegis-related networks"
+            echo "  3) Remove ALL custom networks (keeps bridge, host, none)"
+            echo "  0) Back to previous menu"
+            echo ""
+            read -p "  Select option [0-3]: " NET_OPTION
+            
+            case $NET_OPTION in
+                1)
+                    echo ""
+                    print_info "Removing unused networks..."
+                    docker network prune -f
+                    print_success "Unused networks removed."
+                    ;;
+                2)
+                    echo ""
+                    print_info "Looking for Aegis-related networks..."
+                    local aegis_nets=$(docker network ls --filter "name=aegis" --filter "name=aio" -q 2>/dev/null)
+                    if [ -n "$aegis_nets" ]; then
+                        docker network rm $aegis_nets 2>/dev/null || true
+                        print_success "Aegis networks removed."
+                    else
+                        print_info "No Aegis-specific networks found."
+                    fi
+                    # Also try to remove the default compose network
+                    docker network rm aegis-all-in-one_default 2>/dev/null || true
+                    ;;
+                3)
+                    echo ""
+                    print_warning "This will remove ALL custom Docker networks!"
+                    read -p "  Are you sure? (y/n) [n]: " CONFIRM
+                    if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                        # Get all network IDs except bridge, host, none
+                        local custom_nets=$(docker network ls --format "{{.ID}} {{.Name}}" | grep -v -E "bridge|host|none" | awk '{print $1}')
+                        if [ -n "$custom_nets" ]; then
+                            docker network rm $custom_nets 2>/dev/null || true
+                            print_success "Custom networks removed."
+                        fi
+                    fi
+                    ;;
+            esac
+            
+            sleep 1
+            check_all_ports
+            return $?
+            ;;
+        6)
+            echo ""
+            echo -e "  ${RED}${BOLD}Full Docker Cleanup${NC}"
+            echo ""
+            echo "  This will remove:"
+            echo "    • All Aegis containers (running and stopped)"
+            echo "    • All unused Docker networks"
+            echo "    • All unused Docker volumes"
+            echo "    • All dangling images"
+            echo ""
+            print_warning "This is a destructive operation!"
+            read -p "  Are you sure? (y/n) [n]: " CONFIRM
+            
+            if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                echo ""
+                
+                # Stop and remove Aegis containers
+                print_info "Stopping Aegis containers..."
+                docker compose down 2>/dev/null || true
+                
+                local aegis_containers=("reactmap" "admin" "dragonite" "golbat" "rotom" "koji" "pma" "grafana" "xilriws" "database" "vmagent" "victoriametrics" "poracle" "fletchling")
+                for container in "${aegis_containers[@]}"; do
+                    docker rm -f "$container" 2>/dev/null || true
+                done
+                print_success "Containers removed."
+                
+                # Remove networks
+                print_info "Removing unused networks..."
+                docker network prune -f 2>/dev/null || true
+                print_success "Networks cleaned."
+                
+                # Remove volumes (with extra confirmation)
+                read -p "  Also remove Docker volumes? (DATABASE DATA WILL BE LOST) (y/n) [n]: " REMOVE_VOLS
+                if [ "$REMOVE_VOLS" = "y" ] || [ "$REMOVE_VOLS" = "Y" ]; then
+                    print_info "Removing unused volumes..."
+                    docker volume prune -f 2>/dev/null || true
+                    print_success "Volumes cleaned."
+                fi
+                
+                # Clean dangling images
+                print_info "Removing dangling images..."
+                docker image prune -f 2>/dev/null || true
+                print_success "Images cleaned."
+                
+                echo ""
+                print_success "Full Docker cleanup complete!"
+            fi
+            
+            sleep 1
+            check_all_ports
+            return $?
+            ;;
+        7)
             echo ""
             print_info "Detailed process information for ports in use:"
             echo ""
@@ -335,10 +565,10 @@ check_all_ports() {
             check_all_ports
             return $?
             ;;
-        4)
+        8)
             print_warning "Continuing with port conflicts. Services may fail to start!"
             ;;
-        5)
+        9)
             print_info "Exiting. Please free the following ports and re-run setup:"
             for port in "${ports_in_use[@]}"; do
                 echo "    • Port $port (${STACK_PORTS[$port]})"
@@ -348,6 +578,8 @@ check_all_ports() {
             echo "    • sudo lsof -i :PORT      - Show what's using a port"
             echo "    • sudo kill -9 PID        - Force stop a process"
             echo "    • docker compose down     - Stop all Docker containers"
+            echo "    • docker rm -f CONTAINER  - Force remove a container"
+            echo "    • docker network prune    - Remove unused networks"
             echo "    • sudo systemctl stop SERVICE  - Stop a system service"
             exit 1
             ;;
