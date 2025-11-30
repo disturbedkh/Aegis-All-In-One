@@ -560,7 +560,7 @@ show_help() {
     echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
     echo "  s) Start Stack    - docker compose up -d"
-    echo "  x) Stop Stack     - docker compose down"
+    echo "  x) Stop Stack     - docker compose stop (preserves containers)"
     echo "  t) Restart Stack  - docker compose restart"
     echo "  c) Status         - docker compose ps -a"
     echo "  v) Dashboard      - Detailed container status + image info"
@@ -1150,9 +1150,10 @@ docker_stop() {
     echo ""
     
     if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose down
+        docker compose stop
         echo ""
         echo -e "${GREEN}✓ Containers stopped${NC}"
+        echo -e "${DIM}(Containers preserved - use 'docker compose down' to remove them)${NC}"
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
     fi
@@ -1270,7 +1271,7 @@ show_service_menu() {
         if [ "$action" = "start" ]; then
             docker compose up -d
         else
-            docker compose down
+            docker compose stop
         fi
         echo ""
         echo -e "${GREEN}✓ All services ${action_past}${NC}"

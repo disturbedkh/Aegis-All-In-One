@@ -195,7 +195,7 @@ sudo bash ./aegis.sh
 | **Features** | 6) Poracle Setup | Discord/Telegram alerts |
 | | 7) Fletchling Setup | Nest detection |
 | **Stack** | s) Start Stack | docker compose up -d |
-| | x) Stop Stack | docker compose down |
+| | x) Stop Stack | docker compose stop (preserves containers) |
 | | t) Restart Stack | docker compose restart |
 | | c) Container Status | docker compose ps |
 | | v) Container Dashboard | Detailed status + image info |
