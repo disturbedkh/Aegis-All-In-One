@@ -393,7 +393,7 @@ site_management_menu() {
         echo "    2) Disable a site"
         echo "    3) View site configuration"
         echo "    4) Edit site configuration"
-        echo "    5) Add new Aegis site (runs setup for single site)"
+        echo "    5) Add new nginx site"
         echo "    6) Delete site"
         echo ""
         echo "    t) Test configuration"
