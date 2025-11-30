@@ -44,6 +44,58 @@ ERROR_PATTERNS=(
     ["critical"]="fatal|panic|critical|emergency|FATAL|PANIC"
 )
 
+# Exclusion patterns - these are NOT errors even if they match error keywords
+# These are success/info messages that contain words like "database" or "connection"
+EXCLUSION_PATTERNS=(
+    # Info symbol prefix (ℹ character indicates info, not error)
+    "^ℹ"
+    "^[[:space:]]*ℹ"
+    # Success/Info messages with "database" keyword
+    "database version:"
+    "Current database version"
+    "Migration completed.*database"
+    "Loaded.*from database"
+    "proxies from database"
+    "database version: [0-9]"
+    "database migrated"
+    "database migrations"
+    "Determining database types"
+    # Success/Info messages with "connection" keyword
+    "connection established"
+    "connected successfully"
+    "connection.*ready"
+    "websocket.*connected"
+    "new connection from"
+    "accepted connection"
+    "Bound .* to .* connection"
+    "to [0-9]+ connection"
+    "for [0-9]+ connections"
+    # General success patterns that should be excluded
+    "successfully"
+    "completed"
+    "started"
+    "ready for connections"
+    "listening on"
+    "Starting.*[0-9]+\.[0-9]+\.[0-9]+"
+    "auth provider.*is enabled"
+    "auth provider.*is disabled"
+    "Server is now listening"
+    "was not initialized"
+    # Info-level log prefixes (these lines are informational, not errors)
+    "^INFO "
+    "| I |"
+    "\[INFO\]"
+    "\[DB\]"
+    "\[AUTH\]"
+    "\[ReactMap\]"
+    # Log level indicators at start of line
+    "^[0-9].*\| I \|"
+    "^[0-9].*INFO"
+)
+
+# Startup window in seconds - errors within this window after container start are likely transient
+STARTUP_WINDOW_SECONDS=120
+
 # Get the original user who called sudo (to prevent files being locked to root)
 # Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
@@ -201,6 +253,121 @@ get_log_pattern() {
     local pattern=$2
     local context=${3:-2}
     docker logs "$container" 2>&1 | grep -iE -B"$context" -A"$context" "$pattern" 2>/dev/null
+}
+
+# Check if a line should be excluded (it's actually a success/info message)
+is_excluded_line() {
+    local line=$1
+    for exclusion in "${EXCLUSION_PATTERNS[@]}"; do
+        if echo "$line" | grep -qiE "$exclusion"; then
+            return 0  # Should be excluded
+        fi
+    done
+    return 1  # Not excluded
+}
+
+# Check if a line is an actual error (has error keywords AND is not excluded)
+is_actual_error() {
+    local line=$1
+    # Must have an error keyword
+    if ! echo "$line" | grep -qiE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL|WARN"; then
+        return 1  # Not an error
+    fi
+    # Must not be excluded
+    if is_excluded_line "$line"; then
+        return 1  # Excluded
+    fi
+    return 0  # Is an actual error
+}
+
+# Get container start time in epoch seconds
+get_container_start_time() {
+    local container=$1
+    local start_time=$(docker inspect --format='{{.State.StartedAt}}' "$container" 2>/dev/null)
+    if [ -n "$start_time" ]; then
+        # Convert to epoch seconds
+        date -d "$start_time" +%s 2>/dev/null || echo "0"
+    else
+        echo "0"
+    fi
+}
+
+# Get current container uptime in seconds
+get_container_uptime_seconds() {
+    local container=$1
+    local start_epoch=$(get_container_start_time "$container")
+    if [ "$start_epoch" -gt 0 ] 2>/dev/null; then
+        local now_epoch=$(date +%s)
+        echo $((now_epoch - start_epoch))
+    else
+        echo "0"
+    fi
+}
+
+# Check if a timestamp is within the startup window
+# Returns 0 if within startup window, 1 if not
+is_startup_error() {
+    local log_timestamp=$1
+    local container_start_epoch=$2
+    
+    if [ "$container_start_epoch" -eq 0 ] 2>/dev/null; then
+        return 1  # Can't determine, assume not startup
+    fi
+    
+    # Try to extract timestamp from log line and convert to epoch
+    # Common formats: "2025-11-30 12:00:57" or "12:00:57" or ISO format
+    local log_epoch=0
+    
+    # Try full datetime format first
+    if echo "$log_timestamp" | grep -qE "^[0-9]{4}-[0-9]{2}-[0-9]{2}"; then
+        local datetime=$(echo "$log_timestamp" | grep -oE "^[0-9]{4}-[0-9]{2}-[0-9]{2} [0-9]{2}:[0-9]{2}:[0-9]{2}" | head -1)
+        if [ -n "$datetime" ]; then
+            log_epoch=$(date -d "$datetime" +%s 2>/dev/null || echo "0")
+        fi
+    fi
+    
+    if [ "$log_epoch" -gt 0 ] 2>/dev/null; then
+        local diff=$((log_epoch - container_start_epoch))
+        if [ "$diff" -ge 0 ] && [ "$diff" -le "$STARTUP_WINDOW_SECONDS" ]; then
+            return 0  # Within startup window
+        fi
+    fi
+    
+    return 1  # Not within startup window
+}
+
+# Format startup annotation
+get_startup_annotation() {
+    local log_line=$1
+    local container=$2
+    local container_start=$(get_container_start_time "$container")
+    
+    if is_startup_error "$log_line" "$container_start"; then
+        echo "[STARTUP]"
+    else
+        echo ""
+    fi
+}
+
+# Count ACTUAL errors (excluding false positives)
+count_actual_errors() {
+    local container=$1
+    local pattern=$2
+    local count=0
+    
+    while IFS= read -r line; do
+        if is_actual_error "$line"; then
+            if [ -n "$pattern" ]; then
+                if echo "$line" | grep -qiE "$pattern"; then
+                    ((count++))
+                fi
+            else
+                ((count++))
+            fi
+        fi
+    done < <(docker logs "$container" 2>&1)
+    
+    echo "$count"
 }
 
 # =============================================================================
@@ -414,15 +581,42 @@ view_numbered_errors() {
     # Create temp file for storing all log lines with line numbers
     local log_file=$(mktemp)
     local error_file=$(mktemp)
+    local classified_file=$(mktemp)
     
     # Trap to clean up temp files
-    trap "rm -f '$log_file' '$error_file'" RETURN
+    trap "rm -f '$log_file' '$error_file' '$classified_file'" RETURN
+    
+    # Get container start time for startup detection
+    local container_start=$(get_container_start_time "$service")
     
     # Get full log with line numbers
     docker logs "$service" 2>&1 | nl -ba > "$log_file"
     
-    # Extract error lines (keeping line numbers)
-    grep -iE "error|err\]|failed|fatal|panic|critical|exception|warning|warn\]" "$log_file" > "$error_file" 2>/dev/null || true
+    # Extract error lines, filter out exclusions, and classify
+    grep -iE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL" "$log_file" 2>/dev/null | while IFS= read -r line; do
+        local content=$(echo "$line" | cut -c8-)
+        
+        # Skip if it matches exclusion patterns
+        local excluded=false
+        for exclusion in "${EXCLUSION_PATTERNS[@]}"; do
+            if echo "$content" | grep -qiE "$exclusion"; then
+                excluded=true
+                break
+            fi
+        done
+        
+        if [ "$excluded" = false ]; then
+            # Check if it's a startup error
+            if is_startup_error "$content" "$container_start"; then
+                echo "STARTUP|$line" >> "$classified_file"
+            else
+                echo "ERROR|$line" >> "$classified_file"
+            fi
+        fi
+    done
+    
+    # Create final error file with classification prefix
+    cat "$classified_file" > "$error_file" 2>/dev/null || true
     
     local total_errors=$(wc -l < "$error_file" 2>/dev/null || echo "0")
     total_errors=$((total_errors + 0))  # Ensure it's a number
@@ -461,24 +655,37 @@ view_numbered_errors() {
         # Display current page of errors
         local idx=0
         local display_idx=$start_idx
-        while IFS= read -r line; do
+        while IFS= read -r entry; do
             ((idx++))
             if [ "$idx" -ge "$start_idx" ] && [ "$idx" -le "$end_idx" ]; then
+                # Extract classification and line
+                local classification=$(echo "$entry" | cut -d'|' -f1)
+                local line=$(echo "$entry" | cut -d'|' -f2-)
+                
                 # Extract line number from the log (first field from nl command)
                 local log_line_num=$(echo "$line" | awk '{print $1}')
                 # Get the rest of the line (the actual log content)
                 local log_content=$(echo "$line" | cut -c8-)
                 
                 # Truncate for display
-                local short_content="${log_content:0:60}"
+                local short_content="${log_content:0:50}"
                 
-                # Color based on severity
-                if echo "$line" | grep -qiE "fatal|panic|critical"; then
-                    printf "  ${RED}%4d${NC})  ${DIM}L%-6s${NC}  ${RED}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
-                elif echo "$line" | grep -qiE "error|err\]|failed|exception"; then
-                    printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${YELLOW}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                # Color and annotate based on classification and severity
+                local annotation=""
+                if [ "$classification" = "STARTUP" ]; then
+                    annotation="${MAGENTA}[STARTUP]${NC} "
+                fi
+                
+                if echo "$log_content" | grep -qiE "fatal|panic|critical|FATL"; then
+                    printf "  ${RED}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}${RED}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                elif echo "$log_content" | grep -qiE "error|err\]|failed|exception|ERRO"; then
+                    if [ "$classification" = "STARTUP" ]; then
+                        printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}${DIM}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                    else
+                        printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}${YELLOW}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                    fi
                 else
-                    printf "  ${DIM}%4d${NC})  ${DIM}L%-6s${NC}  %s\n" "$display_idx" "$log_line_num" "$short_content"
+                    printf "  ${DIM}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}%s\n" "$display_idx" "$log_line_num" "$short_content"
                 fi
                 ((display_idx++))
             fi
@@ -537,8 +744,9 @@ view_numbered_errors() {
             *)
                 # Check if it's a number (error selection)
                 if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$total_errors" ] 2>/dev/null; then
-                    # Get the log line number for this error
-                    local selected_line=$(sed -n "${choice}p" "$error_file")
+                    # Get the log line number for this error (handle classified format)
+                    local selected_entry=$(sed -n "${choice}p" "$error_file")
+                    local selected_line=$(echo "$selected_entry" | cut -d'|' -f2-)
                     local log_line_num=$(echo "$selected_line" | awk '{print $1}')
                     view_error_with_context "$service" "$log_line_num" "$log_file" "$choice"
                 fi
@@ -843,32 +1051,88 @@ view_category_errors() {
     draw_box_bottom
     echo ""
 
-    local count=$(count_errors_by_pattern "$service" "$pattern")
-    echo -e "  Found ${RED}$count${NC} entries matching '$category' pattern"
+    # Get container start time for startup detection
+    local container_start=$(get_container_start_time "$service")
+    local uptime=$(get_container_uptime_seconds "$service")
+    
+    # Count actual errors (excluding false positives)
+    local actual_count=0
+    local startup_count=0
+    local excluded_count=0
+    local temp_errors=$(mktemp)
+    
+    # Get all lines matching pattern and filter
+    docker logs "$service" 2>&1 | grep -iE "$pattern" 2>/dev/null | while IFS= read -r line; do
+        # Check if this is an excluded (false positive) line
+        if is_excluded_line "$line"; then
+            echo "EXCLUDED:$line" >> "$temp_errors"
+        elif echo "$line" | grep -qiE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL"; then
+            # Check if it's a startup error
+            if is_startup_error "$line" "$container_start"; then
+                echo "STARTUP:$line" >> "$temp_errors"
+            else
+                echo "ERROR:$line" >> "$temp_errors"
+            fi
+        else
+            # Matches pattern but isn't an error keyword - likely info
+            echo "EXCLUDED:$line" >> "$temp_errors"
+        fi
+    done
+    
+    actual_count=$(grep -c "^ERROR:" "$temp_errors" 2>/dev/null || echo "0")
+    startup_count=$(grep -c "^STARTUP:" "$temp_errors" 2>/dev/null || echo "0")
+    excluded_count=$(grep -c "^EXCLUDED:" "$temp_errors" 2>/dev/null || echo "0")
+    
+    local total_errors=$((actual_count + startup_count))
+    
+    echo -e "  ${WHITE}${BOLD}Analysis Results:${NC}"
+    echo -e "  ├─ ${RED}Actual errors:${NC}      $actual_count"
+    echo -e "  ├─ ${YELLOW}Startup errors:${NC}     $startup_count ${DIM}(within first ${STARTUP_WINDOW_SECONDS}s)${NC}"
+    echo -e "  └─ ${DIM}Excluded (info):${NC}    $excluded_count ${DIM}(false positives filtered)${NC}"
     echo ""
 
-    if [ "$count" -gt 0 ]; then
-        echo -e "${WHITE}${BOLD}Error Entries (with context):${NC}"
+    if [ "$total_errors" -gt 0 ]; then
+        echo -e "${WHITE}${BOLD}Error Entries:${NC}"
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
         
-        # Get errors with context, limit to reasonable amount
-        docker logs "$service" 2>&1 | grep -iE -B1 -A1 "$pattern" 2>/dev/null | head -100 | while read line; do
-            if echo "$line" | grep -qiE "$pattern"; then
-                echo -e "${RED}$line${NC}"
-            elif [ "$line" = "--" ]; then
-                echo -e "${DIM}---${NC}"
-            else
-                echo -e "${DIM}$line${NC}"
-            fi
-        done
-
-        if [ "$count" -gt 30 ]; then
+        local shown=0
+        
+        # Show actual errors first
+        if [ "$actual_count" -gt 0 ]; then
+            echo -e "  ${RED}${BOLD}── Actual Errors ──${NC}"
+            grep "^ERROR:" "$temp_errors" 2>/dev/null | head -20 | while IFS= read -r entry; do
+                local line="${entry#ERROR:}"
+                echo -e "  ${RED}$line${NC}"
+                ((shown++))
+            done
             echo ""
-            echo -e "${YELLOW}  (Showing first ~30 matches. Use search for specific entries)${NC}"
+        fi
+        
+        # Show startup errors with annotation
+        if [ "$startup_count" -gt 0 ]; then
+            echo -e "  ${YELLOW}${BOLD}── Startup Errors ──${NC} ${DIM}(likely transient, occurred during container initialization)${NC}"
+            grep "^STARTUP:" "$temp_errors" 2>/dev/null | head -15 | while IFS= read -r entry; do
+                local line="${entry#STARTUP:}"
+                echo -e "  ${YELLOW}[STARTUP]${NC} ${DIM}$line${NC}"
+            done
+            echo ""
+        fi
+
+        if [ "$total_errors" -gt 35 ]; then
+            echo ""
+            echo -e "${YELLOW}  (Showing first ~35 matches. Use search for specific entries)${NC}"
         fi
     else
-        echo -e "  ${GREEN}No errors found in this category!${NC}"
+        echo -e "  ${GREEN}No actual errors found in this category!${NC}"
+        
+        if [ "$excluded_count" -gt 0 ]; then
+            echo ""
+            echo -e "  ${DIM}$excluded_count info/success messages were filtered out.${NC}"
+        fi
     fi
+    
+    # Cleanup
+    rm -f "$temp_errors"
 
     press_enter
 }

@@ -414,8 +414,63 @@ show_status_dashboard() {
         local commit=$(git rev-parse --short HEAD 2>/dev/null)
         print_status "  Branch:" "$branch ($commit)" "$DIM"
     fi
+    
+    # Quick Image Update Check (only for running containers)
+    local image_status=$(quick_check_image_updates)
+    if [ "$image_status" != "none" ]; then
+        print_status "Images:" "$image_status" "$YELLOW"
+    fi
 
     echo ""
+}
+
+# Quick check for image updates (fast, checks key services only)
+quick_check_image_updates() {
+    # Only check if Docker is running
+    if ! docker info &> /dev/null; then
+        echo "none"
+        return
+    fi
+    
+    # Key services to check (most frequently updated)
+    local key_services=("dragonite" "golbat" "rotom" "reactmap" "xilriws")
+    local updates_available=0
+    local checked=0
+    
+    for service in "${key_services[@]}"; do
+        # Check if container exists
+        local container_exists=$(docker ps -a --filter "name=^${service}$" --format "{{.Names}}" 2>/dev/null)
+        if [ -z "$container_exists" ]; then
+            continue
+        fi
+        
+        # Get the image used by the container
+        local image=$(docker inspect --format='{{.Config.Image}}' "$service" 2>/dev/null)
+        if [ -z "$image" ]; then
+            continue
+        fi
+        
+        ((checked++))
+        
+        # Compare local image creation time with what we'd get from a pull
+        # This is a quick heuristic - check if image is older than 7 days
+        local created=$(docker inspect --format='{{.Created}}' "$image" 2>/dev/null | cut -d'T' -f1)
+        if [ -n "$created" ]; then
+            local created_epoch=$(date -d "$created" +%s 2>/dev/null || echo "0")
+            local now_epoch=$(date +%s)
+            local age_days=$(( (now_epoch - created_epoch) / 86400 ))
+            
+            if [ "$age_days" -gt 7 ]; then
+                ((updates_available++))
+            fi
+        fi
+    done
+    
+    if [ "$updates_available" -gt 0 ]; then
+        echo "${updates_available} image(s) may have updates (press 'v' to check)"
+    else
+        echo "none"
+    fi
 }
 
 # =============================================================================
