@@ -383,6 +383,7 @@ show_service_detail() {
     echo "    4) Follow log (live)"
     echo "    5) Search in log"
     echo "    6) Clear this service's log"
+    echo "    ${CYAN}e) View errors only (numbered list with context jump)${NC}"
     echo "    0) Back to main menu"
     echo ""
     read -p "  Select option: " choice
@@ -394,6 +395,7 @@ show_service_detail() {
         4) follow_log "$service" ;;
         5) search_in_log "$service" ;;
         6) clear_service_log "$service" ;;
+        e|E) view_numbered_errors "$service" ;;
         0) return ;;
         *) show_service_detail "$service" ;;
     esac
@@ -402,6 +404,386 @@ show_service_detail() {
 # =============================================================================
 # ERROR VIEWING
 # =============================================================================
+
+# View numbered errors with ability to jump to context
+view_numbered_errors() {
+    local service=$1
+    local page=1
+    local per_page=20
+    
+    # Create temp file for storing all log lines with line numbers
+    local log_file=$(mktemp)
+    local error_file=$(mktemp)
+    
+    # Trap to clean up temp files
+    trap "rm -f '$log_file' '$error_file'" RETURN
+    
+    # Get full log with line numbers
+    docker logs "$service" 2>&1 | nl -ba > "$log_file"
+    
+    # Extract error lines (keeping line numbers)
+    grep -iE "error|err\]|failed|fatal|panic|critical|exception|warning|warn\]" "$log_file" > "$error_file" 2>/dev/null || true
+    
+    local total_errors=$(wc -l < "$error_file" 2>/dev/null || echo "0")
+    total_errors=$((total_errors + 0))  # Ensure it's a number
+    
+    if [ "$total_errors" -eq 0 ]; then
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              NUMBERED ERRORS: $service"
+        draw_box_bottom
+        echo ""
+        echo -e "  ${GREEN}No errors found in logs!${NC}"
+        press_enter
+        show_service_detail "$service"
+        return
+    fi
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              NUMBERED ERRORS: $service"
+        draw_box_bottom
+        echo ""
+        
+        local total_pages=$(( (total_errors + per_page - 1) / per_page ))
+        local start_idx=$(( (page - 1) * per_page + 1 ))
+        local end_idx=$(( page * per_page ))
+        [ "$end_idx" -gt "$total_errors" ] && end_idx=$total_errors
+        
+        echo -e "  Found ${RED}$total_errors${NC} errors/warnings  |  Page ${CYAN}$page${NC} of ${CYAN}$total_pages${NC}  |  Showing #$start_idx-$end_idx"
+        echo ""
+        echo -e "${DIM}  [Error#]  [LogLine]  Message${NC}"
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+        
+        # Display current page of errors
+        local idx=0
+        local display_idx=$start_idx
+        while IFS= read -r line; do
+            ((idx++))
+            if [ "$idx" -ge "$start_idx" ] && [ "$idx" -le "$end_idx" ]; then
+                # Extract line number from the log (first field from nl command)
+                local log_line_num=$(echo "$line" | awk '{print $1}')
+                # Get the rest of the line (the actual log content)
+                local log_content=$(echo "$line" | cut -c8-)
+                
+                # Truncate for display
+                local short_content="${log_content:0:60}"
+                
+                # Color based on severity
+                if echo "$line" | grep -qiE "fatal|panic|critical"; then
+                    printf "  ${RED}%4d${NC})  ${DIM}L%-6s${NC}  ${RED}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                elif echo "$line" | grep -qiE "error|err\]|failed|exception"; then
+                    printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${YELLOW}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                else
+                    printf "  ${DIM}%4d${NC})  ${DIM}L%-6s${NC}  %s\n" "$display_idx" "$log_line_num" "$short_content"
+                fi
+                ((display_idx++))
+            fi
+        done < "$error_file"
+        
+        echo ""
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${WHITE}${BOLD}Navigation:${NC}"
+        echo "    [number]  - View error with 50 lines context before/after"
+        echo "    n         - Next page"
+        echo "    p         - Previous page"
+        echo "    g [page]  - Go to page"
+        echo "    f         - Filter by keyword"
+        echo "    0         - Back to service detail"
+        echo ""
+        read -p "  Enter choice: " choice
+        
+        case $choice in
+            n|N)
+                if [ "$page" -lt "$total_pages" ]; then
+                    ((page++))
+                else
+                    print_warning "Already at last page"
+                    sleep 1
+                fi
+                ;;
+            p|P)
+                if [ "$page" -gt 1 ]; then
+                    ((page--))
+                else
+                    print_warning "Already at first page"
+                    sleep 1
+                fi
+                ;;
+            g\ *|G\ *)
+                local target_page=$(echo "$choice" | awk '{print $2}')
+                if [ "$target_page" -ge 1 ] 2>/dev/null && [ "$target_page" -le "$total_pages" ] 2>/dev/null; then
+                    page=$target_page
+                else
+                    print_warning "Invalid page number"
+                    sleep 1
+                fi
+                ;;
+            f|F)
+                echo ""
+                read -p "  Enter filter keyword: " filter_word
+                if [ -n "$filter_word" ]; then
+                    view_filtered_numbered_errors "$service" "$filter_word"
+                fi
+                ;;
+            0)
+                show_service_detail "$service"
+                return
+                ;;
+            *)
+                # Check if it's a number (error selection)
+                if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$total_errors" ] 2>/dev/null; then
+                    # Get the log line number for this error
+                    local selected_line=$(sed -n "${choice}p" "$error_file")
+                    local log_line_num=$(echo "$selected_line" | awk '{print $1}')
+                    view_error_with_context "$service" "$log_line_num" "$log_file" "$choice"
+                fi
+                ;;
+        esac
+    done
+}
+
+# View filtered errors by keyword
+view_filtered_numbered_errors() {
+    local service=$1
+    local filter=$2
+    local page=1
+    local per_page=20
+    
+    # Create temp file for storing all log lines with line numbers
+    local log_file=$(mktemp)
+    local error_file=$(mktemp)
+    
+    # Trap to clean up temp files
+    trap "rm -f '$log_file' '$error_file'" RETURN
+    
+    # Get full log with line numbers
+    docker logs "$service" 2>&1 | nl -ba > "$log_file"
+    
+    # Extract error lines matching filter
+    grep -iE "error|err\]|failed|fatal|panic|critical|exception|warning|warn\]" "$log_file" | \
+        grep -i "$filter" > "$error_file" 2>/dev/null || true
+    
+    local total_errors=$(wc -l < "$error_file" 2>/dev/null || echo "0")
+    total_errors=$((total_errors + 0))
+    
+    if [ "$total_errors" -eq 0 ]; then
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              FILTERED ERRORS: $service"
+        draw_box_bottom
+        echo ""
+        echo -e "  ${YELLOW}No errors matching '${filter}' found${NC}"
+        press_enter
+        return
+    fi
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              FILTERED ERRORS: $service"
+        draw_box_bottom
+        echo ""
+        
+        local total_pages=$(( (total_errors + per_page - 1) / per_page ))
+        local start_idx=$(( (page - 1) * per_page + 1 ))
+        local end_idx=$(( page * per_page ))
+        [ "$end_idx" -gt "$total_errors" ] && end_idx=$total_errors
+        
+        echo -e "  Filter: ${CYAN}'$filter'${NC}  |  Found ${RED}$total_errors${NC} matching  |  Page ${CYAN}$page${NC}/${CYAN}$total_pages${NC}"
+        echo ""
+        echo -e "${DIM}  [Error#]  [LogLine]  Message${NC}"
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+        
+        local idx=0
+        local display_idx=$start_idx
+        while IFS= read -r line; do
+            ((idx++))
+            if [ "$idx" -ge "$start_idx" ] && [ "$idx" -le "$end_idx" ]; then
+                local log_line_num=$(echo "$line" | awk '{print $1}')
+                local log_content=$(echo "$line" | cut -c8-)
+                local short_content="${log_content:0:60}"
+                
+                if echo "$line" | grep -qiE "fatal|panic|critical"; then
+                    printf "  ${RED}%4d${NC})  ${DIM}L%-6s${NC}  ${RED}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                elif echo "$line" | grep -qiE "error|err\]|failed|exception"; then
+                    printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${YELLOW}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
+                else
+                    printf "  ${DIM}%4d${NC})  ${DIM}L%-6s${NC}  %s\n" "$display_idx" "$log_line_num" "$short_content"
+                fi
+                ((display_idx++))
+            fi
+        done < "$error_file"
+        
+        echo ""
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${WHITE}${BOLD}Navigation:${NC}"
+        echo "    [number]  - View error with 50 lines context"
+        echo "    n/p       - Next/Previous page"
+        echo "    0         - Back"
+        echo ""
+        read -p "  Enter choice: " choice
+        
+        case $choice in
+            n|N) [ "$page" -lt "$total_pages" ] && ((page++)) ;;
+            p|P) [ "$page" -gt 1 ] && ((page--)) ;;
+            0) return ;;
+            *)
+                if [ "$choice" -ge 1 ] 2>/dev/null && [ "$choice" -le "$total_errors" ] 2>/dev/null; then
+                    local selected_line=$(sed -n "${choice}p" "$error_file")
+                    local log_line_num=$(echo "$selected_line" | awk '{print $1}')
+                    view_error_with_context "$service" "$log_line_num" "$log_file" "$choice"
+                fi
+                ;;
+        esac
+    done
+}
+
+# View a specific error with context (50 lines before and after)
+view_error_with_context() {
+    local service=$1
+    local target_line=$2
+    local log_file=$3
+    local error_num=$4
+    local context=50
+    
+    # Calculate start and end lines
+    local start_line=$((target_line - context))
+    [ "$start_line" -lt 1 ] && start_line=1
+    local end_line=$((target_line + context))
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              ERROR #$error_num CONTEXT: $service"
+    draw_box_divider
+    printf "${CYAN}║${NC}  Target Error Line: ${RED}%-54s${NC} ${CYAN}║${NC}\n" "L$target_line"
+    printf "${CYAN}║${NC}  Context Range:     ${DIM}L$start_line - L$end_line (±$context lines)${NC}%-22s ${CYAN}║${NC}\n" ""
+    draw_box_bottom
+    echo ""
+    
+    # Get total lines in log
+    local total_lines=$(wc -l < "$log_file" 2>/dev/null || echo "0")
+    [ "$end_line" -gt "$total_lines" ] && end_line=$total_lines
+    
+    echo -e "${DIM}  Log context (${context} lines before and after the error):${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Display lines with highlighting
+    local line_num=0
+    while IFS= read -r line; do
+        ((line_num++))
+        if [ "$line_num" -ge "$start_line" ] && [ "$line_num" -le "$end_line" ]; then
+            # Get the actual log line number (first field)
+            local actual_line=$(echo "$line" | awk '{print $1}')
+            local content=$(echo "$line" | cut -c8-)
+            
+            # Highlight the target line
+            if [ "$actual_line" -eq "$target_line" ] 2>/dev/null; then
+                echo -e "  ${RED}▶ L${actual_line}:${NC} ${RED}${BOLD}$content${NC}"
+            elif echo "$content" | grep -qiE "error|fatal|panic|critical|failed"; then
+                echo -e "  ${YELLOW}  L${actual_line}:${NC} ${YELLOW}$content${NC}"
+            elif echo "$content" | grep -qiE "warning|warn"; then
+                echo -e "  ${DIM}  L${actual_line}:${NC} $content"
+            else
+                echo -e "  ${DIM}  L${actual_line}:${NC} $content"
+            fi
+        fi
+    done < "$log_file"
+    
+    echo ""
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo -e "  ${RED}▶${NC} = Target error line (L$target_line)"
+    echo ""
+    
+    # Options for navigation
+    echo -e "${WHITE}${BOLD}Options:${NC}"
+    echo "    m - View more context (100 lines)"
+    echo "    a - View all log around this error"
+    echo "    c - Copy error line to clipboard (if available)"
+    echo "    Enter - Back to error list"
+    echo ""
+    read -p "  Select option: " opt
+    
+    case $opt in
+        m|M)
+            view_error_with_extended_context "$service" "$target_line" "$log_file" "$error_num" 100
+            ;;
+        a|A)
+            view_error_with_extended_context "$service" "$target_line" "$log_file" "$error_num" 200
+            ;;
+        c|C)
+            local error_line=$(sed -n "${target_line}p" "$log_file" | cut -c8-)
+            if command -v xclip &> /dev/null; then
+                echo "$error_line" | xclip -selection clipboard
+                print_success "Error copied to clipboard"
+            elif command -v pbcopy &> /dev/null; then
+                echo "$error_line" | pbcopy
+                print_success "Error copied to clipboard"
+            else
+                print_warning "No clipboard tool available (xclip/pbcopy)"
+                echo ""
+                echo "  Error line:"
+                echo "  $error_line"
+            fi
+            press_enter
+            ;;
+    esac
+}
+
+# View error with extended context
+view_error_with_extended_context() {
+    local service=$1
+    local target_line=$2
+    local log_file=$3
+    local error_num=$4
+    local context=$5
+    
+    local start_line=$((target_line - context))
+    [ "$start_line" -lt 1 ] && start_line=1
+    local end_line=$((target_line + context))
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              ERROR #$error_num EXTENDED CONTEXT: $service"
+    draw_box_divider
+    printf "${CYAN}║${NC}  Target Error Line: ${RED}%-54s${NC} ${CYAN}║${NC}\n" "L$target_line"
+    printf "${CYAN}║${NC}  Context Range:     ${DIM}L$start_line - L$end_line (±$context lines)${NC}%-22s ${CYAN}║${NC}\n" ""
+    draw_box_bottom
+    echo ""
+    
+    local total_lines=$(wc -l < "$log_file" 2>/dev/null || echo "0")
+    [ "$end_line" -gt "$total_lines" ] && end_line=$total_lines
+    
+    echo -e "${DIM}  Extended log context (±$context lines):${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────────${NC}"
+    
+    # Use sed to extract range and display with highlighting
+    sed -n "${start_line},${end_line}p" "$log_file" | while IFS= read -r line; do
+        local actual_line=$(echo "$line" | awk '{print $1}')
+        local content=$(echo "$line" | cut -c8-)
+        
+        if [ "$actual_line" -eq "$target_line" ] 2>/dev/null; then
+            echo -e "  ${RED}▶ L${actual_line}:${NC} ${RED}${BOLD}$content${NC}"
+        elif echo "$content" | grep -qiE "error|fatal|panic|critical|failed"; then
+            echo -e "  ${YELLOW}  L${actual_line}:${NC} ${YELLOW}$content${NC}"
+        else
+            echo -e "  ${DIM}  L${actual_line}:${NC} $content"
+        fi
+    done | less -R
+    
+    echo ""
+    press_enter
+}
 
 view_errors_by_category() {
     local service=$1
