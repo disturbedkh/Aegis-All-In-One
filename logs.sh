@@ -144,7 +144,6 @@ EXCLUSION_PATTERNS=(
     "Applying new configuration"
     "Using.*store"
     "Setting up remote"
-    "Database locked.*retrying"
     "successfully executed"
     # Golbat/Dragonite info patterns
     "^\[Pokemon\]"
@@ -337,6 +336,13 @@ get_log_pattern() {
 # Check if a line should be excluded (it's actually a success/info message)
 is_excluded_line() {
     local line=$1
+    
+    # NEVER exclude lines that contain actual error indicators
+    # These patterns indicate real errors even if logged at info/warn level
+    if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+        return 1  # Not excluded - this is a real error
+    fi
+    
     for exclusion in "${EXCLUSION_PATTERNS[@]}"; do
         if echo "$line" | grep -qiE "$exclusion"; then
             return 0  # Should be excluded
