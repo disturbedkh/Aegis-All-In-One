@@ -127,9 +127,9 @@ services:
     depends_on:
       - database
     environment:
-      SCANNER_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/golbat"
-      KOJI_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/koji"
-      CONTROLLER_DB_URL: "mysql://dbuser:${MYSQL_PASSWORD}@database:3306/dragonite"
+      SCANNER_DB_URL: "mysql://${MYSQL_USER:-dbuser}:${MYSQL_PASSWORD}@database:3306/golbat"
+      KOJI_DB_URL: "mysql://${MYSQL_USER:-dbuser}:${MYSQL_PASSWORD}@database:3306/koji"
+      CONTROLLER_DB_URL: "mysql://${MYSQL_USER:-dbuser}:${MYSQL_PASSWORD}@database:3306/dragonite"
       KOJI_SECRET: ${KOJI_SECRET}
     ports:
       - 6004:8080

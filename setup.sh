@@ -2016,7 +2016,7 @@ sed -i "s/SuperSecuredbuserPassword/${DB_PASSWORD}/g" .env reactmap/local.json u
 sed -i "s/CHANGE_ME/${DB_PASSWORD}/g" Poracle/config/local.json
 
 # DB user
-sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json Poracle/config/local.json
+sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json Poracle/config/local.json init/01.sql
 
 # MySQL root password
 sed -i "s/V3ryS3cUr3MYSQL_ROOT_P4ssw0rd/${MYSQL_ROOT_PASSWORD}/g" .env
@@ -2042,8 +2042,9 @@ sed -i "s/SuperSecureDragoniteApiSecret/${DRAGONITE_API_SECRET}/g" .env
 # Poracle API secret (used by ReactMap to communicate with Poracle)
 sed -i "s/SuperSecurePoracleApiSecret/${PORACLE_API_SECRET}/g" reactmap/local.json
 
-# Track Poracle config file
+# Track Poracle config file and init SQL
 track_file "Poracle/config/local.json"
+track_file "init/01.sql"
 
 # Restore file ownership to the original user (not root)
 restore_all_ownership
