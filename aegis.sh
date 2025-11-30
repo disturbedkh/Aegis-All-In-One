@@ -697,6 +697,32 @@ git_pull() {
     local had_changes=false
     local stash_name="aegis-auto-stash-$(date +%Y%m%d-%H%M%S)"
     
+    # First check for unmerged files (from previous failed merge/pull)
+    local unmerged=$(git ls-files --unmerged 2>/dev/null | wc -l)
+    if [ "$unmerged" -gt 0 ]; then
+        echo -e "${YELLOW}━━━ Detected Unresolved Merge Conflicts ━━━${NC}"
+        echo ""
+        echo -e "${DIM}Unmerged files:${NC}"
+        git diff --name-only --diff-filter=U 2>/dev/null | head -5
+        echo ""
+        echo -e "${CYAN}Automatically resolving by keeping your local versions...${NC}"
+        
+        # For each unmerged file, accept local version
+        git diff --name-only --diff-filter=U 2>/dev/null | while read file; do
+            if [ -n "$file" ]; then
+                git checkout --ours "$file" 2>/dev/null
+                git add "$file" 2>/dev/null
+            fi
+        done
+        
+        # Complete the merge if we were in merge state
+        if [ -f ".git/MERGE_HEAD" ]; then
+            git commit -m "Auto-resolved merge conflicts (kept local configs)" --no-edit 2>/dev/null || true
+        fi
+        echo -e "${GREEN}✓ Conflicts resolved${NC}"
+        echo ""
+    fi
+    
     # Check for local changes
     if ! git diff-index --quiet HEAD -- 2>/dev/null; then
         had_changes=true
@@ -713,15 +739,31 @@ git_pull() {
         echo -e "${GREEN}✓ Don't worry - they will be automatically preserved!${NC}"
         echo ""
         
+        # Stage all changes first (required for stash to work with some files)
+        git add -A 2>/dev/null
+        
         # Auto-stash with a named stash
         echo -e "${CYAN}Temporarily saving your configs...${NC}"
-        git stash push -m "$stash_name" --quiet
+        git stash push -m "$stash_name" --quiet 2>&1
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Configs saved${NC}"
         else
-            echo -e "${RED}Failed to save configs. Aborting.${NC}"
-            press_enter
-            return
+            # Try alternative: stash with --include-untracked
+            git stash push -m "$stash_name" --include-untracked --quiet 2>&1
+            if [ $? -eq 0 ]; then
+                echo -e "${GREEN}✓ Configs saved${NC}"
+            else
+                # Last resort: reset and let user know
+                echo -e "${YELLOW}⚠ Could not stash changes automatically.${NC}"
+                echo ""
+                echo "Your local configs are in a complex state."
+                echo "Options:"
+                echo "  1. Run: ${CYAN}git reset --hard origin/$branch${NC} (loses local changes)"
+                echo "  2. Manually backup your config files and re-run setup.sh"
+                echo ""
+                press_enter
+                return
+            fi
         fi
         echo ""
     fi
