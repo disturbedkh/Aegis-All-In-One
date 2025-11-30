@@ -474,17 +474,30 @@ sudo bash ./logs.sh
   - Timeouts and connection refused
   - Proxy errors
   - Permanently banned IPs
-- Proxy Management:
-  - View banned IP addresses from logs
-  - Find failing proxies (25+ failures with no success)
-  - Remove banned IPs from proxy.txt
-  - Remove failing proxies from proxy.txt
-  - Auto-backup before modifications
 - Live Monitoring Mode:
   - Real-time statistics display
   - Consecutive failure tracking
   - **Auto-restart container after 30 consecutive failures**
   - Visual alerts for critical states
+
+**Proxy Manager (Press 'p' from Xilriws menu):**
+- Proxy Statistics:
+  - Total proxy count and file size
+  - Unique IPs/domains analysis
+  - Group/subnet distribution
+  - Consecutive same-group detection
+- Proxy Randomization:
+  - **Smart shuffle avoiding consecutive same-IP/domain entries**
+  - Groups proxies by IP subnet (first 3 octets) or domain
+  - Minimizes detection patterns
+  - Auto-backup before changes
+- Proxy Cleanup:
+  - View banned IP addresses from logs
+  - Find failing proxies (configurable threshold, default 25+)
+  - Remove banned IPs from proxy.txt
+  - Remove failing proxies (no successful logins)
+  - Remove duplicate proxies
+  - View first/last proxy samples
 
 **Error Analysis Features:**
 - View errors by category with context

@@ -1107,13 +1107,10 @@ show_xilriws_menu() {
         echo -e "${WHITE}${BOLD}Xilriws Options${NC}"
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
         echo "    1) View recent errors"
-        echo "    2) View banned IP addresses from logs"
-        echo "    3) Find failing proxies (25+ failures, no success)"
-        echo "    4) Remove banned IPs from proxy.txt"
-        echo "    5) Remove failing proxies from proxy.txt"
-        echo "    6) Live monitoring mode (auto-restart on failure)"
-        echo "    7) Clear Xilriws logs"
-        echo "    8) Restart Xilriws container"
+        echo "    2) Live monitoring mode (auto-restart on failure)"
+        echo "    3) Clear Xilriws logs"
+        echo "    4) Restart Xilriws container"
+        echo "    p) Proxy Manager"
         echo "    r) Refresh"
         echo "    0) Back to main menu"
         echo ""
@@ -1121,17 +1118,440 @@ show_xilriws_menu() {
         
         case $choice in
             1) view_xilriws_errors ;;
-            2) view_banned_ips ;;
-            3) find_failing_proxies ;;
-            4) remove_banned_ips ;;
-            5) remove_failing_proxies ;;
-            6) xilriws_live_monitor ;;
-            7) clear_xilriws_logs ;;
-            8) restart_xilriws ;;
+            2) xilriws_live_monitor ;;
+            3) clear_xilriws_logs ;;
+            4) restart_xilriws ;;
+            p|P) show_proxy_manager ;;
             r|R) continue ;;
             0) return ;;
         esac
     done
+}
+
+# =============================================================================
+# PROXY MANAGER
+# =============================================================================
+
+# Extract IP or domain from proxy line
+get_proxy_identifier() {
+    local line=$1
+    # Handle formats like: ip:port, user:pass@ip:port, protocol://ip:port, etc.
+    # Extract the IP or domain portion
+    local identifier=$(echo "$line" | sed -E 's|^[^:]+://||' | sed -E 's|^[^@]+@||' | sed -E 's|:[0-9]+.*$||' | sed -E 's|^([0-9]+\.[0-9]+\.[0-9]+)\..*|\1|')
+    echo "$identifier"
+}
+
+# Get domain/subnet prefix for grouping (first 3 octets for IP, or domain)
+get_proxy_group() {
+    local line=$1
+    local identifier=$(get_proxy_identifier "$line")
+    
+    # Check if it's an IP address
+    if [[ "$identifier" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # Return first 3 octets as the group
+        echo "$identifier"
+    elif [[ "$identifier" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+        # Full IP - return first 3 octets
+        echo "$identifier" | sed -E 's|\.[0-9]+$||'
+    else
+        # Domain - return the domain itself
+        echo "$identifier"
+    fi
+}
+
+# Randomize proxy list avoiding consecutive same-group entries
+randomize_proxy_list() {
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found"
+        return 1
+    fi
+    
+    local total_lines=$(wc -l < "$proxy_file")
+    
+    if [ "$total_lines" -lt 2 ]; then
+        print_warning "Not enough proxies to randomize"
+        return 1
+    fi
+    
+    print_info "Analyzing $total_lines proxies..."
+    
+    # Read all proxies and their groups into arrays
+    declare -a proxies
+    declare -a groups
+    declare -A group_counts
+    
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        proxies+=("$line")
+        local group=$(get_proxy_group "$line")
+        groups+=("$group")
+        ((group_counts["$group"]++))
+    done < "$proxy_file"
+    
+    local num_proxies=${#proxies[@]}
+    local num_groups=${#group_counts[@]}
+    
+    echo "  Found $num_proxies proxies in $num_groups groups/subnets"
+    echo ""
+    
+    # Show top groups
+    echo -e "${CYAN}Top proxy groups/subnets:${NC}"
+    for group in "${!group_counts[@]}"; do
+        echo "  $group: ${group_counts[$group]} proxies"
+    done | sort -t: -k2 -rn | head -10
+    echo ""
+    
+    # Create shuffled result avoiding consecutive same-group
+    declare -a result
+    declare -a remaining_indices
+    
+    # Initialize remaining indices
+    for ((i=0; i<num_proxies; i++)); do
+        remaining_indices+=($i)
+    done
+    
+    # Shuffle the remaining indices first (Fisher-Yates)
+    for ((i=${#remaining_indices[@]}-1; i>0; i--)); do
+        local j=$((RANDOM % (i+1)))
+        local temp=${remaining_indices[$i]}
+        remaining_indices[$i]=${remaining_indices[$j]}
+        remaining_indices[$j]=$temp
+    done
+    
+    local last_group=""
+    local stuck_count=0
+    local max_stuck=100
+    
+    while [ ${#remaining_indices[@]} -gt 0 ]; do
+        local found=false
+        local best_idx=-1
+        
+        # Try to find a proxy from a different group
+        for ((i=0; i<${#remaining_indices[@]}; i++)); do
+            local idx=${remaining_indices[$i]}
+            local this_group=${groups[$idx]}
+            
+            if [ "$this_group" != "$last_group" ] || [ ${#remaining_indices[@]} -eq 1 ]; then
+                best_idx=$i
+                found=true
+                break
+            fi
+        done
+        
+        # If all remaining are same group, just take the first one
+        if [ "$found" = false ]; then
+            best_idx=0
+            ((stuck_count++))
+        fi
+        
+        # Add to result
+        local selected_idx=${remaining_indices[$best_idx]}
+        result+=("${proxies[$selected_idx]}")
+        last_group=${groups[$selected_idx]}
+        
+        # Remove from remaining
+        unset 'remaining_indices[$best_idx]'
+        remaining_indices=("${remaining_indices[@]}")
+        
+        # Safety check
+        if [ $stuck_count -gt $max_stuck ]; then
+            print_warning "Could not avoid all consecutive duplicates (too many same-group proxies)"
+            # Just append the rest
+            for idx in "${remaining_indices[@]}"; do
+                result+=("${proxies[$idx]}")
+            done
+            break
+        fi
+    done
+    
+    # Count how many consecutive same-group pairs we have
+    local consecutive_same=0
+    local prev_group=""
+    for ((i=0; i<${#result[@]}; i++)); do
+        local this_group=$(get_proxy_group "${result[$i]}")
+        if [ "$this_group" = "$prev_group" ]; then
+            ((consecutive_same++))
+        fi
+        prev_group=$this_group
+    done
+    
+    echo ""
+    echo "  Randomization complete:"
+    echo "  - Total proxies: ${#result[@]}"
+    echo "  - Unavoidable consecutive same-group: $consecutive_same"
+    echo ""
+    
+    # Write result
+    printf '%s\n' "${result[@]}" > "${proxy_file}.new"
+    
+    # Backup and replace
+    cp "$proxy_file" "${proxy_file}.backup.$(date +%Y%m%d_%H%M%S)"
+    mv "${proxy_file}.new" "$proxy_file"
+    
+    # Restore ownership
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER:$REAL_GROUP" "$proxy_file" 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" "${proxy_file}.backup."* 2>/dev/null || true
+    fi
+    
+    print_success "Proxy list randomized! Backup created."
+    return 0
+}
+
+# Show proxy statistics
+show_proxy_stats() {
+    local proxy_file="proxy.txt"
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    PROXY.TXT STATISTICS"
+    draw_box_bottom
+    echo ""
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found in current directory"
+        press_enter
+        return
+    fi
+    
+    local total=$(wc -l < "$proxy_file")
+    local unique_ips=$(cat "$proxy_file" | sed -E 's|^[^:]+://||' | sed -E 's|^[^@]+@||' | sed -E 's|:[0-9]+.*$||' | sort -u | wc -l)
+    local file_size=$(stat -c%s "$proxy_file" 2>/dev/null || stat -f%z "$proxy_file" 2>/dev/null)
+    local file_size_fmt=$(format_bytes "$file_size")
+    
+    echo -e "  ${CYAN}File:${NC}          $proxy_file"
+    echo -e "  ${CYAN}Size:${NC}          $file_size_fmt"
+    echo -e "  ${CYAN}Total Lines:${NC}   $total"
+    echo -e "  ${CYAN}Unique IPs:${NC}    $unique_ips"
+    echo ""
+    
+    # Group analysis
+    echo -e "${WHITE}${BOLD}Proxy Groups/Subnets:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    
+    declare -A group_counts
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        local group=$(get_proxy_group "$line")
+        ((group_counts["$group"]++))
+    done < "$proxy_file"
+    
+    echo "  Top 15 groups by count:"
+    for group in "${!group_counts[@]}"; do
+        echo "  $group: ${group_counts[$group]}"
+    done | sort -t: -k2 -rn | head -15
+    
+    echo ""
+    echo -e "  ${CYAN}Total unique groups:${NC} ${#group_counts[@]}"
+    
+    # Check for consecutive same-group
+    local consecutive=0
+    local prev_group=""
+    while IFS= read -r line || [ -n "$line" ]; do
+        [ -z "$line" ] && continue
+        local this_group=$(get_proxy_group "$line")
+        if [ "$this_group" = "$prev_group" ]; then
+            ((consecutive++))
+        fi
+        prev_group=$this_group
+    done < "$proxy_file"
+    
+    echo -e "  ${CYAN}Consecutive same-group pairs:${NC} $consecutive"
+    
+    press_enter
+}
+
+# Proxy Manager Menu
+show_proxy_manager() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "                    XILRIWS PROXY MANAGER"
+        draw_box_bottom
+        echo ""
+        
+        local proxy_file="proxy.txt"
+        if [ -f "$proxy_file" ]; then
+            local total=$(wc -l < "$proxy_file")
+            local file_size=$(stat -c%s "$proxy_file" 2>/dev/null || stat -f%z "$proxy_file" 2>/dev/null)
+            local file_size_fmt=$(format_bytes "$file_size")
+            echo -e "  ${GREEN}✓${NC} proxy.txt found: ${CYAN}$total${NC} proxies (${file_size_fmt})"
+        else
+            echo -e "  ${RED}✗${NC} proxy.txt not found"
+        fi
+        
+        # Show banned/failing counts from logs
+        local status=$(get_container_status "xilriws")
+        if [ "$status" = "running" ]; then
+            local banned=$(docker logs xilriws 2>&1 | grep -iEc "permanently.*banned|permanent.*ban|IP.*banned" || echo "0")
+            local failing=$(get_failing_ips 25 2>/dev/null | grep -c "." || echo "0")
+            echo -e "  ${YELLOW}⚠${NC} Banned IPs detected in logs: ${RED}$banned${NC}"
+            echo -e "  ${YELLOW}⚠${NC} Failing proxies (25+ failures): ${RED}$failing${NC}"
+        fi
+        
+        echo ""
+        echo -e "${WHITE}${BOLD}Proxy Management Options${NC}"
+        echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+        echo "    1) View proxy statistics"
+        echo "    2) Randomize proxy list (avoids consecutive same-IP/domain)"
+        echo "    3) View banned IP addresses from logs"
+        echo "    4) Find failing proxies (configurable threshold)"
+        echo "    5) Remove banned IPs from proxy.txt"
+        echo "    6) Remove failing proxies from proxy.txt"
+        echo "    7) Remove duplicate proxies"
+        echo "    8) View first/last 10 proxies"
+        echo "    0) Back to Xilriws menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1) show_proxy_stats ;;
+            2) randomize_proxies_menu ;;
+            3) view_banned_ips ;;
+            4) find_failing_proxies ;;
+            5) remove_banned_ips ;;
+            6) remove_failing_proxies ;;
+            7) remove_duplicate_proxies ;;
+            8) view_proxy_sample ;;
+            0) return ;;
+        esac
+    done
+}
+
+# Randomize proxies menu
+randomize_proxies_menu() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    RANDOMIZE PROXY LIST"
+    draw_box_bottom
+    echo ""
+    
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found"
+        press_enter
+        return
+    fi
+    
+    echo "  This will shuffle your proxy list while trying to avoid placing"
+    echo "  two proxies from the same IP range or domain consecutively."
+    echo ""
+    echo "  This helps distribute load and avoid detection patterns."
+    echo ""
+    echo -e "  ${YELLOW}A backup will be created before modification.${NC}"
+    echo ""
+    
+    read -p "  Proceed with randomization? (y/n): " confirm
+    
+    if [ "$confirm" = "y" ]; then
+        echo ""
+        randomize_proxy_list
+    else
+        print_info "Operation cancelled"
+    fi
+    
+    press_enter
+}
+
+# Remove duplicate proxies
+remove_duplicate_proxies() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    REMOVE DUPLICATE PROXIES"
+    draw_box_bottom
+    echo ""
+    
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found"
+        press_enter
+        return
+    fi
+    
+    local total=$(wc -l < "$proxy_file")
+    local unique=$(sort -u "$proxy_file" | wc -l)
+    local duplicates=$((total - unique))
+    
+    echo "  Total proxies:     $total"
+    echo "  Unique proxies:    $unique"
+    echo "  Duplicates found:  $duplicates"
+    echo ""
+    
+    if [ "$duplicates" -eq 0 ]; then
+        echo -e "  ${GREEN}No duplicates found!${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "  ${YELLOW}$duplicates duplicate entries will be removed${NC}"
+    echo ""
+    
+    read -p "  Proceed with removal? (y/n): " confirm
+    
+    if [ "$confirm" = "y" ]; then
+        # Backup
+        cp "$proxy_file" "${proxy_file}.backup.$(date +%Y%m%d_%H%M%S)"
+        print_success "Backup created"
+        
+        # Remove duplicates while preserving order
+        awk '!seen[$0]++' "$proxy_file" > "${proxy_file}.tmp"
+        mv "${proxy_file}.tmp" "$proxy_file"
+        
+        # Restore ownership
+        if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+            chown "$REAL_USER:$REAL_GROUP" "$proxy_file" 2>/dev/null || true
+            chown "$REAL_USER:$REAL_GROUP" "${proxy_file}.backup."* 2>/dev/null || true
+        fi
+        
+        local new_total=$(wc -l < "$proxy_file")
+        print_success "Removed $duplicates duplicates. New total: $new_total"
+    else
+        print_info "Operation cancelled"
+    fi
+    
+    press_enter
+}
+
+# View sample of proxies
+view_proxy_sample() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "                    PROXY SAMPLE VIEW"
+    draw_box_bottom
+    echo ""
+    
+    local proxy_file="proxy.txt"
+    
+    if [ ! -f "$proxy_file" ]; then
+        print_error "proxy.txt not found"
+        press_enter
+        return
+    fi
+    
+    local total=$(wc -l < "$proxy_file")
+    
+    echo -e "${CYAN}First 10 proxies:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    head -10 "$proxy_file" | nl
+    
+    echo ""
+    echo -e "${CYAN}Last 10 proxies:${NC}"
+    echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    tail -10 "$proxy_file" | nl -v $((total - 9))
+    
+    echo ""
+    echo -e "  ${DIM}Total: $total proxies${NC}"
+    
+    press_enter
 }
 
 # View recent Xilriws errors
