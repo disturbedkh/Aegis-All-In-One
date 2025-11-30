@@ -48,8 +48,8 @@ ERROR_PATTERNS=(
 # These are success/info messages that contain words like "database" or "connection"
 EXCLUSION_PATTERNS=(
     # Info symbol prefix (ℹ character indicates info, not error)
-    "^ℹ"
-    "^[[:space:]]*ℹ"
+    # Any line containing ℹ is an info message
+    "ℹ"
     # Success/Info messages with "database" keyword
     "database version:"
     "Current database version"
@@ -81,6 +81,25 @@ EXCLUSION_PATTERNS=(
     "auth provider.*is disabled"
     "Server is now listening"
     "was not initialized"
+    "Loaded areas"
+    "Loading.*URL"
+    "Caching http"
+    "Cached http"
+    "cache loaded"
+    "initialized"
+    "new version available"
+    # ReactMap specific info prefixes
+    "\[API\] Loaded"
+    "\[STATS\]"
+    "\[UPDATE\]"
+    "\[AREAS\]"
+    "\[CACHE\]"
+    "\[POKEMON\]"
+    "\[POKEMON_HISTORY\]"
+    "\[DEVICES\]"
+    "\[NESTS\]"
+    "\[SESSIONS\]"
+    "\[WEATHER\]"
     # Info-level log prefixes (these lines are informational, not errors)
     "^INFO "
     "| I |"
@@ -218,11 +237,24 @@ format_bytes() {
     fi
 }
 
-# Count errors in log by pattern
+# Count errors in log by pattern (with exclusion filtering)
 count_errors_by_pattern() {
     local container=$1
     local pattern=$2
-    local count=$(docker logs "$container" 2>&1 | grep -iEc "$pattern" 2>/dev/null || echo "0")
+    local count=0
+    
+    # Build exclusion grep pattern
+    local exclusion_pattern=""
+    for excl in "${EXCLUSION_PATTERNS[@]}"; do
+        if [ -z "$exclusion_pattern" ]; then
+            exclusion_pattern="$excl"
+        else
+            exclusion_pattern="$exclusion_pattern|$excl"
+        fi
+    done
+    
+    # Count lines matching pattern but NOT matching exclusions
+    count=$(docker logs "$container" 2>&1 | grep -iE "$pattern" 2>/dev/null | grep -ivE "$exclusion_pattern" 2>/dev/null | wc -l || echo "0")
     echo "$count"
 }
 
