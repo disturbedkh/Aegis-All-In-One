@@ -37,10 +37,12 @@ fi
 # =============================================================================
 
 # Extract simple string value from JSON
+# Excludes keys starting with underscore (like _explanation, _description)
 get_json_string() {
     local file=$1
     local key=$2
-    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/'
+    # Match exact key (not _key_explanation variants) and extract value
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | grep -v "\"_${key}\|\"_.*_${key}" | head -1 | sed 's/.*:[[:space:]]*"\([^"]*\)".*/\1/'
 }
 
 # Extract boolean value from JSON

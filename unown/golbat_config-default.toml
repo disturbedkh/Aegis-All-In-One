@@ -1,64 +1,246 @@
-port = 9001             # Listening port for golbat
-grpc_port = 50001       # Listening port for grpc
-raw_bearer = "SuperSecureGolbatRawSecret"     # Raw bearer (password) required
-api_secret = "SuperSecureGolbatApiSecret"     # Golbat secret required on api calls (blank for none)
+# =============================================================================
+# Golbat Configuration
+# =============================================================================
+#
+# WHAT IS GOLBAT?
+# ---------------
+# Golbat is the "data processor" of your scanning setup. It:
+#   - Receives raw Pokemon data from Dragonite (the scanner)
+#   - Calculates IVs (Individual Values - the hidden stats of Pokemon)
+#   - Calculates PVP rankings (how good a Pokemon is for battles)
+#   - Stores everything in the database
+#   - Sends data to ReactMap (the map you see in your browser)
+#   - Can send webhooks to alert bots like Poracle
+#
+# Think of Golbat as the "factory" that processes raw materials (scan data)
+# into finished products (Pokemon with IVs, organized in a database).
+#
+# =============================================================================
 
-pokemon_memory_only = false  # Use in-memory storage for pokemon only
+# -----------------------------------------------------------------------------
+# NETWORK PORTS - How other services connect to Golbat
+# -----------------------------------------------------------------------------
 
+# port: The HTTP port Golbat listens on for incoming data and API requests.
+#   - Dragonite sends raw Pokemon data to this port.
+#   - ReactMap requests Pokemon data from this port.
+#   - 9001 is the default; don't change unless you have a conflict.
+port = 9001
+
+# grpc_port: A faster communication port using gRPC protocol.
+#   - gRPC is more efficient than HTTP for high-volume data.
+#   - Dragonite uses this for faster data transfer when configured.
+#   - 50001 is the default; matches dragonite_config.toml setting.
+grpc_port = 50001
+
+# -----------------------------------------------------------------------------
+# SECURITY - Passwords for accessing Golbat
+# -----------------------------------------------------------------------------
+
+# raw_bearer: Password required to SEND data TO Golbat.
+#   - Dragonite uses this password when sending Pokemon encounters.
+#   - Prevents random people from injecting fake data into your database.
+#   - Must match golbat_raw_bearer in dragonite_config.toml.
+raw_bearer = "SuperSecureGolbatRawSecret"
+
+# api_secret: Password required to REQUEST data FROM Golbat.
+#   - ReactMap uses this to fetch Pokemon, gyms, raids for display.
+#   - Must match the "secret" in ReactMap's database config.
+api_secret = "SuperSecureGolbatApiSecret"
+
+# -----------------------------------------------------------------------------
+# PERFORMANCE SETTINGS
+# -----------------------------------------------------------------------------
+
+# pokemon_memory_only: Keep Pokemon data in RAM instead of constantly writing to disk.
+#   - true = Faster, but Pokemon disappear if Golbat crashes/restarts.
+#   - false = Slower but safer, Pokemon survive restarts (recommended).
+#   - Only set true if you have tons of RAM and value speed over reliability.
+pokemon_memory_only = false
+
+# -----------------------------------------------------------------------------
+# KOJI - GEOFENCE/AREA CONFIGURATION
+# -----------------------------------------------------------------------------
+# Golbat needs to know your scan areas for proper data organization.
 [koji]
+
+# url: Where to fetch your geofence (scan area) definitions.
+#   - Points to Koji's API to get your "Mapping" project areas.
+#   - Replace "Mapping" with your actual Koji project name if different.
+#   - Golbat uses this to know which areas to track.
 url = "http://koji:8080/api/v1/geofence/feature-collection/Mapping"
+
+# bearer_token: Password to access Koji's API.
+#   - Must match KOJI_SECRET in your .env file.
 bearer_token = "SuperSecureKojiSecret"
 
+# -----------------------------------------------------------------------------
+# CLEANUP - AUTOMATIC DATABASE MAINTENANCE
+# -----------------------------------------------------------------------------
+# These settings control automatic deletion of old data to prevent
+# your database from growing forever and filling up your disk.
 [cleanup]
-pokemon = true          # Keep pokemon table is kept nice and short
-incidents = true        # Remove incidents after expiry
-quests = true           # Remove quests after expiry
-stats = true            # Enable/Disable stats history
-stats_days = 365        # Remove entries from ["pokemon_stats", "pokemon_shiny_stats", "pokemon_iv_stats", "pokemon_hundo_stats", "pokemon_nundo_stats" after x days
-device_hours = 24       # Remove devices from in memory after not seen for x hours
 
+# pokemon: Automatically delete Pokemon after they despawn.
+#   - true = Keep database clean, remove expired Pokemon (recommended).
+#   - false = Keep all Pokemon forever (database grows very large).
+pokemon = true
+
+# incidents: Remove Team Rocket invasions after they expire.
+#   - true = Clean up old invasions (recommended).
+#   - false = Keep invasion history forever.
+incidents = true
+
+# quests: Remove Pokestop quests after midnight reset.
+#   - true = Clean up yesterday's quests (recommended).
+#   - false = Keep old quests (not useful, just wastes space).
+quests = true
+
+# stats: Enable/disable statistics history tracking.
+#   - true = Keep historical stats for graphs and analysis.
+#   - false = Don't track history (less data to store).
+stats = true
+
+# stats_days: How many days of statistics to keep.
+#   - 365 = Keep one year of history (good for seeing trends).
+#   - Lower values = less disk space used.
+#   - Affects pokemon_stats, pokemon_shiny_stats, pokemon_iv_stats, etc.
+stats_days = 365
+
+# device_hours: Remove inactive devices from memory after X hours.
+#   - 24 = If a device hasn't been seen in 24 hours, forget it.
+#   - Helps clean up devices that are no longer connected.
+device_hours = 24
+
+# -----------------------------------------------------------------------------
+# LOGGING - Debug and Log File Settings
+# -----------------------------------------------------------------------------
 [logging]
-debug = false
-save_logs = false
-max_size = 50           # Size in MB
-max_backups = 10        # Amount of files to keep
-max_age = 30            # Day(s) to keep files
-compress = true         # Compress to gz archive
 
+# debug: Enable verbose debug logging.
+#   - false = Normal logging (recommended).
+#   - true = Very detailed output (only for troubleshooting problems).
+debug = false
+
+# save_logs: Write logs to files on disk.
+#   - false = Only show logs in console (Docker logs command).
+#   - true = Also save to files (useful for reviewing later).
+save_logs = false
+
+# max_size: Maximum size of a single log file in MB.
+#   - When a log file reaches this size, Golbat starts a new one.
+#   - 50 MB is reasonable; adjust based on your disk space.
+max_size = 50
+
+# max_backups: How many old log files to keep.
+#   - 10 = Keep the 10 most recent log files.
+#   - Older files are automatically deleted.
+max_backups = 10
+
+# max_age: Delete log files older than this many days.
+#   - 30 = Delete logs older than 30 days.
+#   - Prevents logs from accumulating forever.
+max_age = 30
+
+# compress: Compress old log files to save space.
+#   - true = Old logs are gzipped (recommended).
+#   - false = Keep logs uncompressed.
+compress = true
+
+# -----------------------------------------------------------------------------
+# DATABASE - Where Golbat stores all Pokemon data
+# -----------------------------------------------------------------------------
 [database]
+
+# user: Database username.
+#   - Must match MYSQL_USER in your .env file.
 user = "dbuser"
+
+# password: Database password.
+#   - Must match MYSQL_PASSWORD in your .env file.
 password = "SuperSecuredbuserPassword"
+
+# address: Database server location.
+#   - "database:3306" = The MariaDB container on standard MySQL port.
+#   - "database" is the container name in Docker Compose.
 address = "database:3306"
+
+# db: The specific database name for Golbat.
+#   - This is where Pokemon, gyms, raids, etc. are stored.
+#   - ReactMap reads from this database to show the map.
 db = "golbat"
 
-
+# -----------------------------------------------------------------------------
+# PVP - BATTLE LEAGUE RANKINGS
+# -----------------------------------------------------------------------------
+# Golbat can calculate how good each Pokemon is for PVP battles.
 [pvp]
+
+# enabled: Calculate PVP rankings for encountered Pokemon.
+#   - true = Show Great/Ultra/Master League rankings (recommended).
+#   - false = Skip PVP calculations (slightly faster processing).
 enabled = true
+
+# include_hundos_under_cap: Show PVP rank for 100% IV Pokemon under CP cap.
+#   - false = Don't show PVP rank for hundos (they're rarely good for PVP).
+#   - true = Show anyway (some people want to know).
 include_hundos_under_cap = false
 
-# you can enable prometheus by uncommenting this section
+# -----------------------------------------------------------------------------
+# PROMETHEUS - METRICS FOR GRAFANA DASHBOARDS
+# -----------------------------------------------------------------------------
 [prometheus]
+
+# enabled: Send performance metrics to Prometheus/VictoriaMetrics.
+#   - true = Enable metrics (needed for Grafana dashboards).
+#   - false = Don't collect metrics.
 enabled = true
 
-# You can specify more than one webhook destination by including the [[webhooks]] section
-# multiple times.  The hook types can optionally be filtered by using the types array
+# -----------------------------------------------------------------------------
+# WEBHOOKS - SEND DATA TO OTHER SERVICES (Optional)
+# -----------------------------------------------------------------------------
+# Webhooks notify other services (like Poracle alert bot) when
+# Pokemon spawn, raids start, etc. Uncomment to enable.
+#
+# You can have multiple webhook destinations by repeating [[webhooks]] blocks.
 
+# Example: Send data to Poracle for Discord/Telegram alerts
 #[[webhooks]]
 #url = "http://poracle:3030"
-# types if specified can be...
-# types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather", "fort_update"]
-# "pokemon" includes both with ivs and without. "pokemon_iv" will only be encountered pokemon. "pokemon_no_iv" may be nearby pokemon that have not been encountered (yet).
+# types: What data to send (uncomment and customize as needed)
+# Options: pokemon, pokemon_iv, pokemon_no_iv, gym, invasion, quest, 
+#          pokestop, raid, weather, fort_update
+# "pokemon" = all Pokemon, "pokemon_iv" = only Pokemon with known IVs
+#types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather", "fort_update"]
 
+# Example: Send only Pokemon to a different service
 #[[webhooks]]
-#url = "http://psyduck-webhook:5000/webhook"
+#url = "http://some-other-service:5000/webhook"
 #types = ["pokemon"]
 
+# Example: Send only raids to a specific service, filtered by area
 #[[webhooks]]
 #url = "http://localhost:4202"
 #types = ["raid"]
 #areas = ["London/*", "*/Harrow", "Harrow"]
 
+# -----------------------------------------------------------------------------
+# TUNING - PERFORMANCE ADJUSTMENTS
+# -----------------------------------------------------------------------------
 [tuning]
-max_pokemon_distance = 100  # Maximum distance in kilometers for searching pokemon
-max_pokemon_results = 3000  # Maximum number of pokemon to return
+
+# max_pokemon_distance: Maximum search radius in kilometers.
+#   - 100 = ReactMap can search up to 100km from center.
+#   - Larger = more results but slower queries.
+max_pokemon_distance = 100
+
+# max_pokemon_results: Maximum Pokemon to return in one query.
+#   - 3000 = ReactMap will show at most 3000 Pokemon at once.
+#   - Higher = more complete view but slower loading.
+#   - Lower = faster but might miss some Pokemon on busy maps.
+max_pokemon_results = 3000
+
+# extended_timeout: Allow longer database queries.
+#   - false = Normal timeouts (recommended).
+#   - true = Allow slow queries (only if you have performance issues).
 extended_timeout = false

@@ -1,29 +1,85 @@
 {
+  "_README": "=== ROTOM CONFIGURATION ===",
+  "_WHAT_IS_ROTOM": [
+    "Rotom is the 'device manager' - it's the middleman between your scanning",
+    "devices (Android phones running Aegis) and Dragonite (the scanner brain).",
+    "",
+    "Think of it like a receptionist:",
+    "- Devices check in with Rotom when they connect",
+    "- Rotom tells Dragonite which devices are available", 
+    "- Dragonite assigns work through Rotom to the devices",
+    "- You can see all connected devices in the Rotom web panel (port 6003)"
+  ],
+  "_NOTE": "JSON files don't support real comments, so explanations are in these _ fields",
+
   "deviceListener": {
+    "_description": "Settings for incoming device connections (phones running Aegis)",
+    
     "port": 7070,
-    "secret": "SuperSecretAuthBearerForAegisDevices"
+    "_port_explanation": "The port your scanning devices connect to. When setting up Aegis on your phone, you'll enter 'yourserver:7070' as the Rotom URL. This port MUST be accessible from outside (not blocked by firewall) for devices to connect.",
+    
+    "secret": "SuperSecretAuthBearerForAegisDevices",
+    "_secret_explanation": "The password devices must provide to connect. When setting up Aegis on your phone, you'll enter this as the 'Auth Bearer'. Only devices with this password can connect to your Rotom. The setup script generates this automatically."
   },
+
   "controllerListener": {
+    "_description": "Settings for Dragonite to connect and control devices",
+    
     "port": 7071,
-    "secret": ""
+    "_port_explanation": "Internal port for Dragonite to connect. This is Docker-internal only - not exposed to the internet. Dragonite uses this to send commands to devices.",
+    
+    "secret": "",
+    "_secret_explanation": "Password for Dragonite connection. Empty means no password needed (safe because it's internal Docker network only). Only set this if you have a specific security requirement."
   },
+
   "client": {
+    "_description": "Settings for the Rotom web interface (status page)",
+    
     "port": 7072,
-    "host": "0.0.0.0"
+    "_port_explanation": "Internal port for the web dashboard. Docker maps this to port 6003 externally, so you access it at http://yourserver:6003",
+    
+    "host": "0.0.0.0",
+    "_host_explanation": "0.0.0.0 means 'accept connections from anywhere'. This is needed for Docker to work properly. Don't change unless you know what you're doing."
   },
+
   "logging": {
+    "_description": "Settings for Rotom's log files",
+    
     "save": false,
+    "_save_explanation": "Whether to save logs to files. false = only show in Docker logs (docker logs rotom). true = also write to disk files.",
+    
     "maxSize": 100,
+    "_maxSize_explanation": "Maximum log file size in MB before starting a new file. 100 MB is plenty for most setups.",
+    
     "maxAge": 14,
+    "_maxAge_explanation": "Delete log files older than this many days. 14 = keep 2 weeks of logs.",
+    
     "debug": false,
-    "consoleStatus": false
+    "_debug_explanation": "Enable extra detailed logging. false = normal (recommended). true = very verbose (only for troubleshooting).",
+    
+    "consoleStatus": false,
+    "_consoleStatus_explanation": "Show device status updates in console. false = cleaner logs. true = see every device check-in (very noisy)."
   },
+
   "monitor": {
+    "_description": "Automatic device health monitoring and recovery (optional feature)",
+    
     "enabled": false,
+    "_enabled_explanation": "Turn on automatic device monitoring. When enabled, Rotom can detect unhealthy devices and take action. false = manual management only (recommended for beginners).",
+    
     "reboot": false,
+    "_reboot_explanation": "Automatically reboot devices that appear stuck. false = don't auto-reboot (safer). true = reboot unresponsive devices (can help recovery but risky if misconfigured).",
+    
     "minMemory": 30000,
+    "_minMemory_explanation": "Minimum free memory (KB) before considering a device unhealthy. 30000 = 30 MB. If a device has less free RAM than this, it may be flagged for reboot (if reboot is enabled).",
+    
     "maxMemStartMultiple": 2,
+    "_maxMemStartMultiple_explanation": "Memory threshold multiplier for starting new tasks. If device memory usage is more than 2x the baseline, Rotom might delay sending new tasks.",
+    
     "maxMemStartMultipleOverwrite": {},
-    "deviceCooldown": 0
+    "_maxMemStartMultipleOverwrite_explanation": "Per-device memory multiplier overrides. Format: {\"device-name\": 3}. Use if specific devices need different thresholds.",
+    
+    "deviceCooldown": 0,
+    "_deviceCooldown_explanation": "Seconds to wait before assigning work to a device after it connects. 0 = immediate. Higher values give devices time to stabilize after connecting."
   }
 }

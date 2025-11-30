@@ -1,12 +1,98 @@
-# PUID/PGID - User/Group ID for container file permissions
-# Use 'id -u' and 'id -g' to find your user's IDs
+# =============================================================================
+# Aegis AIO 2.0 - Main Environment Variables (.env file)
+# =============================================================================
+#
+# WHAT IS AN .ENV FILE?
+# ---------------------
+# An .env (environment) file is a simple text file that stores configuration
+# settings as "key=value" pairs. Think of it like a settings file that tells
+# your programs how to behave.
+#
+# WHY USE AN .ENV FILE?
+# ---------------------
+# 1. SECURITY: Keeps passwords out of your main code/config files.
+#    Instead of putting passwords directly in configs, those configs
+#    reference this file. If you share your configs, passwords stay private.
+#
+# 2. CONVENIENCE: Change a password in ONE place, and all services that
+#    use it automatically get the update. No need to edit 5 different files.
+#
+# 3. DOCKER: Docker Compose reads this file automatically and passes these
+#    values to your containers. It's the standard way to configure Docker apps.
+#
+# HOW IT WORKS:
+# -------------
+# - Each line is: VARIABLE_NAME=value (no spaces around the =)
+# - Lines starting with # are comments (ignored by the computer)
+# - Other config files reference these using ${VARIABLE_NAME} syntax
+# - Docker Compose loads this file automatically when you run "docker compose up"
+#
+# IMPORTANT:
+# ----------
+# - This file (.env) contains REAL passwords after setup runs
+# - NEVER share your .env file or commit it to GitHub
+# - The setup script creates .env from this template (env-default)
+# - If you need to change a password, edit .env AND update matching values
+#   in other config files (or re-run setup.sh)
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# USER/GROUP IDs - File Permission Settings
+# -----------------------------------------------------------------------------
+# These control who "owns" files created by Docker containers.
+# Run 'id -u' in terminal to find your user ID (usually 1000 for first user).
+# Run 'id -g' in terminal to find your group ID (usually 1000 for first user).
+# If files created by Docker have wrong permissions, adjust these values.
 PUID=1000
 PGID=1000
+
+# -----------------------------------------------------------------------------
+# DATABASE PASSWORDS - MariaDB/MySQL Credentials
+# -----------------------------------------------------------------------------
+# MYSQL_ROOT_PASSWORD: The "master" password for the database.
+#   - This is like the admin password for the entire database server.
+#   - Used for database maintenance and creating new users.
+#   - Keep this very secure and don't share it.
 MYSQL_ROOT_PASSWORD=V3ryS3cUr3MYSQL_ROOT_P4ssw0rd
+
+# MYSQL_USER: The username that all services use to connect to the database.
+#   - This is NOT the root user - it's a regular user with limited access.
+#   - All your scanning services (Dragonite, Golbat, etc.) use this account.
 MYSQL_USER=dbuser
+
+# MYSQL_PASSWORD: The password for the above user account.
+#   - This is the password services use to read/write data.
+#   - Different from root password for security reasons.
 MYSQL_PASSWORD=SuperSecuredbuserPassword
+
+# -----------------------------------------------------------------------------
+# SERVICE API SECRETS - Authentication Tokens
+# -----------------------------------------------------------------------------
+# These are like "passwords" that services use to talk to each other securely.
+# Without the correct secret, a service won't accept requests.
+
+# KOJI_SECRET: Password for Koji (the area/geofence management tool).
+#   - Used when ReactMap, Dragonite, or Golbat need to fetch your scan areas.
+#   - Think of it as the "API key" for your geofence data.
 KOJI_SECRET=SuperSecureKojiSecret
+
+# DRAGONITE_PASSWORD: Password to access the Dragonite admin web panel.
+#   - You'll enter this when logging into http://yourserver:6002
+#   - Protects your scanner settings from unauthorized access.
 DRAGONITE_PASSWORD=SuperSecureDragoniteAdminPassword
+
+# DRAGONITE_API_SECRET: Password for other services to talk to Dragonite.
+#   - Used for programmatic access to Dragonite's features.
+#   - Not the same as the web panel password above.
 DRAGONITE_API_SECRET=SuperSecureDragoniteApiSecret
+
+# GOLBAT_API_SECRET: Password for services to request data from Golbat.
+#   - ReactMap uses this to fetch Pokemon, gym, and raid data.
+#   - Protects your data from unauthorized access.
 GOLBAT_API_SECRET=SuperSecureGolbatApiSecret
+
+# GOLBAT_RAW_SECRET: Password for sending raw scan data TO Golbat.
+#   - Dragonite uses this when sending Pokemon encounters to be processed.
+#   - Ensures only your scanner can write data to your database.
 GOLBAT_RAW_SECRET=SuperSecureGolbatRawSecret

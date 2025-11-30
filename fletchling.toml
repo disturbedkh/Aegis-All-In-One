@@ -1,143 +1,248 @@
-## Here's your configuration for the nests DB. This will be where the 'nests'
-## table is created/used.
-## If you're already using the nests table in golbat db, configure
-## your golbat db info here. This is a separate configuration from golbat_db
-## below, because you may use any database you want for nests.
-##
-## Your user is required to have the following grants:
-## -- all privileges on dbname.nests
-## -- all privileges on dbname.nests_schema_migrations
-## (Ignore that, if you don't know what it means)
+# =============================================================================
+# Fletchling Configuration
+# =============================================================================
+#
+# WHAT IS FLETCHLING?
+# -------------------
+# Fletchling is the "nest detector" for your Pokemon map. In Pokemon GO,
+# certain parks and areas are "nests" where one specific Pokemon species
+# spawns frequently. Nests rotate every 2 weeks on Wednesday.
+#
+# Fletchling:
+#   - Tracks which Pokemon spawn in park areas
+#   - Figures out which Pokemon is "nesting" in each park
+#   - Updates your database so ReactMap can show nest icons
+#   - Can import park data from OpenStreetMap automatically
+#
+# This is an OPTIONAL feature - your map works fine without it, but
+# nest display helps players find specific Pokemon species.
+#
+# REQUIREMENTS:
+# - You must create a project in Koji with your scan areas FIRST
+# - Replace "YOUR-PROJECT-IN-KOJI-ADMIN-HERE" with your actual project name
+#
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# NESTS DATABASE - Where nest data is stored
+# -----------------------------------------------------------------------------
+# This database stores the "nests" table with park areas and their
+# current nesting Pokemon. Usually the same database as Golbat.
+#
+# Your database user needs permission to create/modify the nests table.
+# If you see permission errors, the root user always has full access.
+
 [nests_db]
+# addr: Database server address and port.
+#   - "database:3306" = The MariaDB container on standard port.
 addr = "database:3306"
+
+# db: Which database to store nest data in.
+#   - Usually "golbat" so ReactMap can easily read nest data.
 db = "golbat"
+
+# user: Database username with write access.
+#   - Using "root" ensures full permissions to create tables.
+#   - You can use a regular user if they have proper grants.
 user = "root"
+
+# password: Database password.
+#   - ${MYSQL_ROOT_PASSWORD} reads from your .env file automatically.
+#   - This is a special syntax that pulls the value from environment.
 password = ${MYSQL_ROOT_PASSWORD}
 
-## Configure your golbat DB if you want to be able to auto-disable nests
-## with too few spawnpoints.
-## This is *NOT* the configuration for your nests DB, even though it
-## may be the same!
-##
-## Your user is required to have the following grants:
-## -- select on your-golbat-db.spawnpoints
-## (Ignore that, if you don't know what it means)
+# -----------------------------------------------------------------------------
+# GOLBAT DATABASE - For checking spawnpoints (Optional)
+# -----------------------------------------------------------------------------
+# Configure this if you want Fletchling to automatically disable nests
+# that don't have enough spawnpoints. Requires read access to Golbat's
+# spawnpoints table.
+#
+# Uncomment the section below if you want this feature:
+
 #[golbat_db]
-#addr = "dbhost:3306"
+# addr: Golbat's database address (usually same as nests_db).
+#addr = "database:3306"
+
+# db: Golbat's database name.
 #db = "golbat"
-#user = "username"
-#password = "password"
+
+# user: User with SELECT permission on spawnpoints table.
+#user = "dbuser"
+
+# password: Password for the database user.
+#password = "SuperSecuredbuserPassword"
+
+# -----------------------------------------------------------------------------
+# FILTERS - What qualifies as a valid nest
+# -----------------------------------------------------------------------------
+# These settings determine which park areas are tracked as potential nests.
 
 [filters]
-## Do not process nests smaller than this area in meters squared. The
-## importer will not import these small areas into the DB. If any nests are
-## already in the DB smaller than this, Fletchling will ignore them when
-## starting or reloading. (default 100.0)
+# min_area_m2: Minimum nest size in square meters.
+#   - 100 = Ignore areas smaller than 100 m² (about 10m x 10m).
+#   - Very small areas can't really be nests.
+#   - Default is good for most cases.
 min_area_m2 = 100.0
 
-## Do not process nests larger than this area in meters squared. The
-## importer will not import these large areas into the DB. If any nests are
-## already in the DB larger than this, Fletchling will ignore them when
-## starting or reloading. (default 10000000.0)
+# max_area_m2: Maximum nest size in square meters.
+#   - 10000000 = 10 km² (about 3.1 x 3.1 km).
+#   - Huge areas are usually not true nests.
+#   - Default is very permissive; lower if you get weird results.
 max_area_m2 = 10000000.0
 
-## How many spawnpoints required in the nest in order to track (default 10)
-## Requires the golbat_db section above to be configured OR your nests
-## table to already be populated with spawnpoint counts, otherwise this
-## option will be ignored. This option does not prevent the importer from
-## putting nests into the nests_db, however it will mark them inactive
-## if there's not enough spawnpoints.
-## The spawnpoint counts may be refreshed from the golbat_db at any time
-## via an API call as long as golbat_db is configured above.
+# min_spawnpoints: Minimum Pokemon spawn points in a nest area.
+#   - 10 = A park needs at least 10 spawn points to count as a nest.
+#   - Parks with too few spawns can't reliably identify nesting species.
+#   - Requires golbat_db configured above to work.
 min_spawnpoints = 10
 
-## Ignore spawnpoints older than this age when computing spawnpoint counts.
+# max_spawnpoint_age_days: Ignore spawnpoints older than this.
+#   - 7 = Only count spawnpoints seen in the last 7 days.
+#   - Old spawnpoints might no longer exist in the game.
 max_spawnpoint_age_days = 7
 
-## How much overlap with a larger nest to allow. If any nest overlaps
-## with a larger nest by more than this percent, then the nest will be
-## deactivated upon filtering. (default 60)
+# max_overlap_percent: How much nests can overlap with larger nests.
+#   - 60 = If a small nest overlaps 60%+ with a larger nest, disable it.
+#   - Prevents double-counting nests that are inside other nests.
+#   - Example: A small park completely inside a large park.
 max_overlap_percent = 60
 
+# -----------------------------------------------------------------------------
+# IMPORTER - Settings for importing park data from OpenStreetMap
+# -----------------------------------------------------------------------------
+
 [importer]
-# default name to use when no other name can be determined when importing.
-# if you set this to "", nests with no names will be skipped.
+# default_name: Name to use when a park has no name in OpenStreetMap.
+#   - Parks without names will be labeled "Unknown Nest".
+#   - Set to "" (empty) to skip nameless parks entirely.
 default_name = "Unknown Nest"
 
-## Configure the source you'd like to use for your areas. Areas are used
-## by the importer to use for OSM data searching as well as labeling the
-## nests with their areas in the nests_db, if they are not yet labeled.
-## Like Golbat, you can either use a Koji project for areas, or you can
-## have them read from a file. If using a file, it must be a geojson feature
-## collection or a poracle-style geofence.json.
-## This configuration should match your Golbat configuration!
-## Populate *1* of 'koji_url' or 'filename':
+# -----------------------------------------------------------------------------
+# AREAS - Where to get your scan area definitions
+# -----------------------------------------------------------------------------
+# Fletchling needs to know your scan areas to find nests within them.
+# Use Koji (recommended) OR a local file, not both.
+
 [areas]
+# koji_url: URL to fetch areas from your Koji project.
+#   - IMPORTANT: Replace "YOUR-PROJECT-IN-KOJI-ADMIN-HERE" with your
+#     actual Koji project name (the one you created for scanning).
+#   - Example: If your project is named "MyCity", use:
+#     koji_url = "http://koji:8080/api/v1/geofence/feature-collection/MyCity"
 koji_url = "http://koji:8080/api/v1/geofence/feature-collection/YOUR-PROJECT-IN-KOJI-ADMIN-HERE"
+
+# koji_token: Password to access Koji's API.
+#   - ${KOJI_SECRET} reads from your .env file automatically.
 koji_token = ${KOJI_SECRET}
-#filename =
 
-## Poracle nest-change webhooks. You may configure more than one. Just
-## duplicate the whole [[webhooks]] entry.
-#[[webhooks]]
-#url = "http://localhost:4202"
-#headers = ["X-Poracle-Secret:abc", "Other-Header:def"]
+# filename: Alternative - load areas from a local file instead of Koji.
+#   - Uncomment and set path if not using Koji.
+#   - File must be GeoJSON format or Poracle-style geofence.json.
+#filename = "/path/to/geofence.json"
+
+# -----------------------------------------------------------------------------
+# WEBHOOKS - Notify Poracle when nests change (Optional)
+# -----------------------------------------------------------------------------
+# Send notifications when nest Pokemon rotate (every 2 weeks).
+# Uncomment to enable. You can have multiple webhook destinations.
 
 #[[webhooks]]
-#url = "http://localhost:4202"
+# url: Where to send nest change notifications.
+#url = "http://poracle:3030"
+
+# headers: Optional HTTP headers for authentication.
+#   - Some services require secret tokens in headers.
+#headers = ["X-Poracle-Secret:your-secret-here"]
+
+# areas: Only send webhooks for nests in specific areas.
+#   - Use wildcards: "London/*" = all sub-areas of London
+#   - "*/Harrow" = any area ending in Harrow
 #areas = ["London/*", "*/Harrow", "Harrow"]
 
+# -----------------------------------------------------------------------------
+# HTTP SERVER - For receiving Pokemon data and API requests
+# -----------------------------------------------------------------------------
+
 [http]
-## http server listen address (default: 127.0.0.1:9042)
-## If you run docker, change this to ":9042" or "0.0.0.0:9042"
-## This is where Golbat will send pokemon webhooks. When configuring
-## golbat, the endpoint path for Fletchling will need to be /webhook.
-## For example: if 'addr' below is the default of '127.0.0.1:9042',
-## then you would need to configure webhooks in golbat like so:
-##-- GOLBAT CONFIG EXAMPLE --
-## [[webhooks]]
-## url = "http://127.0.0.1:9042/webhook"
-## types = ["pokemon_iv"]  # fletchling only looks at encounters
-##-- END GOLBAT CONFIG EXAMPLE --
+# addr: What address and port Fletchling listens on.
+#   - ":9042" = Listen on port 9042 on all interfaces (needed for Docker).
+#   - "127.0.0.1:9042" = Only accept local connections.
+#   - Golbat sends Pokemon encounter webhooks to http://fletchling:9042/webhook
 addr = ":9042"
 
+# -----------------------------------------------------------------------------
+# LOGGING - Debug and log file settings
+# -----------------------------------------------------------------------------
+
 [logging]
+# debug: Enable detailed debug logging.
+#   - false = Normal logging (recommended).
+#   - true = Very verbose (only for troubleshooting).
 debug = false
-# Change log_dir to "" if you only want output to stdout (your terminal).
+
+# log_dir: Directory to store log files.
+#   - "logs/" = Save in a 'logs' folder.
+#   - "" = Don't save to files, only output to console.
 log_dir = "logs/"
+
+# max_backups: How many old log files to keep.
+#   - 20 = Keep the 20 most recent log files.
 max_backups = 20
+
+# compress: Compress old log files.
+#   - true = Save disk space by gzipping old logs.
 compress = true
 
-# Some adjustable settings. Stats periods get thrown away 
-# and ignored when there's a pokemon spawning at an incredibly
-# high rate (CD, spotlight hour, etc). Stats rotations are not
-# aligned to event start/stop times, therefore it is a bit better
-# to rotate stats more frequently so that a single stats period
-# doesn't overlap before/after event start/stops too much. However,
-# more rotations means more memory being used.
+# -----------------------------------------------------------------------------
+# PROCESSOR - How nest detection works
+# -----------------------------------------------------------------------------
+# These settings control the statistics and detection algorithm.
+
 [processor]
-## Whether to log the last stats period when processing (default false)
-## This just dumps info about the single time period that just finished
-## to the logs.
+# log_last_stats_period: Log stats when a time period ends.
+#   - false = Quiet operation (recommended).
+#   - true = Print stats summary to logs (debugging).
 log_last_stats_period = false
 
-## how often to rotate stats (default 15)
+# rotation_interval_minutes: How often to rotate statistics.
+#   - 15 = Every 15 minutes, start a new stats window.
+#   - Shorter = more memory used but better event handling.
+#   - Events (Community Day, Spotlight Hour) can skew stats, so
+#     shorter windows help isolate event impacts.
 rotation_interval_minutes = 15
 
-## Require this many hours of stats in order to produce the nesting pokemon and update the nests_db (default 1)
+# min_history_duration_hours: Hours of data needed before detecting nests.
+#   - 1 = Need at least 1 hour of spawn data to identify nesting species.
+#   - Higher = more accurate but slower to detect new nests.
 min_history_duration_hours = 1
 
-## Hold stats covering at most this many hours (default 8)
+# max_history_duration_hours: Maximum stats history to keep in memory.
+#   - 8 = Keep up to 8 hours of spawn statistics.
+#   - Higher = more data for accuracy but uses more RAM.
 max_history_duration_hours = 8
 
-## How many hours without seeing a nesting pokemon before we unset it in DB (default 12)
+# no_nesting_pokemon_age_hours: Clear nest status after no detections.
+#   - 12 = If no nesting Pokemon detected for 12 hours, clear the nest.
+#   - Handles cases where a nest might have been removed from the game.
 no_nesting_pokemon_age_hours = 12
 
-# Prometheus settings.
+# -----------------------------------------------------------------------------
+# PROMETHEUS - Metrics for Grafana dashboards (Optional)
+# -----------------------------------------------------------------------------
+
 [prometheus]
-## Uncomment to enable prometheus stats and corresponding /metrics endpoint
+# enabled: Enable Prometheus metrics endpoint.
+#   - Uncomment to enable stats collection.
 #enabled = true
 
-# In case there's a need to change this:
+# -----------------------------------------------------------------------------
+# OVERPASS - OpenStreetMap data source (Advanced)
+# -----------------------------------------------------------------------------
+# Overpass API is used to fetch park/nest boundary data from OpenStreetMap.
+# Default URL is the public Overpass API. Only change if using a private mirror.
+
 [overpass]
+# url: Overpass API server URL.
+#   - Default public server works fine for most users.
 #url = "https://overpass-api.de/api/interpreter"

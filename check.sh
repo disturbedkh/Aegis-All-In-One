@@ -35,10 +35,12 @@ get_toml_value() {
 }
 
 # Helper function to extract value from JSON
+# Excludes keys starting with underscore (like _explanation, _description)
 get_json_value() {
     local file=$1
     local key=$2
-    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | head -1 | sed 's/.*:\s*"\([^"]*\)".*/\1/'
+    # Match exact key (not _key_explanation variants) and extract value
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | grep -v "\"_${key}" | head -1 | sed 's/.*:\s*"\([^"]*\)".*/\1/'
 }
 
 # Helper function to check if value contains placeholder
@@ -473,14 +475,28 @@ print_header "Checking for Placeholder Values"
 print_info "Scanning config files for placeholder values..."
 
 # Check each config file for common placeholders
+# Excludes comment lines (starting with #) and explanation fields (containing _explanation, _description, _README)
 check_placeholders() {
     local file=$1
     local found=0
     
     if [ -f "$file" ]; then
-        if grep -qE "(CHANGE_ME|YOUR_|SuperSecure|V3ryS3cUr3|placeholder|example\.com)" "$file"; then
+        # For TOML files, exclude comment lines (starting with #)
+        # For JSON files, exclude _explanation, _description, _README, and _NOTE fields
+        local matches
+        if [[ "$file" == *.toml ]]; then
+            # TOML: exclude lines starting with # (comments)
+            matches=$(grep -n -E "(CHANGE_ME|YOUR_|SuperSecure|V3ryS3cUr3|placeholder|example\.com)" "$file" 2>/dev/null | grep -v "^[0-9]*:[[:space:]]*#" || true)
+        elif [[ "$file" == *.json ]]; then
+            # JSON: exclude explanation/description/readme fields
+            matches=$(grep -n -E "(CHANGE_ME|YOUR_|SuperSecure|V3ryS3cUr3|placeholder|example\.com)" "$file" 2>/dev/null | grep -v "_explanation\|_description\|_README\|_NOTE\|_WHAT_IS" || true)
+        else
+            matches=$(grep -n -E "(CHANGE_ME|YOUR_|SuperSecure|V3ryS3cUr3|placeholder|example\.com)" "$file" 2>/dev/null || true)
+        fi
+        
+        if [ -n "$matches" ]; then
             print_warn "Placeholders found in $file:"
-            grep -n -E "(CHANGE_ME|YOUR_|SuperSecure|V3ryS3cUr3|placeholder|example\.com)" "$file" | head -5 | while read line; do
+            echo "$matches" | head -5 | while read line; do
                 echo "         $line"
             done
             found=1

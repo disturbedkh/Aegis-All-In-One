@@ -1,34 +1,98 @@
 {
+  "_README": "=== PORACLE CONFIGURATION ===",
+  "_WHAT_IS_PORACLE": [
+    "Poracle is an alert bot that sends notifications to Discord or Telegram.",
+    "When a Pokemon spawns, a raid starts, or a quest appears, Poracle can",
+    "send you a message with details like location, IVs, and time remaining.",
+    "",
+    "Users can set up custom alerts (e.g., 'notify me when 100% IV Gible spawns')",
+    "through Discord/Telegram commands.",
+    "",
+    "This is an OPTIONAL feature - run poracle.sh to enable it."
+  ],
+
   "database": {
+    "_description": "Database connection settings for Poracle",
+    
     "client": "mysql",
+    "_client_explanation": "Database type. 'mysql' works for both MySQL and MariaDB (which this setup uses).",
+    
     "conn": {
       "host": "database",
+      "_host_explanation": "Database server address. 'database' is the MariaDB container name in Docker.",
+      
       "port": 3306,
+      "_port_explanation": "Database port. 3306 is the standard MySQL/MariaDB port.",
+      
       "user": "dbuser",
+      "_user_explanation": "Database username. Must match MYSQL_USER in your .env file.",
+      
       "password": "CHANGE_ME",
-      "database": "poracle"
+      "_password_explanation": "Database password. The setup script replaces 'CHANGE_ME' with your actual password. Must match MYSQL_PASSWORD in .env.",
+      
+      "database": "poracle",
+      "_database_explanation": "The specific database Poracle uses to store user preferences and alert settings."
     }
   },
+
   "server": {
+    "_description": "Webhook server settings - receives data from Golbat",
+    
     "host": "0.0.0.0",
-    "port": 3030
+    "_host_explanation": "Network interface to listen on. '0.0.0.0' = accept connections from any source (needed for Docker).",
+    
+    "port": 3030,
+    "_port_explanation": "Port for incoming webhooks from Golbat. When Golbat sends Pokemon/raid data, it goes to this port."
   },
+
   "general": {
+    "_description": "What types of alerts Poracle can send",
+    
     "locale": "en",
+    "_locale_explanation": "Language for alert messages. 'en' = English. Options: en, de, fr, es, etc.",
+    
     "pokemon": true,
+    "_pokemon_explanation": "Enable Pokemon spawn alerts. true = users can get notified when Pokemon appear.",
+    
     "pokestops": true,
+    "_pokestops_explanation": "Enable Pokestop alerts (for new stops, etc.).",
+    
     "lures": true,
+    "_lures_explanation": "Enable Lure alerts. Notify when someone places a lure module.",
+    
     "pokestopLures": true,
+    "_pokestopLures_explanation": "Same as lures - enables lure notifications.",
+    
     "invasions": true,
+    "_invasions_explanation": "Enable Team Rocket invasion alerts.",
+    
     "pokestopInvasions": true,
+    "_pokestopInvasions_explanation": "Same as invasions - Team Rocket notification toggle.",
+    
     "gyms": true,
+    "_gyms_explanation": "Enable gym-related alerts (gym changes, new gyms).",
+    
     "raids": true,
+    "_raids_explanation": "Enable raid alerts. Notify when raid eggs appear or bosses hatch.",
+    
     "nests": true,
+    "_nests_explanation": "Enable nest change alerts (requires Fletchling integration).",
+    
     "quests": true,
+    "_quests_explanation": "Enable Pokestop quest alerts (field research tasks).",
+    
     "weather": false,
+    "_weather_explanation": "Enable weather change alerts. false = off (usually too spammy).",
+    
     "greeting": true,
+    "_greeting_explanation": "Send a welcome message when users first interact with the bot.",
+    
     "alterPokemon": true,
+    "_alterPokemon_explanation": "Allow users to modify their Pokemon alert settings via commands.",
+    
     "roleCheckDPokemon": false,
+    "_roleCheckDPokemon_explanation": "Check Discord roles before allowing Pokemon alerts. false = everyone can set alerts.",
+    
     "monsterDefaults": {},
     "raidDefaults": {},
     "eggDefaults": {},
@@ -37,16 +101,34 @@
     "invasionDefaults": {},
     "nestDefaults": {},
     "gymDefaults": {},
-    "weatherDefaults": {}
+    "weatherDefaults": {},
+    "_defaults_explanation": "Default filter settings for each alert type. Empty {} means no defaults - users set their own. Advanced: set default IV filters, distances, etc."
   },
+
   "discord": {
+    "_description": "Discord bot settings - configure if using Discord for alerts",
+    
     "enabled": false,
+    "_enabled_explanation": "Turn Discord bot on/off. Set to true and configure below to use Discord alerts.",
+    
     "prefix": ["!"],
+    "_prefix_explanation": "Command prefix for bot commands. '!' means users type !help, !track, etc.",
+    
     "token": ["YOUR_DISCORD_BOT_TOKEN"],
+    "_token_explanation": "Your Discord bot's secret token. Get this from Discord Developer Portal when you create a bot. KEEP THIS SECRET!",
+    
     "channels": [],
+    "_channels_explanation": "Discord channel IDs where bot commands are allowed. Empty = all channels. Add channel IDs to restrict.",
+    
     "admins": [],
+    "_admins_explanation": "Discord user IDs who can use admin commands. Get your ID by enabling Developer Mode in Discord settings, then right-click your name.",
+    
     "limitSec": 0,
+    "_limitSec_explanation": "Rate limit window in seconds. 0 = no rate limiting.",
+    
     "limitAmount": 0,
+    "_limitAmount_explanation": "Max commands per rate limit window. 0 = unlimited.",
+    
     "pokemonRole": [],
     "pokestopRole": [],
     "invasionRole": [],
@@ -56,13 +138,25 @@
     "raidRole": [],
     "eggRole": [],
     "nestRole": [],
-    "weatherRole": []
+    "weatherRole": [],
+    "_roles_explanation": "Discord role IDs required to use each alert type. Empty [] = no role required (everyone can use). Add role IDs to restrict access."
   },
+
   "telegram": {
+    "_description": "Telegram bot settings - configure if using Telegram for alerts",
+    
     "enabled": false,
+    "_enabled_explanation": "Turn Telegram bot on/off. Set to true to use Telegram alerts.",
+    
     "token": "YOUR_TELEGRAM_BOT_TOKEN",
+    "_token_explanation": "Your Telegram bot token. Get this from @BotFather on Telegram when you create a bot.",
+    
     "channels": [],
+    "_channels_explanation": "Telegram chat/channel IDs where bot is allowed. Empty = allow everywhere.",
+    
     "admins": [],
+    "_admins_explanation": "Telegram user IDs who can use admin commands. Get your ID from @userinfobot.",
+    
     "pokemonRole": [],
     "pokestopRole": [],
     "invasionRole": [],
@@ -72,21 +166,43 @@
     "raidRole": [],
     "eggRole": [],
     "nestRole": [],
-    "weatherRole": []
+    "weatherRole": [],
+    "_roles_explanation": "Same as Discord roles but for Telegram groups."
   },
+
   "geocoding": {
+    "_description": "Settings for converting coordinates to addresses in alert messages",
+    
     "provider": "nominatim",
+    "_provider_explanation": "Service used to get addresses from coordinates. 'nominatim' = free OpenStreetMap service.",
+    
     "providerURL": "https://nominatim.openstreetmap.org/",
-    "cacheDetail": "city"
+    "_providerURL_explanation": "URL of the geocoding service. Default is the public free Nominatim server.",
+    
+    "cacheDetail": "city",
+    "_cacheDetail_explanation": "How much location detail to cache. 'city' = cache at city level (reduces API calls)."
   },
+
   "logging": {
-    "logLevel": "info"
+    "_description": "Log output settings",
+    
+    "logLevel": "info",
+    "_logLevel_explanation": "How much detail to log. Options: error (least), warn, info (normal), verbose, debug (most). 'info' is good for normal use."
   },
+
   "pvp": {
+    "_description": "PVP (Battle League) related notification settings",
+    
     "pokemon": true,
+    "_pokemon_explanation": "Include PVP rank info in Pokemon alerts.",
+    
     "pokemon_best": true,
+    "_pokemon_best_explanation": "Show the Pokemon's best PVP league ranking.",
+    
     "pokemon_worst": true,
-    "pokemon_value": true
+    "_pokemon_worst_explanation": "Show the Pokemon's worst PVP league ranking.",
+    
+    "pokemon_value": true,
+    "_pokemon_value_explanation": "Show the stat product value for PVP."
   }
 }
-

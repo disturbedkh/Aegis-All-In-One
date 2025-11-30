@@ -1,82 +1,272 @@
+# =============================================================================
+# Dragonite Configuration
+# =============================================================================
+# Dragonite is the "brain" of the scanning operation. It:
+#   - Manages your Pokemon GO accounts
+#   - Assigns tasks to your scanning devices (phones)
+#   - Coordinates what areas to scan and when
+#   - Sends discovered Pokemon data to Golbat for processing
+# =============================================================================
+
 [general]
-# seconds to sleep in-between PTC authing on one proxy
-login_delay = 0 
-# Ηave dragonite scroll through accounts which don't have a refresh token and fetch these in the background.
+# -----------------------------------------------------------------------------
+# GENERAL SETTINGS
+# -----------------------------------------------------------------------------
+
+# login_delay: Seconds to wait between logging in accounts on the same proxy.
+#   - Higher = safer but slower account initialization.
+#   - 0 = no delay (faster but might trigger rate limits).
+#   - Recommended: Leave at 0 unless you're having login issues.
+login_delay = 0
+
+# token_init_enabled: Background account preparation (commented out = use default).
+#   - When enabled, Dragonite prepares accounts before they're needed.
+#   - This makes account switching faster during scanning.
 # token_init_enabled = true
 
-# Whether raw worker stats are written
+# stats: Whether to record detailed worker statistics.
+#   - true = Track performance data (recommended for monitoring).
+#   - false = Don't track (slightly less resource usage).
 stats = true
 
-# Host and Port used for the Dragonite API
+# api_host: What network address Dragonite listens on.
+#   - "0.0.0.0" = Accept connections from any device (needed for Docker).
+#   - "127.0.0.1" = Only accept local connections.
+#   - Don't change unless you know what you're doing.
 api_host = "0.0.0.0"
+
+# api_port: The port number for Dragonite's web interface and API.
+#   - This is the internal port (Docker maps it to 6002 externally).
+#   - Default 7272 works with the provided docker-compose setup.
 api_port = 7272
 
-# Uses login proxy as you wish, e.g. Swirlix or Xilriws
+# remote_auth_url: The service that handles Pokemon GO login authentication.
+#   - Xilriws is a login helper that handles the complex auth process.
+#   - This URL points to your Xilriws container.
+#   - Don't change unless you're using a different auth service.
 remote_auth_url = "http://xilriws:5090/api/v1/login-code"
 
+# -----------------------------------------------------------------------------
+# PTC (POKEMON TRAINER CLUB) ACCOUNT SETTINGS
+# -----------------------------------------------------------------------------
+# These settings control how Dragonite handles PTC accounts.
+# PTC = Pokemon Trainer Club (accounts created at pokemon.com)
 [auth.ptc]
-# to use this provider pls enable it
+
+# enable: Turn on PTC account support.
+#   - true = You can use PTC accounts for scanning.
+#   - false = PTC accounts won't work (use if you only have other account types).
 enable = true
-# seconds to sleep in-between PTC authing on one proxy
+
+# login_delay: Seconds between PTC login attempts.
+#   - 120 = Wait 2 minutes between logins (very safe).
+#   - Lower values = faster but more risk of getting accounts flagged.
+#   - PTC is stricter than other providers, so higher delay is safer.
 login_delay = 120
-# background initer to collect tokens of accounts without using them - this is false by default
+
+# token_init_enabled: Prepare PTC accounts in the background.
+#   - true = Dragonite will pre-authenticate accounts before they're needed.
+#   - This speeds up account switching during scanning.
 token_init_enabled=true
+
+# remote_auth_url: Authentication service URL for PTC logins.
+#   - Same as general setting, but specifically for PTC accounts.
 remote_auth_url = "http://xilriws:5090/api/v1/login-code"
-# don't rely on remote auth and only use accounts with stored token
+
+# token_refresh_only: Only use accounts that already have valid login tokens.
+#   - true = Safer, won't try to login fresh (uses cached credentials).
+#   - false = Will attempt new logins if needed.
+#   - Recommended: true (avoids triggering anti-bot detection).
 token_refresh_only = true
 
+# -----------------------------------------------------------------------------
+# NK (NINTENDO/GOOGLE) ACCOUNT SETTINGS
+# -----------------------------------------------------------------------------
+# Settings for Nintendo-linked or Google-linked Pokemon GO accounts.
 [auth.nk]
-# to use this provider pls enable it
+
+# enable: Turn on NK account support.
+#   - true = Use Nintendo/Google linked accounts.
+#   - false = Don't use these accounts (most common choice).
 enable = false
-# seconds to sleep in-between NK authing on one proxy
+
+# login_delay: Seconds between NK login attempts (commented = use default).
+#   - Similar to PTC but typically can be lower.
 #login_delay = 20
-# background initer to collect tokens of accounts without using them - this is false by default
+
+# token_init_enabled: Prepare NK accounts in the background.
 token_init_enabled=true
-# don't rely on user-pass auth and only use accounts with stored token
+
+# token_refresh_only: Only use accounts with existing valid tokens.
 token_refresh_only = true
 
+# -----------------------------------------------------------------------------
+# KOJI - GEOFENCE/AREA MANAGEMENT CONNECTION
+# -----------------------------------------------------------------------------
+# Koji is the tool where you draw your scan areas on a map.
+# Dragonite needs to connect to Koji to know WHERE to scan.
 [koji]
+
+# url: The web address of your Koji service.
+#   - This is the internal Docker network address.
+#   - Don't change unless you renamed your Koji container.
 url = "http://koji:8080"
+
+# bearer_token: The password to access Koji's data.
+#   - Must match the KOJI_SECRET in your .env file.
+#   - The setup script sets this automatically.
 bearer_token = "SuperSecureKojiSecret"
 
+# -----------------------------------------------------------------------------
+# PROMETHEUS - PERFORMANCE MONITORING
+# -----------------------------------------------------------------------------
+# Prometheus collects performance metrics for Grafana dashboards.
 [prometheus]
+
+# enabled: Turn on metrics collection.
+#   - true = Send stats to Prometheus (needed for Grafana dashboards).
+#   - false = Don't collect metrics (saves tiny bit of resources).
 enabled = true
 
+# -----------------------------------------------------------------------------
+# TUNING - ACCOUNT USAGE SETTINGS
+# -----------------------------------------------------------------------------
+# These settings control how aggressively accounts are used.
+# Aggressive = more scans but higher risk of account bans.
+# Conservative = fewer scans but accounts last longer.
 [tuning]
+
+# recycle_gmo_limit: Max map requests before rotating account (commented = default).
+#   - Lower = switch accounts more often (safer but slower).
+#   - Higher = use each account longer (faster but riskier).
 #recycle_gmo_limit = 4900
+
+# recycle_encounter_limit: Max Pokemon encounters before rotating (commented = default).
 #recycle_encounter_limit = 9900
+
+# recycle_on_jail: What to do when an account gets "jailed" (temp banned).
+#   - true = Put jailed accounts back in rotation after cooldown.
+#   - false = Remove jailed accounts permanently.
+#   - Recommended: true (accounts usually recover after rest).
 recycle_on_jail=false
+
+# minimum_account_reuse_hours: How long an account must rest before reuse.
+#   - 72 = Account must wait 3 days before being used again.
+#   - Higher = safer for accounts but need more accounts total.
+#   - Lower = accounts used more often but higher ban risk.
+#   - Rule of thumb: Have (devices × 100 × hours/24) accounts available.
 minimum_account_reuse_hours = 72
+
+# location_delay: Milliseconds to wait between location updates (commented = default).
 #location_delay = 0
+
+# fort_location_delay: Delay for gym/pokestop scanning (commented = default).
 #fort_location_delay = 0
+
+# scout_age_limit: How old (seconds) encounter data can be (commented = default).
 #scout_age_limit = 30
 
+# -----------------------------------------------------------------------------
+# ACCOUNT LEVEL REQUIREMENTS (commented out = use defaults)
+# -----------------------------------------------------------------------------
+# Pokemon GO accounts need certain levels for different features.
 #[accounts]
-#required_level = 30 # used for everything except leveling (quest can force level 31 at specific events)
-#leveling_level = 31 # used to stop leveling at certain level
+# required_level: Minimum level for most scanning (quests need higher).
+#   - 30 = Standard requirement for IV scanning.
+#   - Some events require level 31+ for quests.
+#required_level = 30
 
+# leveling_level: Stop auto-leveling accounts at this level.
+#   - 31 = Stop once account reaches level 31.
+#leveling_level = 31
+
+# -----------------------------------------------------------------------------
+# ROTOM - DEVICE MANAGER CONNECTION
+# -----------------------------------------------------------------------------
+# Rotom manages your physical scanning devices (phones).
+# Dragonite connects to Rotom to assign work to devices.
 [rotom]
+
+# endpoint: The WebSocket address of your Rotom service.
+#   - ws:// = WebSocket protocol (like http:// but for real-time communication).
+#   - 7071 = Rotom's controller port (for Dragonite to connect).
+#   - Don't change unless you modified your Rotom setup.
 endpoint = "ws://rotom:7071"
 
+# -----------------------------------------------------------------------------
+# LOGGING - DEBUG AND LOG FILE SETTINGS
+# -----------------------------------------------------------------------------
 [logging]
-# if you are going to run Blissey for stats you are going to need these true.
-save = false
-#debug = false
-#max_size = 500 # MB
-#max_age = 30 # days
 
+# save: Whether to save logs to files.
+#   - true = Write logs to disk (needed for Blissey stats tool).
+#   - false = Only show logs in console (saves disk space).
+save = false
+
+# debug: Enable detailed debug logging (commented = false).
+#   - true = Very verbose output (only for troubleshooting).
+#debug = false
+
+# max_size: Maximum log file size in MB before rotation (commented = default).
+#max_size = 500
+
+# max_age: Days to keep old log files (commented = default).
+#max_age = 30
+
+# -----------------------------------------------------------------------------
+# PROCESSORS - DATA PROCESSING CONNECTIONS
+# -----------------------------------------------------------------------------
+# Dragonite sends raw scan data to Golbat for processing.
+# Golbat calculates IVs, stores Pokemon in database, etc.
 [processors]
-# Golbat Endpoint is singular - and will configure an endpoint for raw sending and API
+
+# golbat_endpoint: Golbat's HTTP address for sending data.
+#   - Where Dragonite sends discovered Pokemon information.
 golbat_endpoint = "http://golbat:9001"
+
+# golbat_raw_bearer: Password for sending raw data to Golbat.
+#   - Must match the raw_bearer in golbat_config.toml.
+#   - Prevents unauthorized data injection.
 golbat_raw_bearer = "SuperSecureGolbatRawSecret"
+
+# golbat_api_secret: Password for requesting data FROM Golbat.
+#   - Used when Dragonite needs to query Golbat for information.
 golbat_api_secret = "SuperSecureGolbatApiSecret"
-# if this is present then dragonite will not send raws to the httpendpoint
+
+# golbat_grpc_endpoint: Faster data transfer method (gRPC).
+#   - gRPC is more efficient than HTTP for high-volume data.
+#   - If this is set, Dragonite uses gRPC instead of HTTP.
+#   - 50001 = Golbat's gRPC port.
 golbat_grpc_endpoint = "golbat:50001"
 
+# -----------------------------------------------------------------------------
+# DATABASE - DRAGONITE'S OWN DATABASE
+# -----------------------------------------------------------------------------
+# Dragonite stores its own data (accounts, settings, etc.) here.
+# This is SEPARATE from where Pokemon data is stored (that's Golbat's DB).
 [db.dragonite]
+
+# host: Database server address.
+#   - "database" = The MariaDB container name in Docker.
 host = "database"
+
+# port: Database server port.
+#   - 3306 = Standard MySQL/MariaDB port.
 port = 3306
+
+# user: Database username.
+#   - Must match MYSQL_USER in your .env file.
 user = "dbuser"
+
+# password: Database password.
+#   - Must match MYSQL_PASSWORD in your .env file.
 password = "SuperSecuredbuserPassword"
+
+# name: The specific database name for Dragonite.
+#   - Dragonite stores accounts, settings, etc. in this database.
 name = "dragonite"
+
+# pool_size: Number of database connections to maintain.
+#   - 1 = Single connection (fine for most setups).
+#   - Higher values = better performance for large operations.
 pool_size = 1

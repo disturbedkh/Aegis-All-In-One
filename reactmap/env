@@ -1,8 +1,51 @@
+# =============================================================================
+# ReactMap Environment Variables
+# =============================================================================
+# These settings control ReactMap's behavior and appearance.
+# ReactMap is the web-based map that displays Pokemon, gyms, and raids.
+# =============================================================================
+
+# ANALYTICS_DEBUG_MODE: Developer setting for troubleshooting.
+#   - true = Shows extra debugging information in browser console.
+#   - false = Normal mode, no extra debug output.
+#   - Leave this as "false" unless you're a developer debugging issues.
 ANALYTICS_DEBUG_MODE=false
+
+# TITLE: The name shown in your browser tab and on the map.
+#   - This is what users see as the website name.
+#   - Change this to whatever you want your map to be called.
+#   - Example: "My City Pokemon Map" or "Awesome Pokemon Scanner"
 TITLE="Pokemod PoGo Map"
+
+# TELEGRAM_BOT_NAME: If you use Telegram for login, put your bot name here.
+#   - Leave empty ("") if you don't use Telegram authentication.
+#   - Only needed if you set up Telegram login in local.json.
 TELEGRAM_BOT_NAME=""
+
+# -----------------------------------------------------------------------------
+# SENTRY - Error Tracking (Optional, Advanced)
+# -----------------------------------------------------------------------------
+# Sentry is a service that automatically reports errors/crashes.
+# Most users should leave these empty. Only use if you have a Sentry account.
+
+# SENTRY_DSN: Your Sentry project's connection URL.
+#   - Leave empty if you don't use Sentry error tracking.
 SENTRY_DSN=""
+
+# SENTRY_AUTH_TOKEN: Authentication token for Sentry.
+#   - Required only if using Sentry for error reporting.
 SENTRY_AUTH_TOKEN=""
+
+# SENTRY_ORG: Your Sentry organization name.
+#   - The organization/team name in your Sentry account.
 SENTRY_ORG=""
+
+# SENTRY_PROJECT: Your Sentry project name.
+#   - The specific project in Sentry for this ReactMap instance.
 SENTRY_PROJECT=""
+
+# SENTRY_TRACES_SAMPLE_RATE: How often to send performance data to Sentry.
+#   - 0.1 = Send 10% of requests (good for high-traffic sites).
+#   - 1.0 = Send everything (only for debugging).
+#   - Lower values = less data sent = lower Sentry costs.
 SENTRY_TRACES_SAMPLE_RATE=0.1
