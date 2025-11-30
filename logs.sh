@@ -1799,9 +1799,29 @@ XILRIWS_PATTERNS=(
     ["proxy_error"]="proxy.*error|proxy.*failed|bad.*proxy"
 )
 
+# Initialize Xilriws variables to safe defaults
+init_xilriws_vars() {
+    XILRIWS_SUCCESS=0
+    XILRIWS_AUTH_BANNED=0
+    XILRIWS_INVALID_CRED=0
+    XILRIWS_TUNNEL_ERROR=0
+    XILRIWS_CODE_15=0
+    XILRIWS_PERM_BANNED=0
+    XILRIWS_RATE_LIMIT=0
+    XILRIWS_TIMEOUT=0
+    XILRIWS_CONN_REFUSED=0
+    XILRIWS_PROXY_ERROR=0
+    XILRIWS_TOTAL_ERRORS=0
+    XILRIWS_OTHER_ERRORS=0
+}
+
 # Get Xilriws stats from logs
 get_xilriws_stats() {
     local container="xilriws"
+    
+    # Initialize to safe defaults first
+    init_xilriws_vars
+    
     local status=$(get_container_status "$container")
     
     if [ "$status" != "running" ]; then
@@ -1809,20 +1829,37 @@ get_xilriws_stats() {
     fi
     
     # Get log content once for efficiency
-    local log_content=$(docker logs "$container" 2>&1)
+    local log_content
+    log_content=$(docker logs "$container" 2>&1) || {
+        echo "Failed to get Xilriws logs" >&2
+        return 1
+    }
     
-    # Count various events
-    XILRIWS_SUCCESS=$(echo "$log_content" | grep -iEc "Successfully obtained cookies|cookie.*success|login.*success" || echo "0")
-    XILRIWS_AUTH_BANNED=$(echo "$log_content" | grep -iEc "auth.banned|auth_banned|authentication.*banned" || echo "0")
-    XILRIWS_INVALID_CRED=$(echo "$log_content" | grep -iEc "invalid.*credential|wrong.*password|incorrect.*login|invalid.*password" || echo "0")
-    XILRIWS_TUNNEL_ERROR=$(echo "$log_content" | grep -iEc "tunnel.*error|tunneling.*failed|proxy.*tunnel|CONNECT.*failed" || echo "0")
-    XILRIWS_CODE_15=$(echo "$log_content" | grep -iEc "code.*15|error.*15|status.*15|code\":15" || echo "0")
-    XILRIWS_PERM_BANNED=$(echo "$log_content" | grep -iEc "permanently.*banned|permanent.*ban|IP.*banned" || echo "0")
-    XILRIWS_RATE_LIMIT=$(echo "$log_content" | grep -iEc "rate.*limit|too.*many.*requests|429" || echo "0")
-    XILRIWS_TIMEOUT=$(echo "$log_content" | grep -iEc "timeout|timed.*out|ETIMEDOUT" || echo "0")
-    XILRIWS_CONN_REFUSED=$(echo "$log_content" | grep -iEc "connection.*refused|ECONNREFUSED" || echo "0")
-    XILRIWS_PROXY_ERROR=$(echo "$log_content" | grep -iEc "proxy.*error|proxy.*failed|bad.*proxy" || echo "0")
-    XILRIWS_TOTAL_ERRORS=$(echo "$log_content" | grep -iEc "error|failed|exception" || echo "0")
+    # Count various events (use || true to prevent pipeline failures)
+    XILRIWS_SUCCESS=$(echo "$log_content" | grep -iEc "Successfully obtained cookies|cookie.*success|login.*success" 2>/dev/null || echo "0")
+    XILRIWS_AUTH_BANNED=$(echo "$log_content" | grep -iEc "auth.banned|auth_banned|authentication.*banned" 2>/dev/null || echo "0")
+    XILRIWS_INVALID_CRED=$(echo "$log_content" | grep -iEc "invalid.*credential|wrong.*password|incorrect.*login|invalid.*password" 2>/dev/null || echo "0")
+    XILRIWS_TUNNEL_ERROR=$(echo "$log_content" | grep -iEc "tunnel.*error|tunneling.*failed|proxy.*tunnel|CONNECT.*failed" 2>/dev/null || echo "0")
+    XILRIWS_CODE_15=$(echo "$log_content" | grep -iEc "code.*15|error.*15|status.*15|code\":15" 2>/dev/null || echo "0")
+    XILRIWS_PERM_BANNED=$(echo "$log_content" | grep -iEc "permanently.*banned|permanent.*ban|IP.*banned" 2>/dev/null || echo "0")
+    XILRIWS_RATE_LIMIT=$(echo "$log_content" | grep -iEc "rate.*limit|too.*many.*requests|429" 2>/dev/null || echo "0")
+    XILRIWS_TIMEOUT=$(echo "$log_content" | grep -iEc "timeout|timed.*out|ETIMEDOUT" 2>/dev/null || echo "0")
+    XILRIWS_CONN_REFUSED=$(echo "$log_content" | grep -iEc "connection.*refused|ECONNREFUSED" 2>/dev/null || echo "0")
+    XILRIWS_PROXY_ERROR=$(echo "$log_content" | grep -iEc "proxy.*error|proxy.*failed|bad.*proxy" 2>/dev/null || echo "0")
+    XILRIWS_TOTAL_ERRORS=$(echo "$log_content" | grep -iEc "error|failed|exception" 2>/dev/null || echo "0")
+    
+    # Ensure all variables are numbers
+    XILRIWS_SUCCESS=${XILRIWS_SUCCESS:-0}
+    XILRIWS_AUTH_BANNED=${XILRIWS_AUTH_BANNED:-0}
+    XILRIWS_INVALID_CRED=${XILRIWS_INVALID_CRED:-0}
+    XILRIWS_TUNNEL_ERROR=${XILRIWS_TUNNEL_ERROR:-0}
+    XILRIWS_CODE_15=${XILRIWS_CODE_15:-0}
+    XILRIWS_PERM_BANNED=${XILRIWS_PERM_BANNED:-0}
+    XILRIWS_RATE_LIMIT=${XILRIWS_RATE_LIMIT:-0}
+    XILRIWS_TIMEOUT=${XILRIWS_TIMEOUT:-0}
+    XILRIWS_CONN_REFUSED=${XILRIWS_CONN_REFUSED:-0}
+    XILRIWS_PROXY_ERROR=${XILRIWS_PROXY_ERROR:-0}
+    XILRIWS_TOTAL_ERRORS=${XILRIWS_TOTAL_ERRORS:-0}
     
     # Calculate other errors
     local known_errors=$((XILRIWS_AUTH_BANNED + XILRIWS_INVALID_CRED + XILRIWS_TUNNEL_ERROR + XILRIWS_CODE_15 + XILRIWS_PERM_BANNED + XILRIWS_RATE_LIMIT + XILRIWS_TIMEOUT + XILRIWS_CONN_REFUSED + XILRIWS_PROXY_ERROR))
@@ -1881,39 +1918,68 @@ show_xilriws_status() {
     draw_box_bottom
     echo ""
     
+    # Initialize variables to safe defaults
+    init_xilriws_vars
+    
     local status=$(get_container_status "xilriws")
     
     if [ "$status" = "not_found" ]; then
-        echo -e "  ${RED}Xilriws container not found${NC}"
-        press_enter
-        return
+        echo -e "  ${RED}╔════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${RED}║  Xilriws container not found!                                      ║${NC}"
+        echo -e "  ${RED}╚════════════════════════════════════════════════════════════════════╝${NC}"
+        echo ""
+        echo -e "  ${WHITE}Xilriws is not part of your Docker Compose setup.${NC}"
+        echo ""
+        echo -e "  ${DIM}To add Xilriws:${NC}"
+        echo "    1. Add xilriws service to docker-compose.yaml"
+        echo "    2. Run: docker compose up -d"
+        echo ""
+        # Return special code so menu knows to exit
+        return 2
     fi
     
     if [ "$status" = "stopped" ]; then
-        echo -e "  ${RED}Xilriws container is not running${NC}"
+        echo -e "  ${YELLOW}╔════════════════════════════════════════════════════════════════════╗${NC}"
+        echo -e "  ${YELLOW}║  Xilriws container is stopped                                      ║${NC}"
+        echo -e "  ${YELLOW}╚════════════════════════════════════════════════════════════════════╝${NC}"
         echo ""
-        read -p "  Would you like to start it? (y/n): " start_it
-        if [ "$start_it" = "y" ]; then
-            docker start xilriws
-            print_success "Container started"
-            sleep 2
+        read -p "  Would you like to start it? (y/n) [y]: " start_it
+        start_it=${start_it:-y}
+        if [ "$start_it" = "y" ] || [ "$start_it" = "Y" ]; then
+            echo ""
+            echo -e "  ${CYAN}Starting Xilriws container...${NC}"
+            docker start xilriws 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓ Container started${NC}"
+                echo -e "  ${DIM}Waiting for container to initialize...${NC}"
+                sleep 3
+            else
+                echo -e "  ${RED}✗ Failed to start container${NC}"
+                press_enter
+                return 1
+            fi
         else
-            press_enter
-            return
+            return 1
         fi
     fi
     
     echo -e "  ${CYAN}Analyzing Xilriws logs...${NC}"
     
     # Get stats
-    get_xilriws_stats
+    if ! get_xilriws_stats; then
+        echo -e "  ${YELLOW}⚠ Could not retrieve Xilriws statistics${NC}"
+        echo ""
+        press_enter
+        return 1
+    fi
     
     # Get log size
-    local log_size=$(get_log_size "xilriws")
+    local log_size=$(get_log_size "xilriws" 2>/dev/null || echo "0")
     local log_size_fmt=$(format_bytes "$log_size")
     
     # Get uptime
     local uptime=$(docker ps --filter "name=xilriws" --format "{{.Status}}" 2>/dev/null | head -1)
+    [ -z "$uptime" ] && uptime="Unknown"
     
     clear
     echo ""
@@ -1928,42 +1994,82 @@ show_xilriws_status() {
     draw_box_line "  LOGIN STATISTICS"
     draw_box_divider
     
-    printf "${CYAN}║${NC}    ${GREEN}✓ Successful Logins:${NC}    %-49s ${CYAN}║${NC}\n" "$XILRIWS_SUCCESS"
-    printf "${CYAN}║${NC}    ${RED}✗ Auth-Banned:${NC}           %-49s ${CYAN}║${NC}\n" "$XILRIWS_AUTH_BANNED"
-    printf "${CYAN}║${NC}    ${RED}✗ Invalid Credentials:${NC}   %-49s ${CYAN}║${NC}\n" "$XILRIWS_INVALID_CRED"
+    printf "${CYAN}║${NC}    ${GREEN}✓ Successful Logins:${NC}    %-49s ${CYAN}║${NC}\n" "${XILRIWS_SUCCESS:-0}"
+    printf "${CYAN}║${NC}    ${RED}✗ Auth-Banned:${NC}           %-49s ${CYAN}║${NC}\n" "${XILRIWS_AUTH_BANNED:-0}"
+    printf "${CYAN}║${NC}    ${RED}✗ Invalid Credentials:${NC}   %-49s ${CYAN}║${NC}\n" "${XILRIWS_INVALID_CRED:-0}"
     
     draw_box_divider
     draw_box_line "  ERROR BREAKDOWN"
     draw_box_divider
     
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Tunneling Errors:${NC}      %-49s ${CYAN}║${NC}\n" "$XILRIWS_TUNNEL_ERROR"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Code 15 Errors:${NC}        %-49s ${CYAN}║${NC}\n" "$XILRIWS_CODE_15"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Rate Limited:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_RATE_LIMIT"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Timeouts:${NC}              %-49s ${CYAN}║${NC}\n" "$XILRIWS_TIMEOUT"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Connection Refused:${NC}    %-49s ${CYAN}║${NC}\n" "$XILRIWS_CONN_REFUSED"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Proxy Errors:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_PROXY_ERROR"
-    printf "${CYAN}║${NC}    ${RED}✗ Permanently Banned IPs:${NC} %-49s ${CYAN}║${NC}\n" "$XILRIWS_PERM_BANNED"
-    printf "${CYAN}║${NC}    ${DIM}○ Other Errors:${NC}          %-49s ${CYAN}║${NC}\n" "$XILRIWS_OTHER_ERRORS"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Tunneling Errors:${NC}      %-49s ${CYAN}║${NC}\n" "${XILRIWS_TUNNEL_ERROR:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Code 15 Errors:${NC}        %-49s ${CYAN}║${NC}\n" "${XILRIWS_CODE_15:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Rate Limited:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_RATE_LIMIT:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Timeouts:${NC}              %-49s ${CYAN}║${NC}\n" "${XILRIWS_TIMEOUT:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Connection Refused:${NC}    %-49s ${CYAN}║${NC}\n" "${XILRIWS_CONN_REFUSED:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Proxy Errors:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_PROXY_ERROR:-0}"
+    printf "${CYAN}║${NC}    ${RED}✗ Permanently Banned IPs:${NC} %-49s ${CYAN}║${NC}\n" "${XILRIWS_PERM_BANNED:-0}"
+    printf "${CYAN}║${NC}    ${DIM}○ Other Errors:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_OTHER_ERRORS:-0}"
     
     draw_box_divider
-    printf "${CYAN}║${NC}    ${WHITE}TOTAL ERRORS:${NC}            %-49s ${CYAN}║${NC}\n" "$XILRIWS_TOTAL_ERRORS"
+    printf "${CYAN}║${NC}    ${WHITE}TOTAL ERRORS:${NC}            %-49s ${CYAN}║${NC}\n" "${XILRIWS_TOTAL_ERRORS:-0}"
     
-    # Calculate success rate
-    local total_attempts=$((XILRIWS_SUCCESS + XILRIWS_AUTH_BANNED + XILRIWS_INVALID_CRED))
-    if [ "$total_attempts" -gt 0 ]; then
-        local success_rate=$((XILRIWS_SUCCESS * 100 / total_attempts))
+    # Calculate success rate (safely)
+    local total_attempts=$((${XILRIWS_SUCCESS:-0} + ${XILRIWS_AUTH_BANNED:-0} + ${XILRIWS_INVALID_CRED:-0}))
+    if [ "$total_attempts" -gt 0 ] 2>/dev/null; then
+        local success_rate=$((${XILRIWS_SUCCESS:-0} * 100 / total_attempts))
         printf "${CYAN}║${NC}    ${WHITE}Success Rate:${NC}            %-49s ${CYAN}║${NC}\n" "${success_rate}%"
     fi
     
     draw_box_bottom
     echo ""
+    
+    return 0
 }
 
 # Xilriws menu
 show_xilriws_menu() {
     while true; do
         show_xilriws_status
+        local status_result=$?
         
+        # If xilriws not found (return code 2), show limited menu
+        if [ $status_result -eq 2 ]; then
+            echo -e "${WHITE}${BOLD}Options${NC}"
+            echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+            echo "    p) Proxy Manager (manage proxy.txt)"
+            echo "    0) Back to main menu"
+            echo ""
+            read -p "  Select option: " choice
+            
+            case $choice in
+                p|P) show_proxy_manager ;;
+                0|"") return ;;
+                *) continue ;;
+            esac
+            continue
+        fi
+        
+        # If other error (return code 1), offer to retry or go back
+        if [ $status_result -eq 1 ]; then
+            echo -e "${WHITE}${BOLD}Options${NC}"
+            echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+            echo "    r) Retry"
+            echo "    p) Proxy Manager"
+            echo "    0) Back to main menu"
+            echo ""
+            read -p "  Select option: " choice
+            
+            case $choice in
+                r|R) continue ;;
+                p|P) show_proxy_manager ;;
+                0|"") return ;;
+                *) continue ;;
+            esac
+            continue
+        fi
+        
+        # Normal menu when xilriws is running
         echo -e "${WHITE}${BOLD}Xilriws Options${NC}"
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
         echo "    1) View recent errors"
@@ -1983,7 +2089,8 @@ show_xilriws_menu() {
             4) restart_xilriws ;;
             p|P) show_proxy_manager ;;
             r|R) continue ;;
-            0) return ;;
+            0|"") return ;;
+            *) continue ;;
         esac
     done
 }
@@ -2423,12 +2530,34 @@ view_xilriws_errors() {
     draw_box_bottom
     echo ""
     
+    # Check if container exists
+    local status=$(get_container_status "xilriws")
+    if [ "$status" = "not_found" ]; then
+        echo -e "  ${RED}Xilriws container not found${NC}"
+        press_enter
+        return
+    fi
+    
     echo -e "${CYAN}Last 50 error entries:${NC}"
     echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
     
-    docker logs xilriws 2>&1 | grep -iE "error|failed|banned|invalid|timeout" | tail -50
+    # Show navigation help
+    echo -e "${DIM}╔══════════════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${DIM}║${NC}  ${WHITE}Navigation:${NC} Press ${GREEN}Enter${NC} to scroll, ${GREEN}q${NC} to quit                         ${DIM}║${NC}"
+    echo -e "${DIM}╚══════════════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+    sleep 1
     
-    press_enter
+    local errors=$(docker logs xilriws 2>&1 | grep -iE "error|failed|banned|invalid|timeout" | tail -50)
+    
+    if [ -z "$errors" ]; then
+        echo -e "  ${GREEN}No recent errors found!${NC}"
+        press_enter
+        return
+    fi
+    
+    echo "$errors" | less -R -P "Line %lt-%lb (press q to quit)"
 }
 
 # View banned IPs
@@ -2650,15 +2779,33 @@ remove_failing_proxies() {
 # Clear Xilriws logs
 clear_xilriws_logs() {
     echo ""
-    read -p "  Clear Xilriws logs? (y/n): " confirm
-    if [ "$confirm" = "y" ]; then
+    
+    # Check if container exists
+    local status=$(get_container_status "xilriws")
+    if [ "$status" = "not_found" ]; then
+        echo -e "  ${RED}Xilriws container not found${NC}"
+        sleep 2
+        return
+    fi
+    
+    echo -e "  ${YELLOW}⚠ This will permanently delete all Xilriws log history${NC}"
+    echo ""
+    read -p "  Clear Xilriws logs? (y/n) [n]: " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
         local log_path=$(docker inspect --format='{{.LogPath}}' xilriws 2>/dev/null)
         if [ -n "$log_path" ] && [ -f "$log_path" ]; then
-            sudo truncate -s 0 "$log_path"
-            print_success "Xilriws logs cleared"
+            echo -e "  ${CYAN}Clearing logs...${NC}"
+            sudo truncate -s 0 "$log_path" 2>/dev/null
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓ Xilriws logs cleared${NC}"
+            else
+                echo -e "  ${RED}✗ Failed to clear logs (may need sudo)${NC}"
+            fi
         else
-            print_error "Could not find log file"
+            echo -e "  ${RED}✗ Could not find log file${NC}"
         fi
+    else
+        echo -e "  ${DIM}Cancelled${NC}"
     fi
     sleep 1
 }
@@ -2666,15 +2813,32 @@ clear_xilriws_logs() {
 # Restart Xilriws
 restart_xilriws() {
     echo ""
-    read -p "  Restart Xilriws container? (y/n): " confirm
-    if [ "$confirm" = "y" ]; then
-        print_info "Restarting Xilriws..."
-        docker restart xilriws
+    
+    # Check if container exists
+    local status=$(get_container_status "xilriws")
+    if [ "$status" = "not_found" ]; then
+        echo -e "  ${RED}Xilriws container not found${NC}"
+        sleep 2
+        return
+    fi
+    
+    echo -e "  ${WHITE}This will restart the Xilriws container.${NC}"
+    echo -e "  ${DIM}Active connections will be temporarily interrupted.${NC}"
+    echo ""
+    read -p "  Restart Xilriws container? (y/n) [n]: " confirm
+    if [ "$confirm" = "y" ] || [ "$confirm" = "Y" ]; then
+        echo ""
+        echo -e "  ${CYAN}Restarting Xilriws...${NC}"
+        docker restart xilriws 2>/dev/null
         if [ $? -eq 0 ]; then
-            print_success "Xilriws restarted successfully"
+            echo -e "  ${GREEN}✓ Xilriws restarted successfully${NC}"
+            echo -e "  ${DIM}Container may take a few seconds to fully initialize${NC}"
         else
-            print_error "Failed to restart Xilriws"
+            echo -e "  ${RED}✗ Failed to restart Xilriws${NC}"
+            echo -e "  ${DIM}Try: docker restart xilriws${NC}"
         fi
+    else
+        echo -e "  ${DIM}Cancelled${NC}"
     fi
     sleep 2
 }
