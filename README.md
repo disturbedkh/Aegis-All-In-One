@@ -136,6 +136,14 @@ This limits logs to 300MB total (3 files × 100MB each) with automatic rotation 
 
 This repository includes several scripts to help you set up, secure, and maintain your mapping stack.
 
+### Main Control Panel
+
+| Script | Purpose | When to Run |
+|--------|---------|-------------|
+| `aegis.sh` | **Main control panel** - unified interface to all scripts | Anytime |
+
+Run `sudo bash ./aegis.sh` to access the main menu with system status, all scripts, and Docker controls.
+
 ### Core Scripts
 
 | Script | Purpose | When to Run |
@@ -153,6 +161,57 @@ This repository includes several scripts to help you set up, secure, and maintai
 | `poracle.sh` | Discord/Telegram alert bot setup | When you want notifications |
 | `fletchling.sh` | Nest detection setup | After creating Koji project |
 | `docker-osm-importer.sh` | OpenStreetMap data import | For park/nest data |
+
+---
+
+### `aegis.sh` - Main Control Panel
+
+The unified interface for managing your entire Aegis stack.
+
+```bash
+sudo bash ./aegis.sh
+```
+
+**Status Dashboard Shows:**
+- Docker installation and daemon status
+- Docker Compose availability
+- MariaDB status (Docker or local)
+- Container count (running/total)
+- Configuration status (.env file)
+- Nginx configuration status
+- Available scripts detection
+- Git repository update status
+
+**Main Menu Options:**
+
+| Category | Option | Description |
+|----------|--------|-------------|
+| **Setup** | 1) Initial Setup | First-time setup wizard |
+| | 2) Database Management | DB setup, maintenance, users |
+| | 3) Security Setup | Nginx, SSL, firewall, auth |
+| **Monitoring** | 4) System Check | Validate configs, check health |
+| | 5) Log Manager | View, analyze, manage logs |
+| **Features** | 6) Poracle Setup | Discord/Telegram alerts |
+| | 7) Fletchling Setup | Nest detection |
+| **Docker** | 8) Start All | docker compose up -d |
+| | 9) Stop All | docker compose down |
+| | 10) Restart All | docker compose restart |
+| | 11) Status | docker compose ps |
+| **Other** | u) Updates | Check for repo updates |
+| | h) Help | Documentation for all options |
+
+**Command Line Options:**
+```bash
+./aegis.sh              # Interactive menu
+./aegis.sh --status     # Show status dashboard only
+./aegis.sh --start      # Start all containers
+./aegis.sh --stop       # Stop all containers
+./aegis.sh --update     # Check for updates
+./aegis.sh --help       # Help
+```
+
+**Built-in Help System:**
+Press `h` in the menu for detailed documentation on each script and feature.
 
 ---
 
@@ -446,6 +505,19 @@ For experienced users, here's the fastest path to a running system:
 git clone https://github.com/The-Pokemod-Group/Aegis-All-In-One.git
 cd Aegis-All-In-One
 
+# Launch the main control panel
+sudo bash ./aegis.sh
+```
+
+The control panel provides a unified interface to:
+- Run initial setup (option 1)
+- Start all containers (option 8)
+- Set up security (option 3)
+- Monitor and troubleshoot (options 4-5)
+
+**Or run individual commands:**
+
+```bash
 # Run setup (creates configs, databases, passwords)
 sudo bash ./setup.sh
 

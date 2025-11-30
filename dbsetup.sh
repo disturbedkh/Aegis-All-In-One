@@ -64,17 +64,17 @@ DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
 # =============================================================================
 
 check_root() {
-    if [ "$EUID" -ne 0 ]; then
+if [ "$EUID" -ne 0 ]; then
         print_error "Please run this script as root (e.g., sudo bash dbsetup.sh)"
-        exit 1
-    fi
+  exit 1
+fi
 }
 
 load_env() {
-    if [ ! -f ".env" ]; then
+if [ ! -f ".env" ]; then
         print_error ".env file not found. Have you run the initial setup script?"
-        exit 1
-    fi
+  exit 1
+fi
 
     # Source .env (skip UID/GID which are readonly bash variables)
     while IFS='=' read -r key value; do
@@ -331,8 +331,8 @@ install_mariadb() {
     
     if [ $? -eq 0 ]; then
         # Set root password
-        mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;"
-        if [ $? -eq 0 ]; then
+    mysql -u root -e "ALTER USER 'root'@'localhost' IDENTIFIED BY '$MYSQL_ROOT_PASSWORD'; FLUSH PRIVILEGES;"
+    if [ $? -eq 0 ]; then
             print_success "MariaDB installed and root password set"
             return 0
         else
@@ -600,9 +600,9 @@ run_setup_mode() {
             install_mariadb || exit 1
         else
             print_warning "Installation skipped. Please install MariaDB manually."
-            exit 1
-        fi
-    else
+      exit 1
+    fi
+  else
         print_success "MariaDB is installed"
     fi
 
@@ -619,8 +619,8 @@ run_setup_mode() {
     # Test connection
     if ! test_db_connection; then
         print_error "Cannot connect to MariaDB. Check root password in .env"
-        exit 1
-    fi
+    exit 1
+  fi
     print_success "Connected to MariaDB"
 
     # Tuning
@@ -1353,7 +1353,7 @@ db_user_management_menu() {
                 echo ""
                 
                 # Create missing databases
-                for db in "${DBS[@]}"; do
+for db in "${DBS[@]}"; do
                     if ! db_exists "$db"; then
                         run_query "" "CREATE DATABASE IF NOT EXISTS \`$db\`"
                         print_success "Created database: $db"
@@ -1396,8 +1396,8 @@ db_user_management_menu() {
                     run_query "" "CREATE USER IF NOT EXISTS '$new_user'@'%' IDENTIFIED BY '$new_pass'"
                     run_query "" "GRANT ALL PRIVILEGES ON *.* TO '$new_user'@'%' WITH GRANT OPTION"
                     run_query "" "FLUSH PRIVILEGES"
-                    
-                    if [ $? -eq 0 ]; then
+
+if [ $? -eq 0 ]; then
                         print_success "Created user: $new_user with full privileges"
                     else
                         print_error "Failed to create user"
