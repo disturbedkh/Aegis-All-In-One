@@ -1973,6 +1973,13 @@ chmod -R 775 vmagent
 # MySQL data directory
 mkdir -p mysql_data
 
+# Unown directories (logs, cache, jobs)
+mkdir -p unown/logs
+mkdir -p unown/golbat_cache
+mkdir -p unown/rotom_jobs
+chown -R "$USER_UID:$USER_GID" unown
+chmod -R 775 unown
+
 print_success "Directories created."
 
 # Force copy with -f to overwrite any existing files

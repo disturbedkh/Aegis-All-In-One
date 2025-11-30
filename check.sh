@@ -225,19 +225,26 @@ check_permissions() {
     echo -e "${WHITE}${BOLD}User & Permissions${NC}"
     echo -e "${DIM}────────────────────────────────────────${NC}"
 
-    local current_user=$(whoami)
-    local current_uid=$(id -u)
-    local current_gid=$(id -g)
+    # Use REAL_USER (the actual user, not root when using sudo)
+    local display_user="$REAL_USER"
+    local display_uid=$(id -u "$REAL_USER" 2>/dev/null || id -u)
+    local display_gid=$(id -g "$REAL_USER" 2>/dev/null || id -g)
     local in_docker_group=false
 
-    echo -e "  Current User:    ${CYAN}$current_user${NC} (UID: $current_uid, GID: $current_gid)"
+    # Show the actual user, not root
+    if [ "$EUID" -eq 0 ] && [ "$REAL_USER" != "root" ]; then
+        echo -e "  Actual User:     ${CYAN}$display_user${NC} (UID: $display_uid, GID: $display_gid)"
+        echo -e "  Running as:      ${YELLOW}root via sudo${NC}"
+    else
+        echo -e "  Current User:    ${CYAN}$display_user${NC} (UID: $display_uid, GID: $display_gid)"
+    fi
 
-    # Check if in docker group
-    if groups | grep -q docker; then
+    # Check if REAL_USER is in docker group
+    if id -nG "$REAL_USER" 2>/dev/null | grep -qw docker; then
         in_docker_group=true
         echo -e "  Docker Group:    ${GREEN}Member${NC}"
     else
-        echo -e "  Docker Group:    ${YELLOW}Not a Member${NC}"
+        echo -e "  Docker Group:    ${YELLOW}Not a Member${NC} (run: sudo usermod -aG docker $REAL_USER)"
     fi
 
     # Check .env UID/GID settings
@@ -246,17 +253,17 @@ check_permissions() {
         local env_pgid=$(grep "^PGID=" .env 2>/dev/null | cut -d= -f2)
         
         if [ -n "$env_puid" ]; then
-            if [ "$env_puid" = "$current_uid" ]; then
-                echo -e "  .env PUID:       ${GREEN}$env_puid${NC} (matches current user)"
+            if [ "$env_puid" = "$display_uid" ]; then
+                echo -e "  .env PUID:       ${GREEN}$env_puid${NC} (matches $REAL_USER)"
             else
-                echo -e "  .env PUID:       ${YELLOW}$env_puid${NC} (current: $current_uid)"
+                echo -e "  .env PUID:       ${YELLOW}$env_puid${NC} (user $REAL_USER is: $display_uid)"
             fi
         fi
         if [ -n "$env_pgid" ]; then
-            if [ "$env_pgid" = "$current_gid" ]; then
-                echo -e "  .env PGID:       ${GREEN}$env_pgid${NC} (matches current group)"
+            if [ "$env_pgid" = "$display_gid" ]; then
+                echo -e "  .env PGID:       ${GREEN}$env_pgid${NC} (matches $REAL_USER)"
             else
-                echo -e "  .env PGID:       ${YELLOW}$env_pgid${NC} (current: $current_gid)"
+                echo -e "  .env PGID:       ${YELLOW}$env_pgid${NC} (user $REAL_USER is: $display_gid)"
             fi
         fi
     fi
@@ -264,22 +271,68 @@ check_permissions() {
     # Check file ownership of key files
     if [ -f ".env" ]; then
         local env_owner=$(stat -c '%U' .env 2>/dev/null || stat -f '%Su' .env 2>/dev/null)
-        # Check if owner matches the real user or current user
-        if [ "$env_owner" = "$REAL_USER" ] || [ "$env_owner" = "$current_user" ] || [ -z "$env_owner" ]; then
-            echo -e "  .env Owner:      ${GREEN}$env_owner${NC}"
-        elif [ "$EUID" -eq 0 ] && [ "$REAL_USER" != "root" ]; then
-            # Running as root but REAL_USER is different - this is normal when using sudo
+        # Check if owner matches the real user
+        if [ "$env_owner" = "$REAL_USER" ]; then
             echo -e "  .env Owner:      ${GREEN}$env_owner${NC}"
         else
-            echo -e "  .env Owner:      ${YELLOW}$env_owner${NC}"
+            echo -e "  .env Owner:      ${YELLOW}$env_owner${NC} (expected: $REAL_USER)"
         fi
     fi
 
-    # Check if running as root
-    if [ "$EUID" -eq 0 ]; then
-        echo -e "  Running as:      ${YELLOW}root${NC} (some checks may differ)"
-    fi
+    echo ""
+}
 
+# Check directory permissions for Docker volumes
+check_directory_permissions() {
+    echo -e "${WHITE}${BOLD}Docker Volume Permissions${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    local issues=0
+    local real_uid=$(id -u "$REAL_USER" 2>/dev/null || echo "1000")
+    
+    # Key directories that should be writable without sudo
+    local dirs=(
+        "grafana:Grafana data"
+        "mysql_data:MariaDB data"
+        "unown/logs:Scanner logs"
+        "unown/golbat_cache:Golbat cache"
+        "unown/rotom_jobs:Rotom jobs"
+        "victoriametrics/data:VictoriaMetrics"
+        "vmagent/data:VMAgent data"
+    )
+    
+    for dir_entry in "${dirs[@]}"; do
+        local dir_path=$(echo "$dir_entry" | cut -d: -f1)
+        local dir_desc=$(echo "$dir_entry" | cut -d: -f2)
+        
+        if [ -d "$dir_path" ]; then
+            local dir_owner=$(stat -c '%U' "$dir_path" 2>/dev/null || stat -f '%Su' "$dir_path" 2>/dev/null)
+            local dir_uid=$(stat -c '%u' "$dir_path" 2>/dev/null || stat -f '%u' "$dir_path" 2>/dev/null)
+            
+            # Check if owned by root when it shouldn't be (except mysql_data which is OK as root)
+            if [ "$dir_owner" = "root" ] && [ "$dir_path" != "mysql_data" ]; then
+                # Check if user can write to it anyway
+                if [ -w "$dir_path" ]; then
+                    printf "  %-22s ${GREEN}%-10s${NC} (writable)\n" "$dir_desc:" "$dir_owner"
+                else
+                    printf "  %-22s ${YELLOW}%-10s${NC} (may need: sudo chown -R $REAL_USER $dir_path)\n" "$dir_desc:" "$dir_owner"
+                    ((issues++))
+                fi
+            elif [ "$dir_owner" = "$REAL_USER" ] || [ "$dir_uid" = "$real_uid" ]; then
+                printf "  %-22s ${GREEN}%-10s${NC}\n" "$dir_desc:" "$dir_owner"
+            else
+                # Owned by someone else (like mysql user for database) - usually OK
+                printf "  %-22s ${GREEN}%-10s${NC} (container user)\n" "$dir_desc:" "$dir_owner"
+            fi
+        fi
+    done
+    
+    if [ $issues -gt 0 ]; then
+        echo ""
+        echo -e "  ${YELLOW}⚠ $issues directories may require permission fixes${NC}"
+        echo -e "  ${DIM}Run: sudo chown -R $REAL_USER:$REAL_USER grafana unown victoriametrics vmagent${NC}"
+    fi
+    
     echo ""
 }
 
@@ -744,6 +797,7 @@ show_status_dashboard() {
 
     check_docker_status
     check_permissions
+    check_directory_permissions
     check_mariadb
     check_containers
     check_config_alignment
