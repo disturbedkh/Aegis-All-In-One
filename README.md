@@ -98,6 +98,10 @@ Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/T
 
 > 💡 **Tip**: The setup script (`setup.sh`) can automatically install Docker and Docker Compose for you if they're not already installed.
 
+### Database Compatibility
+
+This stack uses **MariaDB 12.x** (latest). The configuration has been optimized for MariaDB 12+ with deprecated options removed to ensure clean startup without warnings.
+
 ### Install Docker Manually (Optional)
 
 If you prefer to install Docker before running the setup script:
@@ -496,6 +500,7 @@ sudo bash ./logs.sh
   - Device errors (worker, disconnect)
   - Critical errors (fatal, panic)
 - Recent log activity preview
+- **Numbered Error View** with context jump (press `e`)
 
 **Xilriws Status & Proxy Management (Press 'x'):**
 - Login Statistics:
@@ -537,6 +542,13 @@ sudo bash ./logs.sh
 **Error Analysis Features:**
 - View errors by category with context
 - Color-coded log output (errors=red, warnings=yellow)
+- **Numbered Error List** (press `e` in service detail):
+  - Paginated view of all errors (20 per page)
+  - Shows error number, log line number, and message
+  - Select any error number to view with **50 lines of context** before/after
+  - Filter errors by keyword
+  - Extended context view (100 or 200 lines)
+  - Copy error to clipboard
 - Search functionality with preset patterns:
   - Device disconnects
   - Account errors
@@ -641,9 +653,11 @@ The setup script will:
 - ✅ **Properly restore file ownership** to non-root user
 
 You'll be prompted to customize:
-- Database usernames and passwords
+- Database usernames and passwords (properly configured across all services including Koji and init scripts)
 - API secrets and bearer tokens
 - Service-specific settings
+
+> 💡 **Note**: Custom database usernames are now properly applied to all configuration files, including Koji environment URLs and the database initialization script.
 
 ### Step 3: Start the Stack
 
@@ -735,6 +749,8 @@ Performance monitoring with:
 - Pokemon catch rates
 - Device performance metrics
 - Historical data analysis
+
+> 💡 **Note**: Grafana runs with proper user permissions (PUID/PGID from `.env`) to avoid permission denied errors on startup.
 
 ### Xilriws (Port 6008)
 
