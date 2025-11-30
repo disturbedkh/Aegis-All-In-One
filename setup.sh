@@ -513,20 +513,47 @@ check_all_ports() {
             # Find which ports nginx is using
             echo "  ${CYAN}Nginx processes detected on these ports:${NC}"
             echo "  ─────────────────────────────────────────────────────────────────"
+            local nginx_on_7070=false
             for port in "${ports_in_use[@]}"; do
                 local proc=$(get_port_process "$port")
                 if [[ "$proc" == *"nginx"* ]]; then
                     echo "    Port $port: ${STACK_PORTS[$port]}"
+                    if [ "$port" = "7070" ]; then
+                        nginx_on_7070=true
+                    fi
                 fi
             done
             echo ""
             
+            # Check for stream configuration (used for port 7070 WebSocket proxy)
+            local stream_config_found=false
+            local stream_config_path=""
+            
+            if [ -f "/etc/nginx/stream.d/rotom-devices.conf" ]; then
+                stream_config_found=true
+                stream_config_path="/etc/nginx/stream.d/rotom-devices.conf"
+                echo -e "  ${YELLOW}⚠ Found Nginx STREAM proxy for port 7070:${NC}"
+                echo "    $stream_config_path"
+                echo ""
+                echo "  This stream proxy makes nginx listen on port 7070 and forward"
+                echo "  to Docker on an internal port (usually 17070)."
+                echo ""
+            fi
+            
+            # Check nginx.conf for embedded stream block
+            if grep -q "listen 7070" /etc/nginx/nginx.conf 2>/dev/null; then
+                stream_config_found=true
+                stream_config_path="/etc/nginx/nginx.conf"
+                echo -e "  ${YELLOW}⚠ Found port 7070 listener in nginx.conf${NC}"
+                echo ""
+            fi
+            
             # Check nginx configuration
-            echo "  ${CYAN}Checking Nginx configuration...${NC}"
+            echo "  ${CYAN}Checking Nginx site configurations...${NC}"
             if [ -d "/etc/nginx/sites-enabled" ]; then
                 local aegis_configs=$(grep -l -r "7070\|6001\|6002\|6003\|6004\|6005\|6006\|5090" /etc/nginx/sites-enabled/ 2>/dev/null || true)
                 if [ -n "$aegis_configs" ]; then
-                    echo "  Found Aegis-related Nginx configs:"
+                    echo "  Found Aegis-related Nginx site configs:"
                     for config in $aegis_configs; do
                         echo "    • $config"
                     done
@@ -535,15 +562,18 @@ check_all_ports() {
             fi
             
             echo "  Options:"
-            echo "    1) Stop Nginx service"
+            echo "    1) Stop Nginx service completely"
             echo "    2) Restart Nginx service"
+            if [ "$nginx_on_7070" = true ]; then
+            echo -e "    ${YELLOW}7) Remove Nginx port 7070 stream proxy (recommended for port 7070 issue)${NC}"
+            fi
             echo "    3) Disable Aegis Nginx sites (move to sites-available)"
-            echo "    4) Remove Aegis Nginx site configurations"
+            echo "    4) Remove ALL Aegis Nginx configurations"
             echo "    5) View Nginx configuration for Aegis ports"
             echo "    6) Reload Nginx (apply config changes)"
             echo "    0) Back to previous menu"
             echo ""
-            read -p "  Select option [0-6]: " NGINX_OPTION
+            read -p "  Select option: " NGINX_OPTION
             
             case $NGINX_OPTION in
                 1)
@@ -562,6 +592,72 @@ check_all_ports() {
                     print_info "Restarting Nginx..."
                     systemctl restart nginx 2>/dev/null || service nginx restart 2>/dev/null || true
                     print_success "Nginx restart command sent."
+                    ;;
+                7)
+                    echo ""
+                    print_info "Removing Nginx port 7070 stream proxy..."
+                    echo ""
+                    
+                    # Remove stream.d config file
+                    if [ -f "/etc/nginx/stream.d/rotom-devices.conf" ]; then
+                        print_info "Removing /etc/nginx/stream.d/rotom-devices.conf"
+                        rm -f "/etc/nginx/stream.d/rotom-devices.conf"
+                    fi
+                    
+                    # Remove any rotom stream configs
+                    if [ -d "/etc/nginx/stream.d" ]; then
+                        for conf in /etc/nginx/stream.d/*rotom* /etc/nginx/stream.d/*7070*; do
+                            if [ -f "$conf" ]; then
+                                print_info "Removing $conf"
+                                rm -f "$conf"
+                            fi
+                        done
+                    fi
+                    
+                    # Check and clean nginx.conf for stream blocks with 7070
+                    if grep -q "listen 7070" /etc/nginx/nginx.conf 2>/dev/null; then
+                        print_info "Found port 7070 in nginx.conf - creating backup and cleaning..."
+                        cp /etc/nginx/nginx.conf /etc/nginx/nginx.conf.backup.$(date +%Y%m%d%H%M%S)
+                        
+                        # Remove stream block containing 7070 from nginx.conf
+                        # This is a simplified removal - may need manual editing for complex configs
+                        sed -i '/stream {/,/^}/{ /listen 7070/d; }' /etc/nginx/nginx.conf 2>/dev/null || true
+                        
+                        # Also try to remove the entire stream block if it only contained 7070 config
+                        # Check if stream block is now empty or only has whitespace
+                        if grep -q "stream {" /etc/nginx/nginx.conf 2>/dev/null; then
+                            local stream_content=$(sed -n '/stream {/,/^}/p' /etc/nginx/nginx.conf | grep -v "stream {" | grep -v "^}" | grep -v "^[[:space:]]*$" | grep -v "^[[:space:]]*#")
+                            if [ -z "$stream_content" ]; then
+                                print_info "Removing empty stream block from nginx.conf"
+                                sed -i '/stream {/,/^}/d' /etc/nginx/nginx.conf 2>/dev/null || true
+                            fi
+                        fi
+                    fi
+                    
+                    # Remove include directive for stream.d if directory is empty
+                    if [ -d "/etc/nginx/stream.d" ] && [ -z "$(ls -A /etc/nginx/stream.d 2>/dev/null)" ]; then
+                        print_info "stream.d directory is empty"
+                    fi
+                    
+                    # Test nginx config
+                    echo ""
+                    print_info "Testing Nginx configuration..."
+                    if nginx -t 2>&1; then
+                        print_info "Reloading Nginx..."
+                        systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+                        print_success "Nginx port 7070 stream proxy removed and nginx reloaded!"
+                        echo ""
+                        print_info "Docker should now be able to bind to port 7070 directly."
+                        print_info "Devices will connect directly to your server on port 7070."
+                    else
+                        print_error "Nginx configuration test failed!"
+                        print_info "Restoring backup..."
+                        local latest_backup=$(ls -t /etc/nginx/nginx.conf.backup.* 2>/dev/null | head -1)
+                        if [ -n "$latest_backup" ]; then
+                            cp "$latest_backup" /etc/nginx/nginx.conf
+                            print_info "Backup restored. Please check nginx configuration manually."
+                        fi
+                    fi
                     ;;
                 3)
                     echo ""
@@ -590,14 +686,22 @@ check_all_ports() {
                     ;;
                 4)
                     echo ""
-                    print_warning "This will DELETE Aegis-related Nginx configurations!"
+                    print_warning "This will DELETE ALL Aegis-related Nginx configurations!"
+                    print_warning "Including: site configs, stream proxies, and port 7070 proxy"
                     read -p "  Are you sure? (y/n) [n]: " CONFIRM
                     if [ "$CONFIRM" = "y" ] || [ "$CONFIRM" = "Y" ]; then
+                        # Remove site configs
                         local sites=("aegis" "aegis-reactmap" "aegis-admin" "aegis-rotom" "aegis-koji" "aegis-grafana" "aegis-pma" "rotom" "reactmap")
                         for site in "${sites[@]}"; do
                             rm -f "/etc/nginx/sites-enabled/$site" 2>/dev/null || true
                             rm -f "/etc/nginx/sites-available/$site" 2>/dev/null || true
                         done
+                        
+                        # Remove stream configs
+                        rm -f /etc/nginx/stream.d/rotom-devices.conf 2>/dev/null || true
+                        rm -f /etc/nginx/stream.d/*rotom* 2>/dev/null || true
+                        rm -f /etc/nginx/stream.d/*aegis* 2>/dev/null || true
+                        
                         # Remove any config with Aegis ports
                         if [ -d "/etc/nginx/sites-enabled" ]; then
                             for config in /etc/nginx/sites-enabled/* /etc/nginx/sites-available/*; do
@@ -607,34 +711,50 @@ check_all_ports() {
                                 fi
                             done
                         fi
-                        print_info "Reloading Nginx..."
-                        systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
-                        print_success "Aegis Nginx configurations removed."
+                        
+                        print_info "Testing and reloading Nginx..."
+                        if nginx -t 2>&1; then
+                            systemctl reload nginx 2>/dev/null || nginx -s reload 2>/dev/null || true
+                            print_success "All Aegis Nginx configurations removed."
+                        else
+                            print_warning "Nginx config test failed - may need manual intervention"
+                        fi
                     fi
                     ;;
                 5)
                     echo ""
                     print_info "Nginx configurations using Aegis ports:"
                     echo ""
+                    
+                    # Check stream configs first
+                    if [ -d "/etc/nginx/stream.d" ]; then
+                        echo "  ${CYAN}=== Stream Configurations (TCP/WebSocket proxies) ===${NC}"
+                        for config in /etc/nginx/stream.d/*; do
+                            if [ -f "$config" ]; then
+                                echo "  ${YELLOW}$config:${NC}"
+                                cat "$config" | sed 's/^/    /'
+                                echo ""
+                            fi
+                        done
+                    fi
+                    
+                    # Check nginx.conf for stream blocks
+                    if grep -q "stream {" /etc/nginx/nginx.conf 2>/dev/null; then
+                        echo "  ${CYAN}=== Stream block in nginx.conf ===${NC}"
+                        sed -n '/stream {/,/^}/p' /etc/nginx/nginx.conf | sed 's/^/    /'
+                        echo ""
+                    fi
+                    
+                    # Check site configs
                     if [ -d "/etc/nginx/sites-enabled" ]; then
+                        echo "  ${CYAN}=== Site Configurations ===${NC}"
                         for config in /etc/nginx/sites-enabled/*; do
                             if [ -f "$config" ]; then
                                 local matches=$(grep -n "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006\|proxy_pass.*600\|proxy_pass.*7070" "$config" 2>/dev/null || true)
                                 if [ -n "$matches" ]; then
-                                    echo "  ${CYAN}=== $config ===${NC}"
+                                    echo "  ${YELLOW}$config:${NC}"
                                     echo "$matches" | sed 's/^/    /'
                                     echo ""
-                                fi
-                            fi
-                        done
-                    fi
-                    if [ -d "/etc/nginx/sites-available" ]; then
-                        echo "  ${DIM}Also in sites-available:${NC}"
-                        for config in /etc/nginx/sites-available/*; do
-                            if [ -f "$config" ]; then
-                                local matches=$(grep -l "listen.*7070\|listen.*6001\|listen.*6002\|listen.*6003\|listen.*6004\|listen.*6005\|listen.*6006" "$config" 2>/dev/null || true)
-                                if [ -n "$matches" ]; then
-                                    echo "    $(basename $config)"
                                 fi
                             fi
                         done
