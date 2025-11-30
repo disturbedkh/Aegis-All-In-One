@@ -28,6 +28,16 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Return to main menu function
+return_to_main() {
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
+
 echo ""
 echo "======================================"
 echo "  Aegis All-in-One 2.0 - Setup"
@@ -1274,3 +1284,10 @@ fi
 
 print_warning "IMPORTANT: Save the credentials above! They won't be shown again."
 echo ""
+
+# Return to main menu or exit
+if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    echo ""
+    read -p "Press Enter to return to main menu..."
+    return_to_main
+fi

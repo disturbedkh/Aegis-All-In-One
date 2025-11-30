@@ -386,14 +386,17 @@ show_main_menu() {
     echo "    6) Poracle Setup          - Discord/Telegram notifications"
     echo "    7) Fletchling Setup       - Pokemon nest detection"
     echo ""
-    echo -e "  ${CYAN}Docker Controls${NC}"
-    echo "    8) Start All Containers"
-    echo "    9) Stop All Containers"
-    echo "   10) Restart All Containers"
-    echo "   11) View Container Status"
+    echo -e "  ${CYAN}Stack Controls${NC}"
+    echo "    s) Start Stack            - Start all containers"
+    echo "    x) Stop Stack             - Stop all containers"
+    echo "    t) Restart Stack          - Restart all containers"
+    echo "    c) Container Status       - View container status"
+    echo ""
+    echo -e "  ${CYAN}Updates${NC}"
+    echo "    p) Pull Latest            - Git pull latest changes"
+    echo "    u) Update & Rebuild       - Pull, rebuild, and restart stack"
     echo ""
     echo -e "  ${CYAN}Other${NC}"
-    echo "    u) Check for Updates"
     echo "    h) Help & Documentation"
     echo "    r) Refresh Status"
     echo "    0) Exit"
@@ -489,13 +492,20 @@ show_help() {
     echo "   Prerequisite: Create Koji project first"
     echo ""
 
-    echo -e "${WHITE}${BOLD}Docker Controls${NC}"
+    echo -e "${WHITE}${BOLD}Stack Controls${NC}"
     echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
     echo ""
-    echo "  8) Start All    - docker compose up -d"
-    echo "  9) Stop All     - docker compose down"
-    echo " 10) Restart All  - docker compose restart"
-    echo " 11) Status       - docker compose ps"
+    echo "  s) Start Stack    - docker compose up -d"
+    echo "  x) Stop Stack     - docker compose down"
+    echo "  t) Restart Stack  - docker compose restart"
+    echo "  c) Status         - docker compose ps"
+    echo ""
+
+    echo -e "${WHITE}${BOLD}Updates${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    echo "  p) Pull Latest      - Git pull latest changes only"
+    echo "  u) Update & Rebuild - Pull changes, rebuild containers, restart stack"
     echo ""
 
     echo -e "${WHITE}${BOLD}Quick Tips${NC}"
@@ -514,7 +524,149 @@ show_help() {
 # UPDATE FUNCTIONS
 # =============================================================================
 
-check_and_update() {
+# Git pull only
+git_pull() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                      GIT PULL"
+    draw_box_bottom
+    echo ""
+
+    if [ ! -d ".git" ]; then
+        echo -e "${YELLOW}This directory is not a git repository.${NC}"
+        echo "To enable updates, clone the repository using git:"
+        echo ""
+        echo "  git clone https://github.com/disturbedkh/Aegis-All-In-One.git"
+        echo ""
+        press_enter
+        return
+    fi
+
+    local branch=$(git branch --show-current 2>/dev/null)
+    echo -e "Current branch: ${CYAN}$branch${NC}"
+    echo ""
+    
+    # Check for local changes
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        echo -e "${YELLOW}You have local changes.${NC}"
+        echo ""
+        git status --short
+        echo ""
+        read -p "Stash changes before pulling? (y/n) [y]: " stash
+        stash=${stash:-y}
+        if [ "$stash" = "y" ] || [ "$stash" = "Y" ]; then
+            echo ""
+            git stash
+            echo ""
+        else
+            echo -e "${RED}Aborting pull to preserve local changes.${NC}"
+            press_enter
+            return
+        fi
+    fi
+
+    echo "Pulling latest changes..."
+    echo ""
+    git pull origin $branch
+    
+    if [ $? -eq 0 ]; then
+        echo ""
+        echo -e "${GREEN}✓ Pull complete!${NC}"
+        
+        # Check if we stashed
+        if git stash list | grep -q "stash@{0}"; then
+            echo ""
+            read -p "Restore stashed changes? (y/n) [y]: " restore
+            restore=${restore:-y}
+            if [ "$restore" = "y" ] || [ "$restore" = "Y" ]; then
+                git stash pop
+            fi
+        fi
+    else
+        echo ""
+        echo -e "${RED}Pull failed. Check for conflicts.${NC}"
+    fi
+    
+    press_enter
+}
+
+# Full update: pull, rebuild, restart
+update_and_rebuild() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                UPDATE & REBUILD STACK"
+    draw_box_bottom
+    echo ""
+
+    if [ ! -d ".git" ]; then
+        echo -e "${YELLOW}This directory is not a git repository.${NC}"
+        press_enter
+        return
+    fi
+
+    echo "This will:"
+    echo "  1. Pull latest changes from git"
+    echo "  2. Stop running containers"
+    echo "  3. Rebuild containers with new images"
+    echo "  4. Start the stack"
+    echo ""
+    
+    read -p "Continue? (y/n) [n]: " confirm
+    if [ "$confirm" != "y" ] && [ "$confirm" != "Y" ]; then
+        return
+    fi
+
+    local branch=$(git branch --show-current 2>/dev/null)
+    
+    # Step 1: Pull
+    echo ""
+    echo -e "${CYAN}Step 1/4: Pulling latest changes...${NC}"
+    
+    if ! git diff-index --quiet HEAD -- 2>/dev/null; then
+        echo -e "${YELLOW}Stashing local changes...${NC}"
+        git stash
+    fi
+    
+    git pull origin $branch
+    
+    if [ $? -ne 0 ]; then
+        echo -e "${RED}Pull failed. Aborting.${NC}"
+        press_enter
+        return
+    fi
+    
+    # Step 2: Stop
+    echo ""
+    echo -e "${CYAN}Step 2/4: Stopping containers...${NC}"
+    docker compose down
+    
+    # Step 3: Rebuild
+    echo ""
+    echo -e "${CYAN}Step 3/4: Rebuilding containers...${NC}"
+    docker compose build --pull
+    
+    # Step 4: Start
+    echo ""
+    echo -e "${CYAN}Step 4/4: Starting stack...${NC}"
+    docker compose up -d
+    
+    echo ""
+    echo -e "${GREEN}✓ Update and rebuild complete!${NC}"
+    echo ""
+    
+    # Show status
+    echo "Container status:"
+    docker compose ps
+    
+    press_enter
+}
+
+# Check for updates (info only)
+check_updates() {
     clear
     draw_logo
     
@@ -556,34 +708,21 @@ check_and_update() {
         echo ""
         
         echo "Recent changes:"
-        git log --oneline HEAD..origin/main 2>/dev/null | head -5 || git log --oneline HEAD..origin/master 2>/dev/null | head -5
+        git log --oneline HEAD..origin/main 2>/dev/null | head -10 || git log --oneline HEAD..origin/master 2>/dev/null | head -10
         echo ""
         
-        read -p "Would you like to update now? (y/n) [n]: " do_update
-        if [ "$do_update" = "y" ] || [ "$do_update" = "Y" ]; then
-            echo ""
-            echo "Updating..."
-            
-            # Check for local changes
-            if ! git diff-index --quiet HEAD -- 2>/dev/null; then
-                echo -e "${YELLOW}You have local changes.${NC}"
-                read -p "Stash changes and update? (y/n) [n]: " stash
-                if [ "$stash" = "y" ]; then
-                    git stash
-                    git pull origin $branch
-                    echo ""
-                    read -p "Restore stashed changes? (y/n) [y]: " restore
-                    if [ "$restore" != "n" ]; then
-                        git stash pop
-                    fi
-                fi
-            else
-                git pull origin $branch
-            fi
-            
-            echo ""
-            echo -e "${GREEN}✓ Update complete!${NC}"
-        fi
+        echo "Options:"
+        echo "  p) Pull Latest       - Just pull changes"
+        echo "  u) Update & Rebuild  - Pull, rebuild, restart"
+        echo "  0) Back"
+        echo ""
+        read -p "Select: " choice
+        
+        case $choice in
+            p|P) git_pull ;;
+            u|U) update_and_rebuild ;;
+        esac
+        return
     fi
     
     press_enter
@@ -674,10 +813,10 @@ run_script() {
         echo ""
         sleep 1
         
-        # Run the script
-        sudo bash "$SCRIPT_DIR/$script"
+        # Run the script with environment variable to indicate it was launched from aegis.sh
+        sudo AEGIS_LAUNCHER=1 bash "$SCRIPT_DIR/$script"
         
-        # Return handled by the script itself
+        # Script completed - no need for extra prompt since scripts handle their own exit
     else
         echo ""
         echo -e "${RED}Script not found: $script${NC}"
@@ -705,18 +844,25 @@ main() {
         read -p "  Select option: " choice
         
         case $choice in
+            # Setup & Configuration
             1) run_script "setup.sh" "Initial Setup" ;;
             2) run_script "dbsetup.sh" "Database Management" ;;
             3) run_script "nginx-setup.sh" "Security Setup" ;;
+            # Monitoring & Maintenance
             4) run_script "check.sh" "System Check" ;;
             5) run_script "logs.sh" "Log Manager" ;;
+            # Optional Features
             6) run_script "poracle.sh" "Poracle Setup" ;;
             7) run_script "fletchling.sh" "Fletchling Setup" ;;
-            8) docker_start ;;
-            9) docker_stop ;;
-            10) docker_restart ;;
-            11) docker_status ;;
-            u|U) check_and_update ;;
+            # Stack Controls
+            s|S) docker_start ;;
+            x|X) docker_stop ;;
+            t|T) docker_restart ;;
+            c|C) docker_status ;;
+            # Updates
+            p|P) git_pull ;;
+            u|U) update_and_rebuild ;;
+            # Other
             h|H) show_help ;;
             r|R) continue ;;
             0|q|Q)
@@ -744,12 +890,14 @@ case "${1:-}" in
         echo "Usage: $0 [option]"
         echo ""
         echo "Options:"
-        echo "  (none)    Interactive menu"
-        echo "  --status  Show status only"
-        echo "  --start   Start all containers"
-        echo "  --stop    Stop all containers"
-        echo "  --update  Check for updates"
-        echo "  --help    This help message"
+        echo "  (none)      Interactive menu"
+        echo "  --status    Show status only"
+        echo "  --start     Start all containers"
+        echo "  --stop      Stop all containers"
+        echo "  --restart   Restart all containers"
+        echo "  --pull      Git pull latest changes"
+        echo "  --update    Pull, rebuild, and restart stack"
+        echo "  --help      This help message"
         echo ""
         exit 0
         ;;
@@ -765,8 +913,16 @@ case "${1:-}" in
         docker_stop
         exit 0
         ;;
+    --restart)
+        docker_restart
+        exit 0
+        ;;
+    --pull)
+        git_pull
+        exit 0
+        ;;
     --update)
-        check_and_update
+        update_and_rebuild
         exit 0
         ;;
     *)

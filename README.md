@@ -193,12 +193,13 @@ sudo bash ./aegis.sh
 | | 5) Log Manager | View, analyze, manage logs |
 | **Features** | 6) Poracle Setup | Discord/Telegram alerts |
 | | 7) Fletchling Setup | Nest detection |
-| **Docker** | 8) Start All | docker compose up -d |
-| | 9) Stop All | docker compose down |
-| | 10) Restart All | docker compose restart |
-| | 11) Status | docker compose ps |
-| **Other** | u) Updates | Check for repo updates |
-| | h) Help | Documentation for all options |
+| **Stack** | s) Start Stack | docker compose up -d |
+| | x) Stop Stack | docker compose down |
+| | t) Restart Stack | docker compose restart |
+| | c) Container Status | docker compose ps |
+| **Updates** | p) Pull Latest | Git pull only |
+| | u) Update & Rebuild | Pull, rebuild, restart |
+| **Other** | h) Help | Documentation for all options |
 
 **Command Line Options:**
 ```bash
@@ -206,7 +207,9 @@ sudo bash ./aegis.sh
 ./aegis.sh --status     # Show status dashboard only
 ./aegis.sh --start      # Start all containers
 ./aegis.sh --stop       # Stop all containers
-./aegis.sh --update     # Check for updates
+./aegis.sh --restart    # Restart all containers
+./aegis.sh --pull       # Git pull latest changes
+./aegis.sh --update     # Pull, rebuild, restart stack
 ./aegis.sh --help       # Help
 ```
 

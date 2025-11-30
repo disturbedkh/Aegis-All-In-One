@@ -37,6 +37,16 @@ print_fail() { echo -e "${RED}[✗]${NC} $1"; ((ERRORS++)); }
 print_check() { echo -e "${BLUE}[CHECK]${NC} $1"; }
 print_header() { echo -e "\n${CYAN}━━━ $1 ━━━${NC}\n"; }
 
+# Return to main menu function
+return_to_main() {
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
+
 # Box drawing
 draw_box_top() {
     echo -e "${CYAN}╔════════════════════════════════════════════════════════════════════╗${NC}"
@@ -1102,7 +1112,7 @@ show_menu() {
                 echo ""
                 echo -e "  ${GREEN}Goodbye!${NC}"
                 echo ""
-                exit 0
+                return_to_main
                 ;;
             *)
                 echo ""

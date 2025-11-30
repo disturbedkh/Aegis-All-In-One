@@ -44,11 +44,30 @@ ERROR_PATTERNS=(
     ["critical"]="fatal|panic|critical|emergency|FATAL|PANIC"
 )
 
+# Get the original user who called sudo (to prevent files being locked to root)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
+
 # Print functions
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 print_error() { echo -e "${RED}[✗]${NC} $1"; }
+
+# Return to main menu function
+return_to_main() {
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
 
 # Box drawing
 draw_box_top() {
@@ -1001,7 +1020,7 @@ show_main_menu() {
             0)
                 echo ""
                 print_success "Goodbye!"
-                exit 0
+                return_to_main
                 ;;
         esac
     done

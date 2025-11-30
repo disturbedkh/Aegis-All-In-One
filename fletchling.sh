@@ -10,18 +10,36 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+WHITE='\033[1;37m'
+BOLD='\033[1m'
+DIM='\033[2m'
 NC='\033[0m' # No Color
 
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
-print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
-print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
-print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+print_success() { echo -e "${GREEN}[✓]${NC} $1"; }
+print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
+print_error() { echo -e "${RED}[✗]${NC} $1"; }
+print_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
 
-echo "=============================================="
-echo "  Fletchling Setup - Pokemon Nest Tracking"
-echo "  Aegis All-in-One by The Pokemod Group"
-echo "  https://pokemod.dev/"
-echo "=============================================="
+# Return to main menu function
+return_to_main() {
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
+
+clear
+echo ""
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${NC}        ${WHITE}${BOLD}Fletchling Setup - Pokemon Nest Tracking${NC}          ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}                                                              ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}        ${DIM}Aegis All-in-One by The Pokemod Group${NC}              ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}        ${DIM}https://pokemod.dev/${NC}                                ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # Get the original user who called sudo (to fix file ownership later)
@@ -229,21 +247,100 @@ fi
 
 # Run OSM importer
 echo ""
+echo -e "${WHITE}${BOLD}OSM Park Data Import${NC}"
+echo -e "${DIM}────────────────────────────────────────────────────────────────${NC}"
 print_info "Running OSM park data importer for area: $AREA_NAME"
-print_warning "This may take a while depending on the area size..."
+print_warning "This may take several minutes depending on the area size..."
+echo ""
 
 if [ -f "./docker-osm-importer.sh" ]; then
     chmod +x ./docker-osm-importer.sh
-    ./docker-osm-importer.sh "$AREA_NAME"
     
-    if [ $? -eq 0 ]; then
-        print_success "OSM import completed successfully"
-    else
-        print_error "OSM import failed. Check the logs for details."
-        print_info "You can retry manually: ./docker-osm-importer.sh '$AREA_NAME'"
+    # Create a temp file for output
+    OSM_OUTPUT=$(mktemp)
+    OSM_EXIT_CODE=0
+    
+    # Run the importer and capture output
+    echo -e "${DIM}─── Import Progress ───${NC}"
+    ./docker-osm-importer.sh "$AREA_NAME" 2>&1 | tee "$OSM_OUTPUT" || OSM_EXIT_CODE=$?
+    echo -e "${DIM}───────────────────────${NC}"
+    echo ""
+    
+    # Analyze the output for success/failure indicators
+    OSM_SUCCESS=false
+    OSM_PARKS_IMPORTED=0
+    OSM_ERROR_MSG=""
+    
+    # Check for various success/failure indicators in the output
+    if grep -qi "successfully\|imported\|complete\|done\|finished" "$OSM_OUTPUT" 2>/dev/null; then
+        OSM_SUCCESS=true
     fi
+    
+    # Try to extract number of parks/areas imported
+    if grep -qiE "[0-9]+ (parks?|areas?|polygons?|features?)" "$OSM_OUTPUT" 2>/dev/null; then
+        OSM_PARKS_IMPORTED=$(grep -oiE "[0-9]+ (parks?|areas?|polygons?|features?)" "$OSM_OUTPUT" | head -1)
+    fi
+    
+    # Check for error indicators
+    if grep -qi "error\|failed\|fatal\|exception\|not found\|timeout" "$OSM_OUTPUT" 2>/dev/null; then
+        OSM_ERROR_MSG=$(grep -i "error\|failed\|fatal\|exception" "$OSM_OUTPUT" | head -3)
+        if [ -n "$OSM_ERROR_MSG" ]; then
+            OSM_SUCCESS=false
+        fi
+    fi
+    
+    # Check for empty area or no data
+    if grep -qi "no.*data\|empty\|0 parks\|0 areas\|0 features" "$OSM_OUTPUT" 2>/dev/null; then
+        OSM_SUCCESS=false
+        OSM_ERROR_MSG="No park data found for this area"
+    fi
+    
+    # Report results
+    echo -e "${WHITE}${BOLD}Import Results${NC}"
+    echo -e "${DIM}────────────────────────────────────────────────────────────────${NC}"
+    
+    if [ $OSM_EXIT_CODE -eq 0 ] && [ "$OSM_SUCCESS" = true ]; then
+        print_success "OSM import completed successfully!"
+        if [ -n "$OSM_PARKS_IMPORTED" ]; then
+            echo -e "  Parks imported: ${GREEN}$OSM_PARKS_IMPORTED${NC}"
+        fi
+        echo ""
+    elif [ $OSM_EXIT_CODE -eq 0 ]; then
+        print_warning "OSM import finished but results unclear"
+        echo -e "  ${DIM}Check the output above for details${NC}"
+        echo ""
+    else
+        print_error "OSM import failed (exit code: $OSM_EXIT_CODE)"
+        if [ -n "$OSM_ERROR_MSG" ]; then
+            echo -e "  ${RED}Error details:${NC}"
+            echo "$OSM_ERROR_MSG" | while read line; do
+                echo -e "    ${DIM}$line${NC}"
+            done
+        fi
+        echo ""
+        print_info "Troubleshooting:"
+        echo "  1. Ensure fletchling-tools container is running:"
+        echo "     docker compose ps fletchling-tools"
+        echo ""
+        echo "  2. Check if the area name matches your Koji geofence exactly"
+        echo ""
+        echo "  3. Retry manually:"
+        echo "     ./docker-osm-importer.sh '$AREA_NAME'"
+        echo ""
+        echo "  4. Check container logs:"
+        echo "     docker compose logs fletchling-tools"
+        echo ""
+    fi
+    
+    # Cleanup temp file
+    rm -f "$OSM_OUTPUT"
 else
     print_error "docker-osm-importer.sh not found"
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        read -p "Press Enter to return to main menu..."
+        return_to_main
+    fi
     exit 1
 fi
 
@@ -256,34 +353,50 @@ print_success "File ownership restored to $REAL_USER"
 
 # Print summary
 echo ""
-echo "=============================================="
-print_success "Fletchling Setup Complete!"
-echo "=============================================="
+echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
+echo -e "${CYAN}║${NC}              ${GREEN}${BOLD}Fletchling Setup Complete!${NC}                    ${CYAN}║${NC}"
+echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
-print_info "Configuration Summary:"
+
+echo -e "${WHITE}${BOLD}Configuration Summary${NC}"
+echo -e "${DIM}────────────────────────────────────────────────────────────────${NC}"
 echo "  Koji Project:    $KOJI_PROJECT"
 echo "  OSM Import Area: $AREA_NAME"
 echo "  Config File:     $CONFIG_FILE"
 echo ""
-print_info "Next Steps:"
+
+echo -e "${WHITE}${BOLD}Next Steps${NC}"
+echo -e "${DIM}────────────────────────────────────────────────────────────────${NC}"
 echo "  1. Configure Golbat to send webhooks to Fletchling"
-echo "     Add to golbat_config.toml:"
-echo "     [[webhooks]]"
-echo "     url = \"http://fletchling:9042/webhook\""
-echo "     types = [\"pokemon_iv\"]"
+echo "     Add to unown/golbat_config.toml:"
+echo ""
+echo -e "     ${CYAN}[[webhooks]]${NC}"
+echo -e "     ${CYAN}url = \"http://fletchling:9042/webhook\"${NC}"
+echo -e "     ${CYAN}types = [\"pokemon_iv\"]${NC}"
 echo ""
 echo "  2. Restart Golbat to apply webhook changes:"
-echo "     docker compose restart golbat"
+echo -e "     ${DIM}docker compose restart golbat${NC}"
 echo ""
 echo "  3. Monitor Fletchling logs:"
-echo "     docker compose logs -f fletchling"
+echo -e "     ${DIM}docker compose logs -f fletchling${NC}"
 echo ""
 echo "  4. Access Fletchling status:"
-echo "     http://localhost:9042/status"
+echo -e "     ${DIM}http://localhost:9042/status${NC}"
 echo ""
-print_info "Useful Commands:"
+
+echo -e "${WHITE}${BOLD}Useful Commands${NC}"
+echo -e "${DIM}────────────────────────────────────────────────────────────────${NC}"
 echo "  View logs:       docker compose logs -f fletchling"
 echo "  Restart:         docker compose restart fletchling"
 echo "  Re-import OSM:   ./docker-osm-importer.sh '$AREA_NAME'"
 echo ""
+
 print_warning "Remember: Nest data takes time to accumulate. Check back after a few hours!"
+echo ""
+
+# Return to main menu or exit
+if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    echo ""
+    read -p "Press Enter to return to main menu..."
+    return_to_main
+fi

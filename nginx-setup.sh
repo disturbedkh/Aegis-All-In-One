@@ -17,13 +17,38 @@ RED='\033[0;31m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
 BLUE='\033[0;34m'
+CYAN='\033[0;36m'
 NC='\033[0m' # No Color
+
+# Get the original user who called sudo (to prevent files being locked to root)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
 
 # Print colored messages
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
+
+# Return to main menu function
+return_to_main() {
+    # Restore ownership of modified files
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml 2>/dev/null || true
+    fi
+    
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
 
 # Check if running as root
 check_root() {
@@ -2551,6 +2576,13 @@ main() {
     
     # Done - print summary
     print_summary
+    
+    # Return to main menu or exit
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        read -p "Press Enter to return to main menu..."
+        return_to_main
+    fi
 }
 
 # Run main function

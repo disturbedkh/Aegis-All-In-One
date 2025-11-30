@@ -23,6 +23,16 @@ print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 print_header() { echo -e "\n${CYAN}=== $1 ===${NC}\n"; }
 
+# Return to main menu function
+return_to_main() {
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
+
 # Get the original user who called sudo (to fix file ownership later)
 if [ -n "$SUDO_USER" ]; then
     REAL_USER="$SUDO_USER"
@@ -960,3 +970,10 @@ if [ "$ADD_WEBHOOK" = "y" ] || [ "$ADD_WEBHOOK" = "Y" ]; then
 fi
 
 print_success "Enjoy your Pokemon alerts!"
+
+# Return to main menu or exit
+if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    echo ""
+    read -p "Press Enter to return to main menu..."
+    return_to_main
+fi

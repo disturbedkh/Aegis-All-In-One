@@ -59,15 +59,32 @@ draw_box_line_colored() {
 MYSQL_CMD=""
 DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
 
+# Get the original user who called sudo (to prevent files being locked to root)
+if [ -n "$SUDO_USER" ]; then
+    REAL_USER="$SUDO_USER"
+    REAL_GROUP=$(id -gn "$SUDO_USER")
+else
+    REAL_USER="$USER"
+    REAL_GROUP=$(id -gn)
+fi
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
 
 check_root() {
-if [ "$EUID" -ne 0 ]; then
+    if [ "$EUID" -ne 0 ]; then
         print_error "Please run this script as root (e.g., sudo bash dbsetup.sh)"
-  exit 1
-fi
+        exit 1
+    fi
+}
+
+# Restore file ownership to original user
+restore_ownership() {
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
+        chown "$REAL_USER:$REAL_GROUP" mysql_data/mariadb.cnf 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" .env 2>/dev/null || true
+    fi
 }
 
 load_env() {
@@ -572,6 +589,19 @@ show_setup_complete() {
 
     echo -e "${WHITE}${BOLD}Next Steps${NC}"
     echo -e "${DIM}────────────────────────────────────────${NC}"
+    echo "  1. Run: docker compose up -d --force-recreate --build"
+    echo "  2. Wait for services to initialize"
+    echo "  3. Access your services via web browser"
+    echo ""
+    
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        read -p "  Press Enter to return to main menu..."
+        return_to_main
+    else
+        press_enter
+    fi
+}
     echo "  1. Run: docker compose up -d --force-recreate --build"
     echo "  2. Wait for services to initialize"
     echo "  3. Access your services via web browser"
@@ -1460,7 +1490,11 @@ run_maintenance_mode() {
         echo "    4) General Database Maintenance"
         echo "    5) Database & User Management"
         echo "    6) Refresh Status"
-        echo "    0) Exit"
+        if [ "$AEGIS_LAUNCHER" = "1" ]; then
+            echo "    0) Return to Main Menu"
+        else
+            echo "    0) Exit"
+        fi
         echo ""
         read -p "  Select option: " choice
 
@@ -1473,8 +1507,12 @@ run_maintenance_mode() {
             6) continue ;;
             0) 
                 echo ""
-                print_success "Goodbye!"
-                exit 0
+                if [ "$AEGIS_LAUNCHER" = "1" ]; then
+                    return_to_main
+                else
+                    print_success "Goodbye!"
+                    exit 0
+                fi
                 ;;
         esac
     done
@@ -1484,44 +1522,67 @@ run_maintenance_mode() {
 # MAIN SCRIPT
 # =============================================================================
 
+return_to_main() {
+    # Restore file ownership before exiting
+    restore_ownership
+    
+    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        echo ""
+        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        sleep 1
+    fi
+    exit 0
+}
+
 main() {
     check_root
     load_env
 
-    clear
-    echo ""
-    draw_box_top
-    draw_box_line "      AEGIS DATABASE SETUP & MAINTENANCE"
-    draw_box_line ""
-    draw_box_line "              By The Pokemod Group"
-    draw_box_line "              https://pokemod.dev/"
-    draw_box_bottom
-    echo ""
-    echo "  Select Mode:"
-    echo ""
-    echo "    1) Setup Mode"
-    echo "       - Install/configure MariaDB"
-    echo "       - Create databases and users"
-    echo "       - Performance tuning"
-    echo ""
-    echo "    2) Maintenance Mode"
-    echo "       - Status dashboard"
-    echo "       - Account cleanup"
-    echo "       - Data maintenance"
-    echo "       - Database optimization"
-    echo "       - Create missing DBs/users"
-    echo "       - Fix permissions"
-    echo ""
-    read -p "  Select mode [1-2]: " mode
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "      AEGIS DATABASE SETUP & MAINTENANCE"
+        draw_box_line ""
+        draw_box_line "              By The Pokemod Group"
+        draw_box_line "              https://pokemod.dev/"
+        draw_box_bottom
+        echo ""
+        echo "  Select Mode:"
+        echo ""
+        echo "    1) Setup Mode"
+        echo "       - Install/configure MariaDB"
+        echo "       - Create databases and users"
+        echo "       - Performance tuning"
+        echo ""
+        echo "    2) Maintenance Mode"
+        echo "       - Status dashboard"
+        echo "       - Account cleanup"
+        echo "       - Data maintenance"
+        echo "       - Database optimization"
+        echo "       - Create missing DBs/users"
+        echo "       - Fix permissions"
+        echo ""
+        if [ "$AEGIS_LAUNCHER" = "1" ]; then
+            echo "    0) Return to Main Menu"
+            echo ""
+        fi
+        read -p "  Select mode [1-2]: " mode
 
-    case $mode in
-        1) run_setup_mode ;;
-        2) run_maintenance_mode ;;
-        *)
-            print_error "Invalid selection"
-            exit 1
-            ;;
-    esac
+        case $mode in
+            1) run_setup_mode ;;
+            2) run_maintenance_mode ;;
+            0)
+                if [ "$AEGIS_LAUNCHER" = "1" ]; then
+                    return_to_main
+                fi
+                ;;
+            *)
+                print_error "Invalid selection"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 # Run main function
