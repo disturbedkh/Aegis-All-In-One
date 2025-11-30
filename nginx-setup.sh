@@ -2343,6 +2343,13 @@ create_authelia_config() {
     mkdir -p "$AUTHELIA_DIR/config"
     mkdir -p "$AUTHELIA_DIR/data"
     
+    # Compute ReactMap domain (base domain or subdomain)
+    if [ -z "$SUBDOMAIN_REACTMAP" ]; then
+        REACTMAP_DOMAIN="${BASE_DOMAIN}"
+    else
+        REACTMAP_DOMAIN="${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+    fi
+    
     # Create users database
     cat > "$AUTHELIA_DIR/config/users_database.yml" << EOF
 # Authelia Users Database
@@ -2432,7 +2439,7 @@ access_control:
   
   rules:
     # Public access to ReactMap
-    - domain: "${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+    - domain: "${REACTMAP_DOMAIN}"
       policy: bypass
     
     # Public access to Poracle webhooks
@@ -2673,7 +2680,12 @@ generate_authelia_service_config() {
     local PORT=$3
     local WEBSOCKET=$4
     
-    SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+    # Handle base domain vs subdomain
+    if [ -z "$SUBDOMAIN" ]; then
+        SERVER_NAME="${BASE_DOMAIN}"
+    else
+        SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
     
     # WebSocket support
     WS_BLOCK=""
@@ -2725,7 +2737,12 @@ generate_bypass_service_config() {
     local PORT=$3
     local WEBSOCKET=$4
     
-    SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+    # Handle base domain vs subdomain
+    if [ -z "$SUBDOMAIN" ]; then
+        SERVER_NAME="${BASE_DOMAIN}"
+    else
+        SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+    fi
     
     # WebSocket support
     WS_BLOCK=""
@@ -2854,10 +2871,33 @@ get_user_config() {
     if [ "$STRUCTURE_CHOICE" = "1" ]; then
         USE_SUBDOMAINS=true
         echo ""
-        print_info "Configure subdomain names for each service (press Enter for defaults):"
         
-        read -p "ReactMap subdomain [map]: " SUBDOMAIN_REACTMAP
-        SUBDOMAIN_REACTMAP=${SUBDOMAIN_REACTMAP:-map}
+        # ReactMap domain configuration with explanation
+        echo -e "${WHITE}${BOLD}ReactMap Domain Configuration${NC}"
+        echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "  ${CYAN}Option 1: Base Domain (Recommended)${NC}"
+        echo -e "    Your map will be accessible at: ${GREEN}${BASE_DOMAIN}${NC}"
+        echo -e "    ${DIM}Simpler URL, easier to remember, no subdomain needed${NC}"
+        echo ""
+        echo -e "  ${CYAN}Option 2: Subdomain${NC}"
+        echo -e "    Your map will be accessible at: ${GREEN}map.${BASE_DOMAIN}${NC}"
+        echo -e "    ${DIM}Requires additional DNS record (CNAME or A record for 'map')${NC}"
+        echo ""
+        read -p "Use base domain for ReactMap? (y/n) [y]: " USE_BASE_FOR_MAP
+        USE_BASE_FOR_MAP=${USE_BASE_FOR_MAP:-y}
+        
+        if [ "$USE_BASE_FOR_MAP" = "y" ] || [ "$USE_BASE_FOR_MAP" = "Y" ]; then
+            SUBDOMAIN_REACTMAP=""
+            echo -e "  ${GREEN}✓${NC} ReactMap will be at: ${GREEN}${BASE_DOMAIN}${NC}"
+        else
+            read -p "  Enter ReactMap subdomain [map]: " SUBDOMAIN_REACTMAP
+            SUBDOMAIN_REACTMAP=${SUBDOMAIN_REACTMAP:-map}
+            echo -e "  ${GREEN}✓${NC} ReactMap will be at: ${GREEN}${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}${NC}"
+        fi
+        echo ""
+        
+        print_info "Configure subdomain names for other services (press Enter for defaults):"
         
         read -p "Dragonite Admin subdomain [admin]: " SUBDOMAIN_ADMIN
         SUBDOMAIN_ADMIN=${SUBDOMAIN_ADMIN:-admin}
@@ -2933,11 +2973,21 @@ generate_service_config() {
     local WEBSOCKET=$5
     
     if [ "$USE_SUBDOMAINS" = true ]; then
-        SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+        # Handle base domain vs subdomain
+        if [ -z "$SUBDOMAIN" ]; then
+            SERVER_NAME="${BASE_DOMAIN}"
+        else
+            SERVER_NAME="${SUBDOMAIN}.${BASE_DOMAIN}"
+        fi
         LOCATION="/"
     else
         SERVER_NAME="${BASE_DOMAIN}"
-        LOCATION="/${SUBDOMAIN}/"
+        # For subdirectory mode, empty subdomain means root
+        if [ -z "$SUBDOMAIN" ]; then
+            LOCATION="/"
+        else
+            LOCATION="/${SUBDOMAIN}/"
+        fi
     fi
     
     # Auth block
@@ -3269,7 +3319,12 @@ setup_ssl() {
     # Build domain list
     DOMAIN_LIST=""
     if [ "$USE_SUBDOMAINS" = true ]; then
-        DOMAIN_LIST="-d ${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+        # ReactMap: use base domain or subdomain
+        if [ -z "$SUBDOMAIN_REACTMAP" ]; then
+            DOMAIN_LIST="-d ${BASE_DOMAIN}"
+        else
+            DOMAIN_LIST="-d ${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+        fi
         DOMAIN_LIST="$DOMAIN_LIST -d ${SUBDOMAIN_ADMIN}.${BASE_DOMAIN}"
         DOMAIN_LIST="$DOMAIN_LIST -d ${SUBDOMAIN_ROTOM}.${BASE_DOMAIN}"
         DOMAIN_LIST="$DOMAIN_LIST -d ${SUBDOMAIN_KOJI}.${BASE_DOMAIN}"
@@ -3287,7 +3342,12 @@ setup_ssl() {
     echo ""
     print_info "The following domains will be configured for SSL:"
     if [ "$USE_SUBDOMAINS" = true ]; then
-        echo "  - ${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+        # ReactMap: show base domain or subdomain
+        if [ -z "$SUBDOMAIN_REACTMAP" ]; then
+            echo "  - ${BASE_DOMAIN} (ReactMap)"
+        else
+            echo "  - ${SUBDOMAIN_REACTMAP}.${BASE_DOMAIN}"
+        fi
         echo "  - ${SUBDOMAIN_ADMIN}.${BASE_DOMAIN}"
         echo "  - ${SUBDOMAIN_ROTOM}.${BASE_DOMAIN}"
         echo "  - ${SUBDOMAIN_KOJI}.${BASE_DOMAIN}"
