@@ -281,9 +281,9 @@ show_status_dashboard() {
     
     # Check users from configs
     local db_user="${MYSQL_USER:-dbuser}"
-    local user_exists=$(run_query "" "SELECT COUNT(*) FROM mysql.user WHERE User = '$db_user'")
+    local user_count=$(run_query "" "SELECT COUNT(*) FROM mysql.user WHERE User = '$db_user'")
     
-    if [ "${user_exists:-0}" -gt 0 ]; then
+    if [ "${user_count:-0}" -gt 0 ]; then
         local grants=$(run_query "" "SHOW GRANTS FOR '$db_user'@'%'" 2>/dev/null | head -1)
         echo -e "  $db_user:            ${GREEN}Exists${NC}"
         if echo "$grants" | grep -q "ALL PRIVILEGES"; then
@@ -295,6 +295,27 @@ show_status_dashboard() {
         echo -e "  $db_user:            ${RED}Not Found${NC}"
     fi
     echo ""
+
+    # Quick health check
+    local missing_dbs=0
+    for db in "${DBS[@]}"; do
+        if ! db_exists "$db"; then
+            ((missing_dbs++))
+        fi
+    done
+    
+    if [ $missing_dbs -gt 0 ] || [ "${user_count:-0}" -eq 0 ]; then
+        echo -e "${WHITE}${BOLD}Issues Detected${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        if [ $missing_dbs -gt 0 ]; then
+            echo -e "  ${RED}!${NC} $missing_dbs missing database(s)"
+        fi
+        if [ "${user_count:-0}" -eq 0 ]; then
+            echo -e "  ${RED}!${NC} DB user '$db_user' not found"
+        fi
+        echo -e "  ${CYAN}→${NC} Use option 5 (Database & User Management) to fix"
+        echo ""
+    fi
 
     return 0
 }
@@ -1137,6 +1158,288 @@ general_maintenance_menu() {
     done
 }
 
+# =============================================================================
+# DATABASE & USER MANAGEMENT
+# =============================================================================
+
+# Helper to extract value from TOML
+get_toml_value() {
+    local file=$1
+    local key=$2
+    grep -E "^${key}\s*=" "$file" 2>/dev/null | sed 's/.*=\s*"\?\([^"]*\)"\?.*/\1/' | tr -d '"' | tr -d "'" | head -1
+}
+
+# Helper to extract value from JSON
+get_json_value() {
+    local file=$1
+    local key=$2
+    grep -o "\"${key}\"[[:space:]]*:[[:space:]]*\"[^\"]*\"" "$file" 2>/dev/null | grep -v "\"_${key}" | head -1 | sed 's/.*:\s*"\([^"]*\)".*/\1/'
+}
+
+# Get all usernames from config files
+get_config_users() {
+    local users=()
+    
+    # From .env
+    if [ -n "$MYSQL_USER" ]; then
+        users+=("$MYSQL_USER")
+    fi
+    
+    # From dragonite config
+    if [ -f "unown/dragonite_config.toml" ]; then
+        local user=$(get_toml_value "unown/dragonite_config.toml" "user")
+        if [ -n "$user" ] && [[ ! " ${users[*]} " =~ " ${user} " ]]; then
+            users+=("$user")
+        fi
+    fi
+    
+    # From golbat config
+    if [ -f "unown/golbat_config.toml" ]; then
+        local user=$(get_toml_value "unown/golbat_config.toml" "user")
+        if [ -n "$user" ] && [[ ! " ${users[*]} " =~ " ${user} " ]]; then
+            users+=("$user")
+        fi
+    fi
+    
+    # From reactmap config
+    if [ -f "reactmap/local.json" ]; then
+        local user=$(get_json_value "reactmap/local.json" "username")
+        if [ -n "$user" ] && [[ ! " ${users[*]} " =~ " ${user} " ]]; then
+            users+=("$user")
+        fi
+    fi
+    
+    echo "${users[@]}"
+}
+
+# Check if user exists in database
+user_exists() {
+    local username=$1
+    local count=$(run_query "" "SELECT COUNT(*) FROM mysql.user WHERE User = '$username'")
+    [ "${count:-0}" -gt 0 ]
+}
+
+# Check if user has full privileges
+user_has_full_privileges() {
+    local username=$1
+    local grants=$(run_query "" "SHOW GRANTS FOR '$username'@'%'" 2>/dev/null | head -1)
+    echo "$grants" | grep -q "ALL PRIVILEGES"
+}
+
+# Database & User Management Menu
+db_user_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "         DATABASE & USER MANAGEMENT"
+        draw_box_bottom
+        echo ""
+
+        # Check databases
+        echo -e "${WHITE}${BOLD}Required Databases${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        
+        local missing_dbs=()
+        for db in "${DBS[@]}"; do
+            if db_exists "$db"; then
+                echo -e "  ${GREEN}✓${NC} $db"
+            else
+                echo -e "  ${RED}✗${NC} $db (missing)"
+                missing_dbs+=("$db")
+            fi
+        done
+        echo ""
+
+        # Check users from configs
+        echo -e "${WHITE}${BOLD}Users from Config Files${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        
+        local config_users=($(get_config_users))
+        local missing_users=()
+        local needs_privileges=()
+        
+        for user in "${config_users[@]}"; do
+            if user_exists "$user"; then
+                if user_has_full_privileges "$user"; then
+                    echo -e "  ${GREEN}✓${NC} $user (exists, full privileges)"
+                else
+                    echo -e "  ${YELLOW}!${NC} $user (exists, limited privileges)"
+                    needs_privileges+=("$user")
+                fi
+            else
+                echo -e "  ${RED}✗${NC} $user (missing)"
+                missing_users+=("$user")
+            fi
+        done
+        echo ""
+
+        # Show all DB users
+        echo -e "${WHITE}${BOLD}All Database Users${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        run_query "" "SELECT User, Host FROM mysql.user WHERE User NOT IN ('root', 'mysql', 'mariadb.sys', 'debian-sys-maint')" 2>/dev/null | while read user host; do
+            echo "  $user@$host"
+        done
+        echo ""
+
+        # Menu options
+        echo "  Options:"
+        echo "    1) Create missing databases"
+        echo "    2) Create missing users"
+        echo "    3) Grant full privileges to users"
+        echo "    4) Fix ALL issues (create DBs, users, grant privileges)"
+        echo "    5) Create new user manually"
+        echo "    6) Delete a user"
+        echo "    7) Show user grants"
+        echo "    0) Back to main menu"
+        echo ""
+        read -p "  Select option: " choice
+
+        case $choice in
+            1)
+                if [ ${#missing_dbs[@]} -eq 0 ]; then
+                    print_info "All required databases already exist"
+                else
+                    echo ""
+                    for db in "${missing_dbs[@]}"; do
+                        run_query "" "CREATE DATABASE IF NOT EXISTS \`$db\`"
+                        if [ $? -eq 0 ]; then
+                            print_success "Created database: $db"
+                        else
+                            print_error "Failed to create: $db"
+                        fi
+                    done
+                fi
+                press_enter
+                ;;
+            2)
+                if [ ${#missing_users[@]} -eq 0 ]; then
+                    print_info "All config users already exist"
+                else
+                    echo ""
+                    local db_pass="${MYSQL_PASSWORD:-}"
+                    for user in "${missing_users[@]}"; do
+                        if [ -n "$db_pass" ]; then
+                            run_query "" "CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$db_pass'"
+                            run_query "" "GRANT ALL PRIVILEGES ON *.* TO '$user'@'%' WITH GRANT OPTION"
+                            run_query "" "FLUSH PRIVILEGES"
+                            if [ $? -eq 0 ]; then
+                                print_success "Created user: $user (using MYSQL_PASSWORD from .env)"
+                            else
+                                print_error "Failed to create: $user"
+                            fi
+                        else
+                            print_warning "MYSQL_PASSWORD not set in .env, skipping $user"
+                        fi
+                    done
+                fi
+                press_enter
+                ;;
+            3)
+                echo ""
+                local all_config_users=($(get_config_users))
+                for user in "${all_config_users[@]}"; do
+                    if user_exists "$user"; then
+                        run_query "" "GRANT ALL PRIVILEGES ON *.* TO '$user'@'%' WITH GRANT OPTION"
+                        run_query "" "FLUSH PRIVILEGES"
+                        print_success "Granted full privileges to: $user"
+                    fi
+                done
+                press_enter
+                ;;
+            4)
+                echo ""
+                print_info "Fixing all database and user issues..."
+                echo ""
+                
+                # Create missing databases
+                for db in "${DBS[@]}"; do
+                    if ! db_exists "$db"; then
+                        run_query "" "CREATE DATABASE IF NOT EXISTS \`$db\`"
+                        print_success "Created database: $db"
+                    fi
+                done
+                
+                # Create missing users and grant privileges
+                local db_pass="${MYSQL_PASSWORD:-}"
+                local all_users=($(get_config_users))
+                
+                for user in "${all_users[@]}"; do
+                    if ! user_exists "$user"; then
+                        if [ -n "$db_pass" ]; then
+                            run_query "" "CREATE USER IF NOT EXISTS '$user'@'%' IDENTIFIED BY '$db_pass'"
+                            print_success "Created user: $user"
+                        fi
+                    fi
+                    
+                    if user_exists "$user"; then
+                        run_query "" "GRANT ALL PRIVILEGES ON *.* TO '$user'@'%' WITH GRANT OPTION"
+                        print_success "Granted privileges to: $user"
+                    fi
+                done
+                
+                run_query "" "FLUSH PRIVILEGES"
+                echo ""
+                print_success "All issues fixed!"
+                press_enter
+                ;;
+            5)
+                echo ""
+                read -p "  Enter username to create: " new_user
+                if [ -n "$new_user" ]; then
+                    read -p "  Enter password (or press enter for random): " new_pass
+                    if [ -z "$new_pass" ]; then
+                        new_pass=$(openssl rand -base64 48 | tr -dc 'a-zA-Z0-9' | fold -w 32 | head -n 1)
+                        print_warning "Generated password: $new_pass"
+                    fi
+                    
+                    run_query "" "CREATE USER IF NOT EXISTS '$new_user'@'%' IDENTIFIED BY '$new_pass'"
+                    run_query "" "GRANT ALL PRIVILEGES ON *.* TO '$new_user'@'%' WITH GRANT OPTION"
+                    run_query "" "FLUSH PRIVILEGES"
+                    
+                    if [ $? -eq 0 ]; then
+                        print_success "Created user: $new_user with full privileges"
+                    else
+                        print_error "Failed to create user"
+                    fi
+                fi
+                press_enter
+                ;;
+            6)
+                echo ""
+                read -p "  Enter username to delete: " del_user
+                if [ -n "$del_user" ]; then
+                    if [ "$del_user" = "root" ]; then
+                        print_error "Cannot delete root user!"
+                    else
+                        read -p "  Are you sure you want to delete '$del_user'? (y/n) [n]: " confirm
+                        if [ "$confirm" = "y" ]; then
+                            run_query "" "DROP USER IF EXISTS '$del_user'@'%'"
+                            run_query "" "DROP USER IF EXISTS '$del_user'@'localhost'"
+                            run_query "" "FLUSH PRIVILEGES"
+                            print_success "Deleted user: $del_user"
+                        fi
+                    fi
+                fi
+                press_enter
+                ;;
+            7)
+                echo ""
+                read -p "  Enter username to show grants for: " show_user
+                if [ -n "$show_user" ]; then
+                    echo ""
+                    echo "  Grants for '$show_user':"
+                    run_query "" "SHOW GRANTS FOR '$show_user'@'%'" 2>/dev/null | while read grant; do
+                        echo "    $grant"
+                    done
+                fi
+                press_enter
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
 # Main Maintenance Menu
 run_maintenance_mode() {
     # Check connection first
@@ -1155,7 +1458,8 @@ run_maintenance_mode() {
         echo "    2) Map Data Cleanup"
         echo "    3) Nest Management"
         echo "    4) General Database Maintenance"
-        echo "    5) Refresh Status"
+        echo "    5) Database & User Management"
+        echo "    6) Refresh Status"
         echo "    0) Exit"
         echo ""
         read -p "  Select option: " choice
@@ -1165,7 +1469,8 @@ run_maintenance_mode() {
             2) map_data_cleanup_menu ;;
             3) nest_management_menu ;;
             4) general_maintenance_menu ;;
-            5) continue ;;
+            5) db_user_management_menu ;;
+            6) continue ;;
             0) 
                 echo ""
                 print_success "Goodbye!"
@@ -1204,6 +1509,8 @@ main() {
     echo "       - Account cleanup"
     echo "       - Data maintenance"
     echo "       - Database optimization"
+    echo "       - Create missing DBs/users"
+    echo "       - Fix permissions"
     echo ""
     read -p "  Select mode [1-2]: " mode
 

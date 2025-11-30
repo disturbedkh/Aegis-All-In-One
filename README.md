@@ -143,7 +143,7 @@ This repository includes several scripts to help you set up, secure, and maintai
 | `setup.sh` | Initial setup and configuration | First time setup |
 | `nginx-setup.sh` | Security, SSL, and firewall setup | After initial setup for external access |
 | `dbsetup.sh` | Database setup and maintenance | Initial setup or ongoing maintenance |
-| `check.sh` | Configuration validation | Troubleshooting or after changes |
+| `check.sh` | Status dashboard & config validation | Troubleshooting, health checks |
 
 ### Optional Feature Scripts
 
@@ -253,6 +253,16 @@ Interactive dashboard with:
 - List unknown/unnamed nests
 - Label unknown nests with area name or coordinates
 - Delete unknown nests
+
+**Database & User Management:**
+- View required vs existing databases
+- View config users vs database users
+- Create missing databases automatically
+- Create missing users from config files
+- Grant full privileges to users
+- Fix ALL issues with one click
+- Manually create/delete users
+- View user grants and permissions
 - Reset all nests
 
 **General Maintenance:**
@@ -267,21 +277,48 @@ Interactive dashboard with:
 
 ---
 
-### `check.sh` - Configuration Validator
+### `check.sh` - Configuration & Status Checker
 
-Validates your configuration to catch common issues.
+Interactive status dashboard and configuration validator.
 
 ```bash
 sudo bash ./check.sh
 ```
 
-**What it checks:**
+**Interactive Menu Options:**
+1. **Status Dashboard** - Quick system health overview
+2. **Full Configuration Check** - Detailed validation of all settings
+3. **Docker & Container Status** - Check Docker and container health
+4. **Configuration Alignment** - Verify passwords/secrets match
+5. **File & Endpoint Check** - Verify files and service endpoints
+6. **Port Status** - Check which ports are in use
+
+**Command Line Options:**
+```bash
+./check.sh -d    # Status dashboard only
+./check.sh -f    # Full configuration check
+./check.sh -q    # Quick check (non-interactive, for scripts)
+./check.sh -h    # Help
+```
+
+**Status Dashboard Shows:**
+- Docker installation and daemon status
+- Docker Compose availability
+- User permissions and docker group membership
+- MariaDB connection and version
+- Container status (running/stopped/missing)
+- Configuration alignment (passwords, secrets, tokens)
+
+**What it validates:**
 - ✅ Environment variables match across all configs
 - ✅ Database passwords are consistent
 - ✅ API secrets are properly configured
-- ✅ Docker containers are running
+- ✅ Docker and Docker Compose running
+- ✅ Container health status
 - ✅ Required files exist
-- ✅ Service connectivity
+- ✅ Service endpoints configured correctly
+- ✅ User/group permissions
+- ✅ Port availability
 
 ---
 
@@ -618,12 +655,10 @@ Run the configuration checker to ensure everything is properly configured:
 sudo bash ./check.sh
 ```
 
-This validates:
-- ✅ Environment variables match across all configs
-- ✅ Database passwords are consistent
-- ✅ API secrets are properly configured
-- ✅ Docker containers are running
-- ✅ Required files exist
+This provides an interactive menu with:
+- **Status Dashboard** - Quick health overview of Docker, MariaDB, containers
+- **Full Configuration Check** - Detailed validation with pass/warn/fail counts
+- **Quick Check** - Use `./check.sh -q` for non-interactive validation
 
 ### Database Management
 
@@ -640,6 +675,8 @@ sudo bash ./dbsetup.sh
 - Manage unknown nests
 - Optimize and repair tables
 - Purge old statistics and expired data
+- **Create missing databases and users**
+- **Fix user permissions automatically**
 
 **Choose Setup Mode to:**
 - Re-tune MariaDB for your hardware
