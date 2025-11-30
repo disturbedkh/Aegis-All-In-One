@@ -1180,17 +1180,159 @@ docker_restart() {
 
 docker_status() {
     clear
-    echo ""
-    echo "Container Status:"
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                      CONTAINER STATUS"
+    draw_box_bottom
     echo ""
     
-    if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose ps -a
-    else
+    if [ ! -f "docker-compose.yaml" ] && [ ! -f "docker-compose.yml" ]; then
         echo -e "${RED}docker-compose.yaml not found${NC}"
+        press_enter
+        return
     fi
     
-    press_enter
+    # Define expected core services (always should be running)
+    local core_services=("database" "reactmap" "dragonite" "admin" "golbat" "rotom" "koji" "pma" "grafana" "victoriametrics" "vmagent" "xilriws")
+    # Define optional services (might not be deployed)
+    local optional_services=("poracle" "fletchling" "fletchling-tools")
+    
+    # Counters
+    local running=0
+    local stopped=0
+    local missing=0
+    local unhealthy=0
+    
+    # Header
+    echo -e "  ${WHITE}${BOLD}Core Services${NC}"
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────────${NC}"
+    printf "  ${DIM}%-20s %-12s %-20s %-15s${NC}\n" "SERVICE" "STATUS" "UPTIME" "HEALTH"
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────────${NC}"
+    
+    for service in "${core_services[@]}"; do
+        # Get container info
+        local container_info=$(docker ps -a --filter "name=^${service}$" --format "{{.Status}}|{{.State}}|{{.RunningFor}}" 2>/dev/null | head -1)
+        
+        if [ -z "$container_info" ]; then
+            # Container doesn't exist
+            printf "  %-20s ${RED}%-12s${NC} %-20s %-15s\n" "$service" "NOT CREATED" "-" "-"
+            ((missing++))
+        else
+            local status=$(echo "$container_info" | cut -d'|' -f1)
+            local state=$(echo "$container_info" | cut -d'|' -f2)
+            local uptime=$(echo "$container_info" | cut -d'|' -f3)
+            
+            # Parse health from status if present
+            local health="-"
+            if [[ "$status" == *"(healthy)"* ]]; then
+                health="${GREEN}healthy${NC}"
+            elif [[ "$status" == *"(unhealthy)"* ]]; then
+                health="${RED}unhealthy${NC}"
+                ((unhealthy++))
+            elif [[ "$status" == *"(health:"* ]]; then
+                health="${YELLOW}starting${NC}"
+            fi
+            
+            # Clean up uptime display
+            uptime=$(echo "$uptime" | sed 's/About /~/' | sed 's/ ago//' | cut -c1-18)
+            
+            if [ "$state" = "running" ]; then
+                printf "  ${GREEN}●${NC} %-18s ${GREEN}%-12s${NC} %-20s %-15b\n" "$service" "Running" "$uptime" "$health"
+                ((running++))
+            elif [ "$state" = "exited" ]; then
+                # Get exit code
+                local exit_code=$(docker inspect "$service" --format '{{.State.ExitCode}}' 2>/dev/null)
+                if [ "$exit_code" = "0" ]; then
+                    printf "  ${YELLOW}●${NC} %-18s ${YELLOW}%-12s${NC} %-20s %-15s\n" "$service" "Stopped" "-" "Exit: 0"
+                else
+                    printf "  ${RED}●${NC} %-18s ${RED}%-12s${NC} %-20s %-15s\n" "$service" "Stopped" "-" "Exit: $exit_code"
+                fi
+                ((stopped++))
+            elif [ "$state" = "restarting" ]; then
+                printf "  ${YELLOW}●${NC} %-18s ${YELLOW}%-12s${NC} %-20s %-15s\n" "$service" "Restarting" "$uptime" "-"
+                ((unhealthy++))
+            elif [ "$state" = "created" ]; then
+                printf "  ${DIM}●${NC} %-18s ${DIM}%-12s${NC} %-20s %-15s\n" "$service" "Created" "-" "-"
+                ((stopped++))
+            else
+                printf "  ${DIM}●${NC} %-18s ${DIM}%-12s${NC} %-20s %-15s\n" "$service" "$state" "$uptime" "-"
+            fi
+        fi
+    done
+    
+    echo ""
+    echo -e "  ${WHITE}${BOLD}Optional Services${NC}"
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────────${NC}"
+    
+    local optional_found=false
+    for service in "${optional_services[@]}"; do
+        local container_info=$(docker ps -a --filter "name=^${service}$" --format "{{.Status}}|{{.State}}|{{.RunningFor}}" 2>/dev/null | head -1)
+        
+        if [ -n "$container_info" ]; then
+            optional_found=true
+            local status=$(echo "$container_info" | cut -d'|' -f1)
+            local state=$(echo "$container_info" | cut -d'|' -f2)
+            local uptime=$(echo "$container_info" | cut -d'|' -f3)
+            uptime=$(echo "$uptime" | sed 's/About /~/' | sed 's/ ago//' | cut -c1-18)
+            
+            if [ "$state" = "running" ]; then
+                printf "  ${GREEN}●${NC} %-18s ${GREEN}%-12s${NC} %-20s\n" "$service" "Running" "$uptime"
+                ((running++))
+            else
+                printf "  ${YELLOW}●${NC} %-18s ${YELLOW}%-12s${NC} %-20s\n" "$service" "Stopped" "-"
+                ((stopped++))
+            fi
+        fi
+    done
+    
+    if [ "$optional_found" = false ]; then
+        echo -e "  ${DIM}No optional services deployed${NC}"
+    fi
+    
+    # Summary
+    echo ""
+    echo -e "  ${DIM}─────────────────────────────────────────────────────────────────────${NC}"
+    echo ""
+    
+    local total_expected=${#core_services[@]}
+    local total_deployed=$((running + stopped))
+    
+    # Status summary with color coding
+    echo -n "  Summary: "
+    if [ $running -eq $total_expected ]; then
+        echo -e "${GREEN}All $running core services running${NC}"
+    elif [ $running -gt 0 ]; then
+        echo -e "${YELLOW}$running running${NC}, ${RED}$stopped stopped${NC}, ${DIM}$missing not created${NC}"
+    else
+        echo -e "${RED}No services running${NC}"
+    fi
+    
+    if [ $unhealthy -gt 0 ]; then
+        echo -e "  ${RED}⚠ $unhealthy service(s) unhealthy or restarting${NC}"
+    fi
+    
+    if [ $missing -gt 0 ]; then
+        echo ""
+        echo -e "  ${YELLOW}Tip:${NC} Run 'docker compose up -d' to create missing containers"
+    fi
+    
+    if [ $stopped -gt 0 ]; then
+        echo ""
+        echo -e "  ${YELLOW}Tip:${NC} Run 's' to start stopped containers"
+    fi
+    
+    echo ""
+    echo -e "  ${DIM}Press 'r' for raw docker output, Enter to return${NC}"
+    read -p "  " choice
+    
+    if [ "$choice" = "r" ] || [ "$choice" = "R" ]; then
+        echo ""
+        echo -e "  ${CYAN}Raw docker compose output:${NC}"
+        echo ""
+        docker compose ps -a
+        press_enter
+    fi
 }
 
 # =============================================================================
