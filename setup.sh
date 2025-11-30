@@ -1101,6 +1101,9 @@ read -p "  DRAGONITE_PASSWORD [auto-generate]: " DRAGONITE_PASSWORD
 read -p "  DRAGONITE_API_SECRET [auto-generate]: " DRAGONITE_API_SECRET
 [ -z "$DRAGONITE_API_SECRET" ] && DRAGONITE_API_SECRET=$(generate_random 32 'a-zA-Z0-9')
 
+read -p "  PORACLE_API_SECRET [auto-generate]: " PORACLE_API_SECRET
+[ -z "$PORACLE_API_SECRET" ] && PORACLE_API_SECRET=$(generate_random 32 'a-zA-Z0-9')
+
 echo ""
 print_info "Applying secrets to config files..."
 
@@ -1134,6 +1137,9 @@ sed -i "s/SuperSecretAuthBearerForAegisDevices/${ROTOM_AUTH_BEARER}/g" unown/rot
 # Dragonite secrets
 sed -i "s/SuperSecureDragoniteAdminPassword/${DRAGONITE_PASSWORD}/g" .env
 sed -i "s/SuperSecureDragoniteApiSecret/${DRAGONITE_API_SECRET}/g" .env
+
+# Poracle API secret (used by ReactMap to communicate with Poracle)
+sed -i "s/SuperSecurePoracleApiSecret/${PORACLE_API_SECRET}/g" reactmap/local.json
 
 # Restore file ownership to the original user (not root)
 chown "$REAL_USER:$REAL_GROUP" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
