@@ -1984,8 +1984,14 @@ print_info "Using PUID:PGID = $CONTAINER_UID:$CONTAINER_GID for container volume
 fix_directory_permissions() {
     local dir="$1"
     mkdir -p "$dir"
-    chown -R "$CONTAINER_UID:$CONTAINER_GID" "$dir"
-    chmod -R 775 "$dir"
+    # Use sudo if available and needed (directories may be root-owned)
+    if command -v sudo &>/dev/null; then
+        sudo chown -R "$CONTAINER_UID:$CONTAINER_GID" "$dir" 2>/dev/null || chown -R "$CONTAINER_UID:$CONTAINER_GID" "$dir" 2>/dev/null || true
+        sudo chmod -R 775 "$dir" 2>/dev/null || chmod -R 775 "$dir" 2>/dev/null || true
+    else
+        chown -R "$CONTAINER_UID:$CONTAINER_GID" "$dir" 2>/dev/null || true
+        chmod -R 775 "$dir" 2>/dev/null || true
+    fi
 }
 
 # Grafana directory - container runs as PUID:PGID
@@ -2009,7 +2015,24 @@ fix_directory_permissions "unown/rotom_jobs"
 fix_directory_permissions "Shellder/data"
 fix_directory_permissions "Shellder/logs"
 
-print_success "Directories created with PUID:PGID ownership ($CONTAINER_UID:$CONTAINER_GID)"
+# Verify permissions were set correctly
+local perm_issues=0
+for dir in grafana victoriametrics/data vmagent/data unown/logs Shellder/data; do
+    if [ -d "$dir" ]; then
+        local owner_uid=$(stat -c '%u' "$dir" 2>/dev/null || echo "unknown")
+        if [ "$owner_uid" != "$CONTAINER_UID" ]; then
+            print_warning "$dir ownership mismatch (is $owner_uid, should be $CONTAINER_UID)"
+            ((perm_issues++))
+        fi
+    fi
+done
+
+if [ $perm_issues -gt 0 ]; then
+    print_warning "$perm_issues directories may have permission issues"
+    print_info "Run: sudo chown -R $CONTAINER_UID:$CONTAINER_GID grafana victoriametrics vmagent unown Shellder/data Shellder/logs"
+else
+    print_success "Directories created with PUID:PGID ownership ($CONTAINER_UID:$CONTAINER_GID)"
+fi
 
 # Force copy with -f to overwrite any existing files
 cp -f env-default .env && track_file ".env"
