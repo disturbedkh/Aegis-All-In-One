@@ -28,6 +28,17 @@ DIM='\033[2m'
 BOLD='\033[1m'
 NC='\033[0m' # No Color
 
+# Source Shellder logging helper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHELLDER_SCRIPT_NAME="nginx-setup.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "nginx-setup.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Get the original user who called sudo (to prevent files being locked to root)
 # Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then

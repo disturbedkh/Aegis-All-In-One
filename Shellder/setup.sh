@@ -37,6 +37,16 @@ else
     DB_AVAILABLE=false
 fi
 
+# Source Shellder logging helper
+SHELLDER_SCRIPT_NAME="setup.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "setup.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Return to main menu function
 return_to_main() {
     if [ "$SHELLDER_LAUNCHER" = "1" ]; then

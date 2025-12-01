@@ -38,6 +38,16 @@ else
     DB_AVAILABLE=false
 fi
 
+# Source Shellder logging helper
+SHELLDER_SCRIPT_NAME="check.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "check.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Print functions
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_pass() { echo -e "${GREEN}[✓]${NC} $1"; ((PASSED++)); }

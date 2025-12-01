@@ -151,6 +151,50 @@ On launch, Shellder checks your `.env` against stored values and alerts you to a
 
 The validation ensures **only working, verified values** are stored—if a database password doesn't connect, it won't be saved to the database.
 
+### Shellder Logging System
+
+Shellder includes comprehensive logging (`Shellder/shellder.log`) that captures:
+
+- **Session starts/ends** with timestamps and duration
+- **User actions** (menu selections, Docker operations)
+- **Errors with context** (line numbers, function stack, suggestions)
+- **System state snapshots** on crashes (memory, disk, containers)
+- **Signal handling** (Ctrl+C, kills, terminal close)
+
+**Log Format (Human-Readable):**
+```
+[2024-12-01 14:30:45] [INFO ] [setup.sh] Starting initial setup
+[2024-12-01 14:30:46] [ERROR] [setup.sh] Database connection failed
+    Technical: Exit code 1, mysql command returned error
+    Suggestion: Check database credentials and connection
+```
+
+**Using the Log Helper:**
+```bash
+# View recent log entries
+bash Shellder/log_helper.sh --view 50
+
+# View only errors
+bash Shellder/log_helper.sh --errors
+
+# Export for AI assistance (creates formatted file)
+bash Shellder/log_helper.sh --export
+
+# Export only errors for AI debugging
+bash Shellder/log_helper.sh --export-error
+
+# Show log file size
+bash Shellder/log_helper.sh --size
+
+# Clear logs
+bash Shellder/log_helper.sh --clear
+```
+
+**When Errors Occur:**
+1. Run `bash Shellder/log_helper.sh --export-error`
+2. Open the created file (`Shellder/shellder_error_export.txt`)
+3. Copy contents and paste into chat with AI assistant for debugging help
+
 ### Shellder Scripts
 
 | Script | Purpose | When to Run |

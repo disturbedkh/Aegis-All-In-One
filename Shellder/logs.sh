@@ -38,6 +38,16 @@ else
     DB_AVAILABLE=false
 fi
 
+# Source Shellder logging helper
+SHELLDER_SCRIPT_NAME="logs.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "logs.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Error patterns for categorization
 declare -A ERROR_PATTERNS
 ERROR_PATTERNS=(

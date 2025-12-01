@@ -65,6 +65,16 @@ if [ -f "$SCRIPT_DIR/db_helper.sh" ]; then
     source "$SCRIPT_DIR/db_helper.sh"
 fi
 
+# Source Shellder logging helper
+SHELLDER_SCRIPT_NAME="dbsetup.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "dbsetup.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Get the original user who called sudo (to prevent files being locked to root)
 # Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then

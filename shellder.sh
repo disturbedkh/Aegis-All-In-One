@@ -52,6 +52,15 @@ else
     DB_AVAILABLE=false
 fi
 
+# Source Shellder logging helper
+SHELLDER_SCRIPT_NAME="shellder.sh"
+if [ -f "$SCRIPT_DIR/Shellder/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/Shellder/log_helper.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Track config alerts shown this session to avoid repetition
 CONFIG_ALERT_SHOWN=false
 
@@ -1314,12 +1323,19 @@ docker_start() {
     echo "Starting all containers..."
     echo ""
     
+    [ "$LOG_AVAILABLE" = "true" ] && log_user_action "Start all containers"
+    
     if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose up -d
-        echo ""
-        echo -e "${GREEN}✓ Containers started${NC}"
+        if docker compose up -d 2>&1; then
+            echo ""
+            echo -e "${GREEN}✓ Containers started${NC}"
+            [ "$LOG_AVAILABLE" = "true" ] && log_docker "start" "all" "Success"
+        else
+            [ "$LOG_AVAILABLE" = "true" ] && log_error "Failed to start containers" "docker compose up -d failed"
+        fi
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "docker-compose.yaml not found" "" "Run from Aegis AIO directory"
     fi
     
     press_enter
@@ -1331,13 +1347,20 @@ docker_stop() {
     echo "Stopping all containers..."
     echo ""
     
+    [ "$LOG_AVAILABLE" = "true" ] && log_user_action "Stop all containers"
+    
     if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose stop
-        echo ""
-        echo -e "${GREEN}✓ Containers stopped${NC}"
-        echo -e "${DIM}(Containers preserved - use 'docker compose down' to remove them)${NC}"
+        if docker compose stop 2>&1; then
+            echo ""
+            echo -e "${GREEN}✓ Containers stopped${NC}"
+            echo -e "${DIM}(Containers preserved - use 'docker compose down' to remove them)${NC}"
+            [ "$LOG_AVAILABLE" = "true" ] && log_docker "stop" "all" "Success"
+        else
+            [ "$LOG_AVAILABLE" = "true" ] && log_error "Failed to stop containers" "docker compose stop failed"
+        fi
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "docker-compose.yaml not found"
     fi
     
     press_enter
@@ -1349,12 +1372,19 @@ docker_restart() {
     echo "Restarting all containers..."
     echo ""
     
+    [ "$LOG_AVAILABLE" = "true" ] && log_user_action "Restart all containers"
+    
     if [ -f "docker-compose.yaml" ] || [ -f "docker-compose.yml" ]; then
-        docker compose restart
-        echo ""
-        echo -e "${GREEN}✓ Containers restarted${NC}"
+        if docker compose restart 2>&1; then
+            echo ""
+            echo -e "${GREEN}✓ Containers restarted${NC}"
+            [ "$LOG_AVAILABLE" = "true" ] && log_docker "restart" "all" "Success"
+        else
+            [ "$LOG_AVAILABLE" = "true" ] && log_error "Failed to restart containers" "docker compose restart failed"
+        fi
     else
         echo -e "${RED}docker-compose.yaml not found${NC}"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "docker-compose.yaml not found"
     fi
     
     press_enter
@@ -2271,6 +2301,8 @@ run_script() {
     local script=$1
     local name=$2
     
+    [ "$LOG_AVAILABLE" = "true" ] && log_user_action "Launching script" "$name ($script)"
+    
     if [ -f "$SCRIPT_DIR/Shellder/$script" ]; then
         clear
         echo ""
@@ -2281,12 +2313,17 @@ run_script() {
         # Run the script with environment variables to:
         # - Indicate it was launched from shellder.sh (SHELLDER_LAUNCHER)
         # - Pass the original user info (REAL_USER, REAL_GROUP) to prevent root-locked files
+        # - Pass session ID for log correlation
         # Note: We don't use sudo here because shellder.sh is already running as root
-        SHELLDER_LAUNCHER=1 REAL_USER="$REAL_USER" REAL_GROUP="$REAL_GROUP" bash "$SCRIPT_DIR/Shellder/$script"
+        SHELLDER_LAUNCHER=1 REAL_USER="$REAL_USER" REAL_GROUP="$REAL_GROUP" SHELLDER_SESSION_ID="$SHELLDER_SESSION_ID" bash "$SCRIPT_DIR/Shellder/$script"
+        local exit_code=$?
+        
+        [ "$LOG_AVAILABLE" = "true" ] && log_info "Script completed: $script" "Exit code: $exit_code"
         
         # Script completed - no need for extra prompt since scripts handle their own exit
     else
         echo ""
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Script not found: Shellder/$script"
         echo -e "${RED}Script not found: Shellder/$script${NC}"
         press_enter
     fi
@@ -2355,11 +2392,18 @@ check_config_on_launch() {
 # =============================================================================
 
 main() {
+    # Initialize logging
+    if [ "$LOG_AVAILABLE" = "true" ]; then
+        init_logging "shellder.sh"
+        log_info "Shellder Control Panel starting" "Version: $VERSION"
+    fi
+    
     # Check if we're in the right directory
     if [ ! -f "docker-compose.yaml" ] && [ ! -f "docker-compose.yml" ]; then
         echo ""
         echo -e "${RED}Error: Please run this script from the Aegis AIO directory${NC}"
         echo ""
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Not in Aegis AIO directory" "docker-compose.yaml not found" "Run from the Aegis AIO installation directory"
         exit 1
     fi
     

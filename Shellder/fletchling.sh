@@ -22,6 +22,17 @@ print_warning() { echo -e "${YELLOW}[!]${NC} $1"; }
 print_error() { echo -e "${RED}[✗]${NC} $1"; }
 print_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
 
+# Source Shellder logging helper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+SHELLDER_SCRIPT_NAME="fletchling.sh"
+if [ -f "$SCRIPT_DIR/log_helper.sh" ]; then
+    source "$SCRIPT_DIR/log_helper.sh"
+    init_logging "fletchling.sh"
+    LOG_AVAILABLE=true
+else
+    LOG_AVAILABLE=false
+fi
+
 # Return to main menu function
 return_to_main() {
     if [ "$SHELLDER_LAUNCHER" = "1" ]; then
