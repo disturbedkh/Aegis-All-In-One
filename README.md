@@ -253,6 +253,26 @@ Shellder includes a web-based GUI for managing your Aegis AIO installation from 
 - 🔄 Pull updates from GitHub
 - 💾 System resource monitoring
 
+**External Access with Nginx (Password Protected):**
+
+To make Shellder GUI accessible externally via subdomain with SSL and password protection:
+
+```bash
+# Run nginx-setup.sh in maintenance mode
+sudo bash Shellder/nginx-setup.sh
+
+# Select: 2) Maintenance Mode
+# Select: 2) Site Management
+# Select: s) Setup Shellder GUI (Web Dashboard)
+
+# Follow the prompts to configure:
+# - Subdomain (e.g., shellder.yourdomain.com)
+# - Password protection (recommended)
+# - SSL certificate via Let's Encrypt
+```
+
+After setup, access at `https://shellder.yourdomain.com` with your configured credentials.
+
 ### MariaDB Management System
 
 The Database Manager (`Shellder/dbsetup.sh`) provides two modes:

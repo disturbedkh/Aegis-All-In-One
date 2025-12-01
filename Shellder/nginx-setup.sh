@@ -407,6 +407,8 @@ site_management_menu() {
         echo "    5) Add new nginx site"
         echo "    6) Delete site"
         echo ""
+        echo -e "    ${CYAN}s) Setup Shellder GUI (Web Dashboard)${NC}"
+        echo ""
         echo "    t) Test configuration"
         echo "    r) Reload Nginx"
         echo ""
@@ -421,6 +423,7 @@ site_management_menu() {
             4) edit_site_config ;;
             5) add_new_site ;;
             6) delete_site ;;
+            s|S) setup_shellder_gui_nginx ;;
             t|T)
                 echo ""
                 nginx -t
@@ -434,6 +437,227 @@ site_management_menu() {
             0|"") return ;;
         esac
     done
+}
+
+# =============================================================================
+# SHELLDER GUI NGINX SETUP
+# =============================================================================
+
+setup_shellder_gui_nginx() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "          SHELLDER GUI - NGINX CONFIGURATION"
+    draw_box_divider
+    draw_box_line "  Configure external access to Shellder web dashboard"
+    draw_box_line "  with SSL and password protection"
+    draw_box_bottom
+    echo ""
+    
+    # Check if Shellder GUI exists
+    local GUI_SERVER="$SCRIPT_DIR/gui_server.py"
+    if [ ! -f "$GUI_SERVER" ]; then
+        print_error "Shellder GUI server not found at $GUI_SERVER"
+        press_enter
+        return
+    fi
+    
+    # Get subdomain
+    echo -e "  ${WHITE}${BOLD}Step 1: Configure Subdomain${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+    
+    # Try to detect base domain from existing configs
+    local detected_domain=""
+    if [ -f "/etc/nginx/sites-available/aegis-reactmap" ]; then
+        detected_domain=$(grep "server_name" /etc/nginx/sites-available/aegis-reactmap 2>/dev/null | head -1 | awk '{print $2}' | sed 's/;$//' | sed 's/^[^.]*\.//')
+    fi
+    
+    if [ -n "$detected_domain" ]; then
+        echo -e "  Detected domain: ${CYAN}$detected_domain${NC}"
+        read -p "  Use this domain? (y/n) [y]: " use_detected
+        use_detected=${use_detected:-y}
+        if [ "$use_detected" = "y" ]; then
+            BASE_DOMAIN="$detected_domain"
+        else
+            read -p "  Enter your base domain (e.g., example.com): " BASE_DOMAIN
+        fi
+    else
+        read -p "  Enter your base domain (e.g., example.com): " BASE_DOMAIN
+    fi
+    
+    if [ -z "$BASE_DOMAIN" ]; then
+        print_error "Domain cannot be empty"
+        press_enter
+        return
+    fi
+    
+    read -p "  Enter subdomain for Shellder GUI [shellder]: " SHELLDER_SUBDOMAIN
+    SHELLDER_SUBDOMAIN=${SHELLDER_SUBDOMAIN:-shellder}
+    
+    local FULL_DOMAIN="${SHELLDER_SUBDOMAIN}.${BASE_DOMAIN}"
+    echo ""
+    echo -e "  Shellder GUI will be accessible at: ${CYAN}https://${FULL_DOMAIN}${NC}"
+    echo ""
+    
+    # Password protection
+    echo -e "  ${WHITE}${BOLD}Step 2: Password Protection${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+    
+    read -p "  Enable password protection? (recommended) (y/n) [y]: " ENABLE_AUTH
+    ENABLE_AUTH=${ENABLE_AUTH:-y}
+    
+    local AUTH_BLOCK=""
+    if [ "$ENABLE_AUTH" = "y" ]; then
+        # Check if htpasswd exists
+        if ! command -v htpasswd &> /dev/null; then
+            print_info "Installing apache2-utils for htpasswd..."
+            apt-get update -qq && apt-get install -y apache2-utils -qq
+        fi
+        
+        # Create or update password file
+        local HTPASSWD_FILE="/etc/nginx/.htpasswd-shellder"
+        
+        read -p "  Enter username for Shellder GUI [admin]: " AUTH_USER
+        AUTH_USER=${AUTH_USER:-admin}
+        
+        echo ""
+        echo -e "  ${DIM}Enter password for ${AUTH_USER}:${NC}"
+        htpasswd -c "$HTPASSWD_FILE" "$AUTH_USER"
+        
+        if [ $? -eq 0 ]; then
+            print_success "Password file created at $HTPASSWD_FILE"
+            chmod 640 "$HTPASSWD_FILE"
+            chown root:www-data "$HTPASSWD_FILE" 2>/dev/null || chown root:nginx "$HTPASSWD_FILE" 2>/dev/null
+            
+            AUTH_BLOCK="
+        auth_basic \"Shellder Control Panel\";
+        auth_basic_user_file $HTPASSWD_FILE;"
+        else
+            print_error "Failed to create password file"
+            press_enter
+            return
+        fi
+    fi
+    echo ""
+    
+    # SSL option
+    echo -e "  ${WHITE}${BOLD}Step 3: SSL Certificate${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+    
+    read -p "  Configure SSL with Let's Encrypt? (y/n) [y]: " SETUP_SSL
+    SETUP_SSL=${SETUP_SSL:-y}
+    echo ""
+    
+    # Create nginx configuration
+    echo -e "  ${WHITE}${BOLD}Step 4: Creating Nginx Configuration${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    echo ""
+    
+    local CONFIG_FILE="/etc/nginx/sites-available/shellder-gui"
+    
+    cat > "$CONFIG_FILE" << EOF
+# Shellder GUI - Web Dashboard for Aegis AIO
+# Generated by nginx-setup.sh on $(date)
+# Access at: https://${FULL_DOMAIN}
+
+server {
+    listen 80;
+    server_name ${FULL_DOMAIN};
+
+    location / {
+        proxy_pass http://127.0.0.1:5000;
+        proxy_http_version 1.1;
+        proxy_set_header Host \$host;
+        proxy_set_header X-Real-IP \$remote_addr;
+        proxy_set_header X-Forwarded-For \$proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto \$scheme;
+        proxy_set_header Upgrade \$http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;
+        ${AUTH_BLOCK}
+    }
+    
+    # Static files
+    location /static {
+        proxy_pass http://127.0.0.1:5000/static;
+        proxy_cache_valid 200 1d;
+        ${AUTH_BLOCK}
+    }
+}
+EOF
+    
+    print_success "Created nginx config: $CONFIG_FILE"
+    
+    # Enable the site
+    ln -sf "$CONFIG_FILE" /etc/nginx/sites-enabled/shellder-gui
+    print_success "Enabled shellder-gui site"
+    
+    # Test nginx configuration
+    if nginx -t 2>/dev/null; then
+        print_success "Nginx configuration test passed"
+        systemctl reload nginx
+        print_success "Nginx reloaded"
+    else
+        print_error "Nginx configuration test failed"
+        nginx -t
+        press_enter
+        return
+    fi
+    
+    # SSL setup
+    if [ "$SETUP_SSL" = "y" ]; then
+        echo ""
+        print_info "Setting up SSL certificate..."
+        
+        if command -v certbot &> /dev/null; then
+            certbot --nginx -d "$FULL_DOMAIN" --non-interactive --agree-tos --redirect \
+                --register-unsafely-without-email 2>/dev/null || \
+            certbot --nginx -d "$FULL_DOMAIN"
+            
+            if [ $? -eq 0 ]; then
+                print_success "SSL certificate installed for $FULL_DOMAIN"
+            else
+                print_warn "SSL setup may require manual intervention"
+                echo "  Run: sudo certbot --nginx -d $FULL_DOMAIN"
+            fi
+        else
+            print_warn "Certbot not installed. Install with:"
+            echo "  sudo apt install certbot python3-certbot-nginx"
+            echo "  Then run: sudo certbot --nginx -d $FULL_DOMAIN"
+        fi
+    fi
+    
+    # Summary
+    echo ""
+    draw_box_top
+    draw_box_line "          SHELLDER GUI SETUP COMPLETE"
+    draw_box_bottom
+    echo ""
+    echo -e "  ${WHITE}${BOLD}Access Details:${NC}"
+    echo -e "  URL:      ${CYAN}https://${FULL_DOMAIN}${NC}"
+    if [ "$ENABLE_AUTH" = "y" ]; then
+        echo -e "  Username: ${CYAN}${AUTH_USER}${NC}"
+        echo -e "  Password: ${CYAN}(as configured)${NC}"
+    fi
+    echo ""
+    echo -e "  ${WHITE}${BOLD}Important:${NC}"
+    echo -e "  1. Make sure Shellder GUI is running:"
+    echo -e "     ${DIM}./shellderGUI.sh${NC}"
+    echo ""
+    echo -e "  2. Point your DNS A record for ${CYAN}${SHELLDER_SUBDOMAIN}${NC}"
+    echo -e "     to your server's IP address"
+    echo ""
+    echo -e "  ${WHITE}${BOLD}Password Management:${NC}"
+    echo -e "  Change password: ${DIM}sudo htpasswd /etc/nginx/.htpasswd-shellder USERNAME${NC}"
+    echo -e "  Add user:        ${DIM}sudo htpasswd /etc/nginx/.htpasswd-shellder NEWUSER${NC}"
+    echo ""
+    
+    press_enter
 }
 
 enable_site() {
