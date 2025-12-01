@@ -735,7 +735,7 @@ select:focus {
    ============================================================================= */
 
 .modal {
-    display: none;
+    display: none !important;
     position: fixed;
     top: 0;
     left: 0;
@@ -746,6 +746,10 @@ select:focus {
     z-index: 1000;
     align-items: center;
     justify-content: center;
+}
+
+.modal.active {
+    display: flex !important;
 }
 
 .modal.active {
@@ -1942,9 +1946,8 @@ select:focus {
     font-weight: 500;
 }
 
-/* Log Context Modal - Active state styles */
+/* Log Context Modal - Active state additional styles */
 .modal.active {
-    display: flex;
     align-items: center;
     justify-content: center;
     padding: 20px;
