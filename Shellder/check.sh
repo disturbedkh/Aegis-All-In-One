@@ -358,7 +358,11 @@ check_directory_permissions() {
     if [ $issues -gt 0 ]; then
         echo ""
         echo -e "  ${YELLOW}⚠ $issues directories may require permission fixes${NC}"
-        echo -e "  ${DIM}Run: sudo chown -R $REAL_USER:$REAL_USER grafana unown victoriametrics vmagent${NC}"
+        # Get PUID/PGID from .env for proper container ownership
+        local puid="${PUID:-1000}"
+        local pgid="${PGID:-1000}"
+        echo -e "  ${DIM}Fix with: sudo chown -R $puid:$pgid grafana unown victoriametrics vmagent${NC}"
+        echo -e "  ${DIM}(Uses PUID:PGID from .env - containers run as this user)${NC}"
     fi
     
     echo ""
