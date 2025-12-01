@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Aegis All-in-One 2.0 - Configuration & Status Checker
+# Shellder 2.0 - Configuration & Status Checker for Aegis AIO
 # =============================================================================
 # This script provides:
 #   - Status dashboard showing system health at a glance
@@ -38,9 +38,9 @@ print_check() { echo -e "${BLUE}[CHECK]${NC} $1"; }
 print_header() { echo -e "\n${CYAN}━━━ $1 ━━━${NC}\n"; }
 
 # Get the original user who called sudo (to prevent files being locked to root)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    # REAL_USER was passed from aegis.sh - use it
+    # REAL_USER was passed from shellder.sh - use it
     if [ -z "$REAL_GROUP" ]; then
         REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
     fi
@@ -71,9 +71,9 @@ trap cleanup_on_exit EXIT
 
 # Return to main menu function
 return_to_main() {
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0

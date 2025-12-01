@@ -1,9 +1,10 @@
 #!/bin/bash
 
 # =============================================================================
-# Shellder 2.0 - Main Control Panel for Aegis AIO
+# Shellder 1.0 - Main Control Panel for Aegis AIO
 # =============================================================================
-# This is the main entry point for managing your Aegis mapping stack.
+# This is the main entry point for managing your Aegis AIO ecosystem
+# and its Unown# stack.
 # It provides:
 #   - System status overview
 #   - Quick access to all management scripts
@@ -11,7 +12,7 @@
 #   - Help and documentation
 # =============================================================================
 
-VERSION="2.0.0"
+VERSION="1.0"
 
 # Colors
 RED='\033[0;31m'

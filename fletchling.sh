@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Fletchling Setup Script for Aegis All-in-One
+# Shellder - Fletchling Setup Script for Aegis AIO
 # This script configures Fletchling for Pokemon nest tracking with ReactMap
 
 set -e
@@ -24,9 +24,9 @@ print_step() { echo -e "${CYAN}[STEP]${NC} $1"; }
 
 # Return to main menu function
 return_to_main() {
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0
@@ -37,15 +37,15 @@ echo ""
 echo -e "${CYAN}╔══════════════════════════════════════════════════════════════╗${NC}"
 echo -e "${CYAN}║${NC}        ${WHITE}${BOLD}Fletchling Setup - Pokemon Nest Tracking${NC}          ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}                                                              ${CYAN}║${NC}"
-echo -e "${CYAN}║${NC}        ${DIM}Aegis All-in-One by The Pokemod Group${NC}              ${CYAN}║${NC}"
+echo -e "${CYAN}║${NC}        ${DIM}Shellder for Aegis AIO by The Pokemod Group${NC}        ${CYAN}║${NC}"
 echo -e "${CYAN}║${NC}        ${DIM}https://pokemod.dev/${NC}                                ${CYAN}║${NC}"
 echo -e "${CYAN}╚══════════════════════════════════════════════════════════════╝${NC}"
 echo ""
 
 # Get the original user who called sudo (to fix file ownership later)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    # REAL_USER was passed from aegis.sh - use it
+    # REAL_USER was passed from shellder.sh - use it
     if [ -z "$REAL_GROUP" ]; then
         REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
     fi
@@ -360,7 +360,7 @@ if [ -f "./docker-osm-importer.sh" ]; then
     rm -f "$OSM_OUTPUT"
 else
     print_error "docker-osm-importer.sh not found"
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
         read -p "Press Enter to return to main menu..."
         return_to_main
@@ -419,7 +419,7 @@ print_warning "Remember: Nest data takes time to accumulate. Check back after a 
 echo ""
 
 # Return to main menu or exit
-if [ "$AEGIS_LAUNCHER" = "1" ]; then
+if [ "$SHELLDER_LAUNCHER" = "1" ]; then
     echo ""
     read -p "Press Enter to return to main menu..."
     return_to_main

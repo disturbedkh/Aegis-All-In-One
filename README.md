@@ -7,9 +7,9 @@
 ## 📋 Table of Contents
 
 - [Overview](#overview)
+- [Shellder](#shellder)
 - [Architecture](#architecture)
 - [Prerequisites](#prerequisites)
-- [Scripts](#scripts)
 - [Quick Start](#quick-start)
 - [Installation](#installation)
 - [Services](#services)
@@ -47,6 +47,93 @@ This repository provides a complete, pre-configured Docker stack that brings tog
 ### Alternative Stack
 
 Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/The-Pokemod-Group/Atlas-All-In-One).
+
+---
+
+## Shellder
+
+**Shellder** is the shell management system for Aegis AIO — named after the Pokémon! 🐚
+
+### What is Shellder?
+
+Shellder serves as the **unified command center** for your entire Pokémon mapping infrastructure. It's a collection of interactive shell scripts that provide a friendly, menu-driven interface to manage the Aegis AIO ecosystem and its Unown# stack without needing to memorize Docker commands or edit configuration files manually.
+
+### Shellder's Role
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                           SHELLDER                                   │
+│                    Shell Management System                           │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│   │  shellder.sh │  │   setup.sh   │  │   check.sh   │             │
+│   │  Main Panel  │  │ First Setup  │  │ Health Check │             │
+│   └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│   ┌──────────────┐  ┌──────────────┐  ┌──────────────┐             │
+│   │  dbsetup.sh  │  │nginx-setup.sh│  │   logs.sh    │             │
+│   │  Database    │  │  Security    │  │ Log Manager  │             │
+│   └──────────────┘  └──────────────┘  └──────────────┘             │
+│                                                                      │
+│   ┌──────────────┐  ┌──────────────┐                                │
+│   │  poracle.sh  │  │fletchling.sh │  + More...                     │
+│   │   Alerts     │  │    Nests     │                                │
+│   └──────────────┘  └──────────────┘                                │
+│                                                                      │
+├─────────────────────────────────────────────────────────────────────┤
+│                         MANAGES ▼                                    │
+├─────────────────────────────────────────────────────────────────────┤
+│                                                                      │
+│                      AEGIS AIO ECOSYSTEM                             │
+│                                                                      │
+│                        ┌─────────────────────────────────┐          │
+│                        │         UNOWN# STACK            │          │
+│                        │  Dragonite, Golbat, Rotom,      │          │
+│                        │  ReactMap, Koji, Xilriws, etc.  │          │
+│                        └─────────────────────────────────┘          │
+│                                                                      │
+└─────────────────────────────────────────────────────────────────────┘
+```
+
+### Key Functions
+
+| Function | Description |
+|----------|-------------|
+| **Stack Control** | Start, stop, restart, and rebuild all Docker containers with single commands |
+| **Initial Setup** | Guided wizard for first-time configuration, password generation, and database creation |
+| **Security Management** | Nginx reverse proxy, SSL certificates, firewall rules, and authentication setup |
+| **Database Administration** | MariaDB tuning, user management, cleanup, and maintenance operations |
+| **Health Monitoring** | Real-time status dashboard, configuration validation, and troubleshooting tools |
+| **Log Analysis** | View, search, and manage Docker logs across all services |
+| **Update Management** | Git pulls, Docker image updates, and stack rebuilds with config preservation |
+| **Optional Features** | Easy setup for Poracle (alerts) and Fletchling (nest detection) |
+
+### Shellder Scripts
+
+| Script | Purpose | When to Run |
+|--------|---------|-------------|
+| `shellder.sh` | **Main control panel** - unified interface to everything | Anytime |
+| `setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
+| `dbsetup.sh` | Database setup and maintenance | Initial setup or maintenance |
+| `check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
+| `logs.sh` | Docker log viewer, analyzer, and maintenance | Monitoring, debugging |
+| `nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
+| `poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
+| `fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
+
+### Quick Start with Shellder
+
+```bash
+# Launch the Shellder control panel
+sudo bash ./shellder.sh
+
+# Or use command-line shortcuts
+./shellder.sh --start      # Start all containers
+./shellder.sh --stop       # Stop all containers
+./shellder.sh --status     # View status dashboard
+./shellder.sh --help       # See all options
+```
 
 ---
 
@@ -136,127 +223,6 @@ Docker can generate massive log files. The setup script (`setup.sh`) will automa
 This limits logs to 300MB total (3 files × 100MB each) with automatic rotation and compression.
 
 > 💡 **Tip**: The setup script lets you customize these values and will automatically restart Docker to apply the changes.
-
----
-
-## Scripts
-
-This repository includes several scripts to help you set up, secure, and maintain your mapping stack.
-
-### Main Control Panel
-
-| Script | Purpose | When to Run |
-|--------|---------|-------------|
-| `aegis.sh` | **Main control panel** - unified interface to all scripts | Anytime |
-
-Run `sudo bash ./aegis.sh` to access the main menu with system status, all scripts, and Docker controls.
-
-### Core Scripts
-
-| Script | Purpose | When to Run |
-|--------|---------|-------------|
-| `setup.sh` | Initial setup and configuration | First time setup |
-| `nginx-setup.sh` | Security, SSL, and firewall setup | After initial setup for external access |
-| `dbsetup.sh` | Database setup and maintenance | Initial setup or ongoing maintenance |
-| `check.sh` | Status dashboard & config validation | Troubleshooting, health checks |
-| `logs.sh` | Docker log analysis & maintenance | Monitoring, troubleshooting, log cleanup |
-
-### Optional Feature Scripts
-
-| Script | Purpose | When to Run |
-|--------|---------|-------------|
-| `poracle.sh` | Discord/Telegram alert bot setup | When you want notifications |
-| `fletchling.sh` | Nest detection setup | After creating Koji project |
-| `docker-osm-importer.sh` | OpenStreetMap data import | For park/nest data |
-
----
-
-### `aegis.sh` - Main Control Panel
-
-The unified interface for managing your entire Aegis stack.
-
-```bash
-sudo bash ./aegis.sh
-```
-
-**Status Dashboard Shows:**
-- Docker installation and daemon status
-- Docker Compose availability
-- MariaDB status (Docker or local)
-- Container count (running/total)
-- Configuration status (.env file)
-- Nginx configuration status
-- Available scripts detection
-- Git repository update status
-- **Container image update availability**
-
-**Main Menu Options:**
-
-| Category | Option | Description |
-|----------|--------|-------------|
-| **Setup** | 1) Initial Setup | First-time setup wizard |
-| | 2) Database Management | DB setup, maintenance, users |
-| | 3) Security Setup | Nginx, SSL, firewall, auth |
-| **Monitoring** | 4) System Check | Validate configs, check health |
-| | 5) Log Manager | View, analyze, manage logs |
-| **Features** | 6) Poracle Setup | Discord/Telegram alerts |
-| | 7) Fletchling Setup | Nest detection |
-| **Stack** | s) Start Stack | docker compose up -d |
-| | x) Stop Stack | docker compose stop (preserves containers) |
-| | t) Restart Stack | docker compose restart |
-| | c) Container Status | docker compose ps |
-| | v) Container Dashboard | Detailed status + image info |
-| **Services** | +) Start Service(s) | Start individual services |
-| | -) Stop Service(s) | Stop individual services |
-| | *) Restart Service(s) | Restart individual services |
-| **Updates** | i) Pull Images Only | Pull latest images (no restart) |
-| | p) Pull Latest | Git pull only (auto-preserves configs) |
-| | u) Update & Rebuild | Pull, rebuild, restart |
-| | b) Force Rebuild | Rebuild containers from scratch |
-| **Maintenance** | d) Docker Purge | Clean up Docker resources |
-| | z) Uninstall Stack | Remove Aegis stack |
-| **Other** | h) Help | Documentation for all options |
-
-**Command Line Options:**
-```bash
-./aegis.sh              # Interactive menu
-./aegis.sh --status     # Show status dashboard only
-./aegis.sh --start      # Start all containers
-./aegis.sh --stop       # Stop all containers
-./aegis.sh --restart    # Restart all containers
-./aegis.sh --pull-images # Pull latest Docker images (no restart)
-./aegis.sh --pull       # Git pull latest changes (auto-preserves configs)
-./aegis.sh --update     # Pull, rebuild, restart stack
-./aegis.sh --rebuild    # Force rebuild all containers
-./aegis.sh --dashboard  # Detailed container dashboard
-./aegis.sh --help       # Help
-```
-
-**Service Management:**
-Select individual services to start, stop, or restart using comma-separated numbers (e.g., `1,3,5`). Supports all 14 stack services with real-time status display.
-
-**Container Dashboard:**
-Shows detailed status for all services including:
-- Running/Stopped/Not deployed status
-- Image pull status
-- Option to check for image updates from registries
-- Option to pull all latest images
-
-**Docker Purge Options:**
-- Stop & remove Aegis containers only
-- Remove containers + volumes (keeps images)
-- Remove unused Docker images
-- Remove all unused Docker data (system prune)
-- Remove Docker networks
-- Nuclear option - Remove ALL Docker data
-
-**Uninstall Options:**
-- Light uninstall - Remove containers, keep configs
-- Full uninstall - Remove containers + reset configs
-- Complete removal - Delete entire Aegis directory
-
-**Built-in Help System:**
-Press `h` in the menu for detailed documentation on each script and feature.
 
 ---
 
@@ -674,7 +640,7 @@ git clone https://github.com/The-Pokemod-Group/Aegis-All-In-One.git
 cd Aegis-All-In-One
 
 # Launch the main control panel
-sudo bash ./aegis.sh
+sudo bash ./shellder.sh
 ```
 
 The control panel provides a unified interface to:
@@ -898,7 +864,7 @@ Access Xilriws tools via the Log Manager:
 
 ```bash
 # Via main control panel
-sudo bash ./aegis.sh
+sudo bash ./shellder.sh
 # Select option 5) Log Manager, then press 'x'
 
 # Or directly
@@ -1324,8 +1290,8 @@ docker system prune -a
 The scripts automatically preserve your configuration when pulling updates:
 
 ```bash
-# Via aegis.sh (recommended)
-sudo bash ./aegis.sh
+# Via shellder.sh (recommended)
+sudo bash ./shellder.sh
 # Select p) Pull Latest
 
 # Or directly via git

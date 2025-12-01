@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Poracle Setup Script for Aegis All-in-One
+# Shellder - Poracle Setup Script for Aegis AIO
 # =============================================================================
 # This script configures PoracleJS for Discord and/or Telegram notifications
 # for Pokemon spawns, raids, quests, and other Pokemon GO events.
@@ -25,18 +25,18 @@ print_header() { echo -e "\n${CYAN}=== $1 ===${NC}\n"; }
 
 # Return to main menu function
 return_to_main() {
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0
 }
 
 # Get the original user who called sudo (to fix file ownership later)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    # REAL_USER was passed from aegis.sh - use it
+    # REAL_USER was passed from shellder.sh - use it
     if [ -z "$REAL_GROUP" ]; then
         REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
     fi
@@ -116,7 +116,7 @@ is_placeholder() {
 echo ""
 echo "=============================================="
 echo "  Poracle Setup - Pokemon Alert Notifications"
-echo "  Aegis All-in-One by The Pokemod Group"
+echo "  Shellder for Aegis AIO by The Pokemod Group"
 echo "  https://pokemod.dev/"
 echo "=============================================="
 echo ""
@@ -996,7 +996,7 @@ fi
 print_success "Enjoy your Pokemon alerts!"
 
 # Return to main menu or exit
-if [ "$AEGIS_LAUNCHER" = "1" ]; then
+if [ "$SHELLDER_LAUNCHER" = "1" ]; then
     echo ""
     read -p "Press Enter to return to main menu..."
     return_to_main

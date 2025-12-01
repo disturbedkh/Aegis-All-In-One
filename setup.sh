@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Aegis All-in-One 2.0 - Initial Setup Script
+# Shellder 2.0 - Initial Setup Script for Aegis AIO
 # =============================================================================
 # This script handles:
 #   1. Checking/installing Docker and Docker Compose
@@ -30,9 +30,9 @@ print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
 # Return to main menu function
 return_to_main() {
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0
@@ -40,7 +40,7 @@ return_to_main() {
 
 echo ""
 echo "======================================"
-echo "  Aegis All-in-One 2.0 - Setup"
+echo "  Shellder 2.0 - Aegis AIO Setup"
 echo "  By The Pokemod Group"
 echo "  https://pokemod.dev/"
 echo "======================================"
@@ -53,9 +53,9 @@ if [ "$EUID" -ne 0 ]; then
 fi
 
 # Get the original user who called sudo (to fix file ownership later)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-  # REAL_USER was passed from aegis.sh - use it
+  # REAL_USER was passed from shellder.sh - use it
   # REAL_GROUP should also be set, but verify
   if [ -z "$REAL_GROUP" ]; then
     REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
@@ -111,7 +111,7 @@ restore_all_ownership() {
         local files_to_fix=(
             ".env"
             "setup.sh"
-            "aegis.sh"
+            "shellder.sh"
             "README.md"
             "docker-compose.yaml"
             "docker-compose.yml"
@@ -190,7 +190,7 @@ cleanup_on_exit() {
     # Only run cleanup if we have a valid user
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
         # Quick ownership fix on common files
-        chown "$REAL_USER:$REAL_GROUP" .env setup.sh aegis.sh README.md docker-compose.yaml 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" .env setup.sh shellder.sh README.md docker-compose.yaml 2>/dev/null || true
         chown "$REAL_USER:$REAL_GROUP" *.sh *.md *.yaml *.yml *.toml *.json *.txt 2>/dev/null || true
         chown -R "$REAL_USER:$REAL_GROUP" unown reactmap Poracle 2>/dev/null || true
     fi
@@ -2327,7 +2327,7 @@ print_warning "IMPORTANT: Save the credentials above! They won't be shown again.
 echo ""
 
 # Return to main menu or exit
-if [ "$AEGIS_LAUNCHER" = "1" ]; then
+if [ "$SHELLDER_LAUNCHER" = "1" ]; then
     echo ""
     read -p "Press Enter to return to main menu..."
     return_to_main

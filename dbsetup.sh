@@ -1,7 +1,7 @@
 #!/bin/bash
 
 # =============================================================================
-# Aegis All-in-One 2.0 - Database Setup & Maintenance Script
+# Shellder 2.0 - Database Setup & Maintenance Script for Aegis AIO
 # =============================================================================
 # This script has two modes:
 #   SETUP MODE:
@@ -60,9 +60,9 @@ MYSQL_CMD=""
 DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
 
 # Get the original user who called sudo (to prevent files being locked to root)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    # REAL_USER was passed from aegis.sh - use it
+    # REAL_USER was passed from shellder.sh - use it
     if [ -z "$REAL_GROUP" ]; then
         REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
     fi
@@ -624,7 +624,7 @@ show_setup_complete() {
     echo "  3. Access your services via web browser"
     echo ""
     
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
         read -p "  Press Enter to return to main menu..."
         return_to_main
@@ -1520,7 +1520,7 @@ run_maintenance_mode() {
         echo "    4) General Database Maintenance"
         echo "    5) Database & User Management"
         echo "    6) Refresh Status"
-        if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"
         else
             echo "    0) Exit"
@@ -1537,7 +1537,7 @@ run_maintenance_mode() {
             6) continue ;;
             0) 
                 echo ""
-                if [ "$AEGIS_LAUNCHER" = "1" ]; then
+                if [ "$SHELLDER_LAUNCHER" = "1" ]; then
                     return_to_main
                 else
                     print_success "Goodbye!"
@@ -1556,9 +1556,9 @@ return_to_main() {
     # Restore file ownership before exiting
     restore_ownership
     
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0
@@ -1593,7 +1593,7 @@ main() {
         echo "       - Create missing DBs/users"
         echo "       - Fix permissions"
         echo ""
-        if [ "$AEGIS_LAUNCHER" = "1" ]; then
+        if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"
             echo ""
         fi
@@ -1603,7 +1603,7 @@ main() {
             1) run_setup_mode ;;
             2) run_maintenance_mode ;;
             0)
-                if [ "$AEGIS_LAUNCHER" = "1" ]; then
+                if [ "$SHELLDER_LAUNCHER" = "1" ]; then
                     return_to_main
                 fi
                 ;;

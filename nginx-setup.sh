@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Aegis All-in-One Nginx Security & Management Script
+# Shellder - Nginx Security & Management Script for Aegis AIO
 # =============================================================================
 # This script provides:
 #   - SETUP MODE: Full nginx reverse proxy setup with SSL, Fail2Ban, UFW
@@ -29,9 +29,9 @@ BOLD='\033[1m'
 NC='\033[0m' # No Color
 
 # Get the original user who called sudo (to prevent files being locked to root)
-# Check if REAL_USER was passed from aegis.sh (preferred), otherwise use SUDO_USER
+# Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-    # REAL_USER was passed from aegis.sh - use it
+    # REAL_USER was passed from shellder.sh - use it
     if [ -z "$REAL_GROUP" ]; then
         REAL_GROUP=$(id -gn "$REAL_USER" 2>/dev/null || echo "$REAL_USER")
     fi
@@ -1957,7 +1957,7 @@ show_mode_selection() {
     clear
     echo ""
     draw_box_top
-    draw_box_line "          AEGIS NGINX SECURITY & MANAGEMENT SCRIPT"
+    draw_box_line "        SHELLDER NGINX SECURITY & MANAGEMENT SCRIPT"
     draw_box_divider
     draw_box_line "  Choose how you want to use this script:"
     draw_box_bottom
@@ -1998,9 +1998,9 @@ return_to_main() {
         chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml 2>/dev/null || true
     fi
     
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
-        echo -e "${CYAN}Returning to Aegis Control Panel...${NC}"
+        echo -e "${CYAN}Returning to Shellder Control Panel...${NC}"
         sleep 1
     fi
     exit 0
@@ -4594,7 +4594,7 @@ run_setup_mode() {
     print_summary
     
     # Return to main menu or exit
-    if [ "$AEGIS_LAUNCHER" = "1" ]; then
+    if [ "$SHELLDER_LAUNCHER" = "1" ]; then
         echo ""
         read -p "Press Enter to return to main menu..."
         return_to_main
