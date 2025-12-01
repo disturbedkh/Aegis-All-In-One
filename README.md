@@ -43,6 +43,7 @@ This repository provides a complete, pre-configured Docker stack that brings tog
 | **Poracle** | Discord & Telegram alert notifications |
 | **Grafana** | Performance monitoring & statistics |
 | **MariaDB** | Database for all services |
+| **Shellder** | 🆕 Web dashboard, live monitoring & management |
 
 ### Alternative Stack
 
@@ -52,11 +53,46 @@ Looking for Atlas/RDM instead? Check out [Atlas-All-In-One](https://github.com/T
 
 ## Shellder
 
-**Shellder** is the shell management system for Aegis AIO — named after the Pokémon! 🐚
+**Shellder** is the shell management system and web dashboard for Aegis AIO — named after the Pokémon! 🐚
 
 ### What is Shellder?
 
-Shellder serves as the **unified command center** for your entire Pokémon mapping infrastructure. It's a collection of interactive shell scripts that provide a friendly, menu-driven interface to manage the Aegis AIO ecosystem and its Unown# stack without needing to memorize Docker commands or edit configuration files manually.
+Shellder serves as the **unified command center** for your entire Pokémon mapping infrastructure. It includes:
+
+1. **Shell Scripts** - Interactive terminal-based management tools
+2. **Web Dashboard** - Browser-based control panel with live monitoring
+3. **Docker Service** - Containerized service for real-time stats and WebSocket updates
+
+### Shellder Service (Docker Container)
+
+The Shellder service runs as a Docker container providing:
+
+| Feature | Description |
+|---------|-------------|
+| **Web Dashboard** | Modern UI at `http://localhost:5000` |
+| **Live Container Stats** | Real-time CPU, memory, status for all containers |
+| **Xilriws Monitoring** | Live proxy statistics and error tracking |
+| **Log Streaming** | Real-time log aggregation from all services |
+| **WebSocket Updates** | Instant updates without page refresh |
+| **Remote Management** | Start/stop/restart containers from browser |
+
+```bash
+# Start Shellder service (included in docker-compose.yaml)
+docker compose up -d shellder
+
+# Or use the launcher script
+./shellderGUI.sh              # Auto-detect: Docker or local
+./shellderGUI.sh --docker     # Force Docker mode
+./shellderGUI.sh --local      # Force local Python/venv mode
+./shellderGUI.sh --status     # Check status
+./shellderGUI.sh --stop       # Stop service
+
+# Access dashboard at: http://localhost:5000
+```
+
+### Shell Scripts
+
+Shellder also provides interactive shell scripts for terminal-based management:
 
 ### Shellder's Role
 
@@ -229,49 +265,73 @@ bash Shellder/log_helper.sh --clear
 | `Shellder/db_helper.sh` | Shellder's internal SQLite database (stats/config storage) |
 | `Shellder/log_helper.sh` | Shellder's operation log (for debugging Shellder scripts) |
 
-### Shellder GUI (Web Interface)
+### Shellder GUI (Web Dashboard)
 
-Shellder includes a web-based GUI for managing your Aegis AIO installation from a browser.
+Shellder includes a modern web-based dashboard for managing your Aegis AIO installation from a browser.
 
+#### Starting the Dashboard
+
+**Option 1: Docker (Recommended)**
 ```bash
-# Start the GUI server
-./shellderGUI.sh
+# Start via docker compose (with all other services)
+docker compose up -d shellder
 
-# Access at: http://localhost:5000
-# Or from network: http://<your-ip>:5000
-
-# Other commands
-./shellderGUI.sh --stop     # Stop server
-./shellderGUI.sh --status   # Check status
-./shellderGUI.sh --restart  # Restart server
+# Or standalone
+./shellderGUI.sh --docker
 ```
 
-**Features:**
-- 📊 Dashboard with real-time container status
-- 🐳 Start/stop/restart containers
-- 📋 View container logs
-- 🔄 Pull updates from GitHub
-- 💾 System resource monitoring
+**Option 2: Local Python/venv**
+```bash
+./shellderGUI.sh --local
+```
 
-**External Access with Nginx (Password Protected):**
+**Access at:** `http://localhost:5000` or `http://<your-ip>:5000`
 
-To make Shellder GUI accessible externally via subdomain with SSL and password protection:
+#### Dashboard Features
+
+| Feature | Description |
+|---------|-------------|
+| 📊 **Live Dashboard** | Real-time container status with auto-refresh |
+| 🐳 **Container Control** | Start/stop/restart individual or all containers |
+| 📈 **Resource Monitoring** | CPU, memory, disk usage for system and containers |
+| 📋 **Log Viewer** | View and search container logs |
+| 🔄 **Update Manager** | Check for and pull updates from GitHub |
+| 📡 **Xilriws Stats** | Live proxy statistics and error tracking |
+| 🔌 **WebSocket** | Real-time updates without page refresh |
+
+#### External Access (Nginx + Password Protection)
+
+Make the dashboard accessible externally with SSL and authentication:
 
 ```bash
 # Run nginx-setup.sh in maintenance mode
 sudo bash Shellder/nginx-setup.sh
 
-# Select: 2) Maintenance Mode
-# Select: 2) Site Management
-# Select: s) Setup Shellder GUI (Web Dashboard)
+# Navigate to:
+#   2) Maintenance Mode
+#   2) Site Management
+#   s) Setup Shellder GUI (Web Dashboard)
 
-# Follow the prompts to configure:
-# - Subdomain (e.g., shellder.yourdomain.com)
-# - Password protection (recommended)
-# - SSL certificate via Let's Encrypt
+# Configure:
+#   - Subdomain (e.g., shellder.yourdomain.com)
+#   - Password protection (recommended)
+#   - SSL certificate via Let's Encrypt
 ```
 
-After setup, access at `https://shellder.yourdomain.com` with your configured credentials.
+Access at `https://shellder.yourdomain.com` with your configured credentials.
+
+#### Managing Dashboard Users
+
+```bash
+# Change password
+sudo htpasswd /etc/nginx/.htpasswd-shellder admin
+
+# Add user
+sudo htpasswd /etc/nginx/.htpasswd-shellder newuser
+
+# Remove user
+sudo htpasswd -D /etc/nginx/.htpasswd-shellder username
+```
 
 ### MariaDB Management System
 

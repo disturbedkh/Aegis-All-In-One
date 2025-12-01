@@ -275,3 +275,43 @@ services:
     # - ./fletchling:/fletchling/logs
     # - /etc/timezone:/etc/timezone:ro
     # - /etc/localtime:/etc/localtime:ro
+
+# =============================================================================
+# SHELLDER - Control Panel & Live Monitoring Service
+# =============================================================================
+# Web-based dashboard for Aegis AIO with:
+#   - Live container stats and monitoring
+#   - Xilriws proxy statistics
+#   - Log aggregation and streaming
+#   - Real-time WebSocket updates
+# Access at: http://localhost:5000 (or via nginx reverse proxy)
+# =============================================================================
+
+  shellder:
+    build:
+      context: ./Shellder
+      dockerfile: Dockerfile
+    image: shellder:latest
+    container_name: shellder
+    restart: unless-stopped
+    environment:
+      - SHELLDER_PORT=5000
+      - AEGIS_ROOT=/aegis
+      - SECRET_KEY=${SHELLDER_SECRET:-shellder-default-secret}
+    volumes:
+      # Mount Docker socket for container management
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      # Mount Aegis root for access to configs and logs
+      - ./:/aegis:ro
+      # Persistent data storage
+      - ./Shellder/data:/app/data
+      - ./Shellder/logs:/app/logs
+      - /etc/localtime:/etc/localtime:ro
+    ports:
+      - "5000:5000"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:5000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s

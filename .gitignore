@@ -3,3 +3,14 @@ reactmap/local.json
 unown/dragonite_config.toml
 unown/golbat_config.toml
 unown/rotom_config.json
+
+# Shellder
+Shellder/.venv/
+Shellder/data/*
+!Shellder/data/.gitkeep
+Shellder/logs/*
+!Shellder/logs/.gitkeep
+Shellder/.gui_pid
+Shellder/gui_server.log
+Shellder/shellder.db
+Shellder/shellder.log

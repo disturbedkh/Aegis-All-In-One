@@ -495,6 +495,131 @@ quick_check_image_updates() {
 }
 
 # =============================================================================
+# SHELLDER GUI MANAGEMENT
+# =============================================================================
+
+shellder_gui_menu() {
+    while true; do
+        clear
+        draw_logo
+        
+        draw_box_top
+        draw_box_line "                    SHELLDER WEB DASHBOARD"
+        draw_box_bottom
+        echo ""
+        
+        # Check if Docker container is running
+        local docker_status="${RED}●${NC} Not running"
+        if docker ps --format '{{.Names}}' 2>/dev/null | grep -q "^shellder$"; then
+            docker_status="${GREEN}●${NC} Running (Docker)"
+        fi
+        
+        # Check if local process is running
+        local local_status="${RED}●${NC} Not running"
+        local pid_file="$SCRIPT_DIR/Shellder/.gui_pid"
+        if [ -f "$pid_file" ] && ps -p "$(cat "$pid_file")" > /dev/null 2>&1; then
+            local_status="${GREEN}●${NC} Running (PID: $(cat "$pid_file"))"
+        fi
+        
+        echo -e "  ${WHITE}${BOLD}Status${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────────────────────────────${NC}"
+        echo -e "    Docker Container: $docker_status"
+        echo -e "    Local Process:    $local_status"
+        echo ""
+        echo -e "  ${WHITE}Access:${NC} ${CYAN}http://localhost:5000${NC}"
+        echo ""
+        
+        echo -e "  ${WHITE}${BOLD}Actions${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────────────────────────────${NC}"
+        echo ""
+        echo -e "    ${CYAN}Docker Mode (Recommended)${NC}"
+        echo "    1) Start Shellder (Docker container)"
+        echo "    2) Stop Shellder (Docker container)"
+        echo "    3) Restart Shellder (Docker)"
+        echo "    4) View Shellder logs (Docker)"
+        echo "    5) Build/Rebuild Docker image"
+        echo ""
+        echo -e "    ${CYAN}Local Mode (Alternative)${NC}"
+        echo "    6) Start Shellder (Local Python/venv)"
+        echo "    7) Stop Shellder (Local)"
+        echo ""
+        echo -e "    ${CYAN}Configuration${NC}"
+        echo "    n) Configure Nginx (External Access)"
+        echo ""
+        echo "    0) Back to Main Menu"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                echo ""
+                print_info "Starting Shellder via Docker..."
+                docker compose up -d shellder
+                if [ $? -eq 0 ]; then
+                    print_success "Shellder container started"
+                    echo ""
+                    echo -e "  Access at: ${CYAN}http://localhost:5000${NC}"
+                else
+                    print_error "Failed to start Shellder container"
+                fi
+                press_enter
+                ;;
+            2)
+                echo ""
+                print_info "Stopping Shellder container..."
+                docker compose stop shellder
+                docker compose rm -f shellder 2>/dev/null
+                print_success "Shellder container stopped"
+                press_enter
+                ;;
+            3)
+                echo ""
+                print_info "Restarting Shellder container..."
+                docker compose restart shellder
+                print_success "Shellder container restarted"
+                press_enter
+                ;;
+            4)
+                echo ""
+                echo -e "${CYAN}Shellder container logs (Ctrl+C to exit):${NC}"
+                docker logs -f --tail 100 shellder 2>/dev/null || echo "Container not running"
+                ;;
+            5)
+                echo ""
+                print_info "Building Shellder Docker image..."
+                docker compose build shellder
+                if [ $? -eq 0 ]; then
+                    print_success "Docker image built successfully"
+                else
+                    print_error "Failed to build Docker image"
+                fi
+                press_enter
+                ;;
+            6)
+                echo ""
+                print_info "Starting Shellder locally..."
+                bash "$SCRIPT_DIR/shellderGUI.sh" --local
+                press_enter
+                ;;
+            7)
+                echo ""
+                print_info "Stopping local Shellder..."
+                bash "$SCRIPT_DIR/shellderGUI.sh" --stop
+                press_enter
+                ;;
+            n|N)
+                echo ""
+                print_info "Opening Nginx setup for Shellder GUI..."
+                echo "  Navigate to: Site Management → Setup Shellder GUI"
+                sleep 2
+                run_script "nginx-setup.sh" "Security Setup & Management"
+                ;;
+            0|"") return ;;
+        esac
+    done
+}
+
+# =============================================================================
 # MAIN MENU
 # =============================================================================
 
@@ -517,6 +642,9 @@ show_main_menu() {
     echo ""
     echo -e "  ${CYAN}File Management${NC}"
     echo "    8) File Manager           - Manage files, restore from GitHub"
+    echo ""
+    echo -e "  ${CYAN}Web Dashboard${NC}"
+    echo "    9) Shellder GUI           - Web-based control panel (port 5000)"
     echo ""
     echo -e "  ${CYAN}Stack Controls${NC}"
     echo "    s) Start Stack            - Start all containers"
@@ -2432,6 +2560,8 @@ main() {
             7) run_script "fletchling.sh" "Fletchling Setup" ;;
             # File Management
             8) run_script "files.sh" "File System Manager" ;;
+            # Web Dashboard
+            9) shellder_gui_menu ;;
             # Stack Controls
             s|S) docker_start ;;
             x|X) docker_stop ;;
