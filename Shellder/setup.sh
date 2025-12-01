@@ -2335,11 +2335,79 @@ else
     DB_CREDENTIALS_VERIFIED=true
     
   else
-    print_info "Database container not running."
-    print_info "After running 'docker compose up -d', the user will be created from init/01.sql"
-    print_warning "If database already exists, run 'Shellder/dbsetup.sh' to create the user."
-    DB_CREDENTIALS_VERIFIED=false
-    DB_VERIFY_REASON="database container not running"
+    # Database container not running - start it to verify credentials
+    print_info "Database container not running. Starting it now..."
+    
+    # Start just the database container
+    docker compose up -d database 2>/dev/null
+    
+    if [ $? -eq 0 ]; then
+      print_info "Waiting for MariaDB to initialize (this may take 30-60 seconds on first run)..."
+      
+      # Wait for database to be ready (max 90 seconds)
+      DB_READY=false
+      for i in {1..30}; do
+        sleep 3
+        # Try to connect - detect mysql vs mariadb command
+        MYSQL_CMD="mariadb"
+        if ! docker exec database which mariadb &>/dev/null 2>&1; then
+          MYSQL_CMD="mysql"
+        fi
+        
+        if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "SELECT 1" &>/dev/null 2>&1; then
+          DB_READY=true
+          break
+        fi
+        printf "."
+      done
+      echo ""
+      
+      if [ "$DB_READY" = "true" ]; then
+        print_success "Database container started and ready!"
+        
+        # Now verify/create the user
+        USER_EXISTS=$(docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -N -e "SELECT COUNT(*) FROM mysql.user WHERE User='$DB_USER'" 2>/dev/null)
+        
+        if [ "${USER_EXISTS:-0}" -gt 0 ]; then
+          print_info "User '$DB_USER' already exists."
+        else
+          print_info "Creating database user '$DB_USER'..."
+          SQL="CREATE USER '$DB_USER'@'%' IDENTIFIED BY '$DB_PASSWORD'; "
+          SQL+="GRANT ALL PRIVILEGES ON *.* TO '$DB_USER'@'%' WITH GRANT OPTION; "
+          SQL+="FLUSH PRIVILEGES;"
+          
+          if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
+            print_success "DB user '$DB_USER' created with full privileges."
+          else
+            print_error "Could not create user. Run 'Shellder/dbsetup.sh' after setup completes."
+          fi
+        fi
+        
+        # Create databases
+        DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
+        for db in "${DBS[@]}"; do
+          docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "CREATE DATABASE IF NOT EXISTS \`$db\`" 2>/dev/null
+        done
+        print_success "Databases verified: ${DBS[*]}"
+        
+        DB_CREDENTIALS_VERIFIED=true
+        
+        # Stop the container - user can start full stack when ready
+        print_info "Stopping database container (run 'docker compose up -d' to start full stack)"
+        docker compose stop database 2>/dev/null
+        
+      else
+        print_warning "Database took too long to start."
+        print_info "Credentials will be verified when you run 'docker compose up -d'"
+        DB_CREDENTIALS_VERIFIED=false
+        DB_VERIFY_REASON="database startup timeout"
+      fi
+    else
+      print_warning "Could not start database container."
+      print_info "Run 'docker compose up -d' after setup to start services."
+      DB_CREDENTIALS_VERIFIED=false
+      DB_VERIFY_REASON="docker compose failed"
+    fi
   fi
 fi
 
