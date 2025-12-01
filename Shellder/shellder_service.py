@@ -21,6 +21,25 @@ Or standalone:
     python shellder_service.py
 """
 
+# =============================================================================
+# EVENTLET MUST BE FIRST - Before any other imports!
+# =============================================================================
+# Eventlet monkey_patch() must happen before importing anything else
+# to avoid "monkey_patching after imports" errors
+try:
+    import eventlet
+    eventlet.monkey_patch()
+    ASYNC_MODE = 'eventlet'
+except ImportError:
+    ASYNC_MODE = 'threading'
+except Exception as e:
+    # If eventlet fails, fall back to threading
+    print(f"Warning: eventlet monkey_patch failed: {e}")
+    ASYNC_MODE = 'threading'
+
+# =============================================================================
+# STANDARD LIBRARY IMPORTS
+# =============================================================================
 import os
 import sys
 import json
@@ -34,6 +53,10 @@ from datetime import datetime, timedelta
 from pathlib import Path
 from collections import defaultdict
 from functools import wraps
+
+# =============================================================================
+# THIRD-PARTY IMPORTS
+# =============================================================================
 
 # Flask and WebSocket
 try:
@@ -66,13 +89,6 @@ except ImportError:
     PSUTIL_AVAILABLE = False
     print("Warning: psutil not available, limited system stats")
 
-try:
-    import eventlet
-    eventlet.monkey_patch()
-    ASYNC_MODE = 'eventlet'
-except ImportError:
-    ASYNC_MODE = 'threading'
-
 # =============================================================================
 # CONFIGURATION
 # =============================================================================
@@ -86,14 +102,19 @@ if not AEGIS_ROOT.exists():
     AEGIS_ROOT = SCRIPT_DIR.parent
 
 SHELLDER_DIR = AEGIS_ROOT / 'Shellder'
-SHELLDER_DB = SHELLDER_DIR / 'shellder.db'
-SHELLDER_LOG = SHELLDER_DIR / 'shellder.log'
 TEMPLATES_DIR = SHELLDER_DIR / 'gui_templates'
 STATIC_DIR = SHELLDER_DIR / 'gui_static'
 
-# Data directories
+# Data directories - prefer /app paths in Docker (writable), fall back to Shellder dir
+# Note: /aegis is mounted read-only in Docker, so we MUST use /app/data for writable data
 DATA_DIR = Path('/app/data') if Path('/app/data').exists() else SHELLDER_DIR / 'data'
 LOG_DIR = Path('/app/logs') if Path('/app/logs').exists() else SHELLDER_DIR / 'logs'
+
+# Database and log MUST be in writable directories
+# In Docker: /app/data (mounted from ./Shellder/data)
+# Locally: Shellder/data
+SHELLDER_DB = DATA_DIR / 'shellder.db'
+SHELLDER_LOG = LOG_DIR / 'shellder.log'
 
 # Ensure directories exist (with graceful error handling for permission issues)
 try:
