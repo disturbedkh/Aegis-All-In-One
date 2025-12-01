@@ -665,6 +665,7 @@ show_main_menu() {
     echo "    u) Update & Rebuild       - Pull, rebuild, and restart stack"
     echo ""
     echo -e "  ${CYAN}Maintenance & Cleanup${NC}"
+    echo "    f) Fix Permissions        - Fix directory ownership for containers"
     echo "    d) Docker Purge           - Clean up Docker resources"
     echo "    z) Uninstall Stack        - Remove Aegis stack"
     echo ""
@@ -1170,6 +1171,7 @@ AEGIS_SERVICES=(
     "golbat:Golbat Data Parser"
     "rotom:Rotom Device Manager"
     "koji:Koji Geofence Manager"
+    "shellder:Shellder Dashboard"
     "pma:phpMyAdmin"
     "grafana:Grafana Statistics"
     "victoriametrics:VictoriaMetrics DB"
@@ -2083,6 +2085,136 @@ service_restart_menu() {
 }
 
 # =============================================================================
+# FIX PERMISSIONS
+# =============================================================================
+# Fixes directory ownership for Docker containers that need write access
+# Uses PUID:PGID from .env file (or defaults to 1000:1000)
+
+fix_permissions() {
+    clear
+    draw_logo
+    
+    draw_box_top
+    draw_box_line "                      FIX DIRECTORY PERMISSIONS"
+    draw_box_bottom
+    echo ""
+    
+    # Load PUID/PGID from .env
+    if [ -f ".env" ]; then
+        source .env
+    fi
+    local puid="${PUID:-1000}"
+    local pgid="${PGID:-1000}"
+    
+    echo -e "  Using PUID:PGID = ${CYAN}$puid:$pgid${NC} (from .env)"
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Directories to fix:${NC}"
+    echo -e "  ${DIM}These directories must be writable by containers${NC}"
+    echo ""
+    
+    # Directories that need fixing
+    local dirs=(
+        "grafana:Grafana Statistics"
+        "victoriametrics/data:VictoriaMetrics DB"
+        "vmagent/data:VictoriaMetrics Agent"
+        "unown/logs:Unown Logs"
+        "unown/golbat_cache:Golbat Cache"
+        "unown/rotom_jobs:Rotom Jobs"
+        "Shellder/data:Shellder Data"
+        "Shellder/logs:Shellder Logs"
+    )
+    
+    local issues=0
+    for item in "${dirs[@]}"; do
+        local dir="${item%%:*}"
+        local desc="${item##*:}"
+        
+        if [ -d "$dir" ]; then
+            local owner=$(stat -c '%U' "$dir" 2>/dev/null || echo "unknown")
+            local owner_uid=$(stat -c '%u' "$dir" 2>/dev/null || echo "unknown")
+            
+            if [ "$owner_uid" = "$puid" ]; then
+                printf "  %-25s ${GREEN}✓ OK${NC} (owner: $puid)\n" "$desc:"
+            else
+                printf "  %-25s ${YELLOW}⚠ Needs fix${NC} (owner: $owner_uid, need: $puid)\n" "$desc:"
+                ((issues++))
+            fi
+        else
+            printf "  %-25s ${DIM}Not created yet${NC}\n" "$desc:"
+        fi
+    done
+    
+    echo ""
+    
+    if [ $issues -eq 0 ]; then
+        echo -e "${GREEN}✓ All directory permissions look correct!${NC}"
+        echo ""
+        press_enter
+        return
+    fi
+    
+    echo -e "${YELLOW}Found $issues directories that need permission fixes.${NC}"
+    echo ""
+    echo -e "  1) ${GREEN}Fix all permissions${NC} (recommended)"
+    echo "  2) Fix specific directory"
+    echo "  0) Cancel"
+    echo ""
+    
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1)
+            echo ""
+            echo -e "${CYAN}Fixing all directory permissions...${NC}"
+            echo ""
+            
+            for item in "${dirs[@]}"; do
+                local dir="${item%%:*}"
+                local desc="${item##*:}"
+                
+                if [ -d "$dir" ]; then
+                    mkdir -p "$dir"
+                    sudo chown -R "$puid:$pgid" "$dir"
+                    sudo chmod -R 775 "$dir"
+                    echo -e "  ✓ Fixed $desc ($dir)"
+                else
+                    mkdir -p "$dir"
+                    sudo chown -R "$puid:$pgid" "$dir"
+                    sudo chmod -R 775 "$dir"
+                    echo -e "  ✓ Created and fixed $desc ($dir)"
+                fi
+            done
+            
+            echo ""
+            echo -e "${GREEN}✓ All permissions fixed!${NC}"
+            echo ""
+            echo -e "${CYAN}Tip: Restart affected containers for changes to take effect:${NC}"
+            echo "  docker compose restart grafana victoriametrics vmagent"
+            echo ""
+            ;;
+        2)
+            echo ""
+            echo "  Enter directory path (e.g., grafana):"
+            read -p "  > " dir_path
+            
+            if [ -n "$dir_path" ]; then
+                mkdir -p "$dir_path"
+                sudo chown -R "$puid:$pgid" "$dir_path"
+                sudo chmod -R 775 "$dir_path"
+                echo ""
+                echo -e "${GREEN}✓ Fixed permissions for $dir_path${NC}"
+            fi
+            ;;
+        *)
+            return
+            ;;
+    esac
+    
+    press_enter
+}
+
+# =============================================================================
 # DOCKER PURGE FUNCTIONS
 # =============================================================================
 
@@ -2578,6 +2710,7 @@ main() {
             p|P) git_pull ;;
             u|U) update_and_rebuild ;;
             # Maintenance & Cleanup
+            f|F) fix_permissions ;;
             d|D) docker_purge_menu ;;
             z|Z) uninstall_stack ;;
             # Other

@@ -39,7 +39,7 @@ DIM='\033[2m'
 NC='\033[0m'
 
 # Services to monitor
-SERVICES=("database" "golbat" "dragonite" "rotom" "reactmap" "koji" "admin" "grafana" "pma" "xilriws" "vmagent" "victoriametrics" "poracle" "fletchling")
+SERVICES=("database" "golbat" "dragonite" "rotom" "reactmap" "koji" "admin" "shellder" "grafana" "pma" "xilriws" "vmagent" "victoriametrics" "poracle" "fletchling")
 
 # Source Shellder database helper for persistent statistics
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -481,8 +481,9 @@ count_total_errors() {
     docker logs "$container" 2>&1 | grep -iE "error|err\]|fatal|panic|critical|failed|exception|ERRO|FATL|\[Warning\]|\[Warn\]|Aborted connection" 2>/dev/null > "$temp_file" || true
     
     while IFS= read -r line; do
-        # Always count if it has actual error indicators like error="..."
-        if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+        # Always count if it has actual error indicators
+        # Matches: error="...", Error: ..., ✗ ..., ERRO, FATAL, etc.
+        if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="|^Error:|Error: ✗|ERRO |FATL '; then
             ((count++))
         # Always count database aborted connections
         elif echo "$line" | grep -qE "Aborted connection [0-9]+ to db:"; then
@@ -548,7 +549,8 @@ is_excluded_line() {
     
     # NEVER exclude lines that contain actual error indicators
     # These patterns indicate real errors even if logged at info/warn level
-    if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+    # Matches: error="...", Error: ..., ✗ ..., ERRO, FATAL, etc.
+    if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="|^Error:|Error: ✗|ERRO |FATL |readonly database|attempt to write'; then
         return 1  # Not excluded - this is a real error
     fi
     

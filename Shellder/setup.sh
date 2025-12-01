@@ -1969,39 +1969,47 @@ echo ""
 echo "[6/9] Creating directories and copying config files..."
 
 # Get user's UID/GID for directory permissions
-USER_UID=$(id -u "$REAL_USER" 2>/dev/null || echo "1000")
-USER_GID=$(id -g "$REAL_USER" 2>/dev/null || echo "1000")
+# Get PUID/PGID from .env if exists, otherwise use current user's IDs
+# This ensures containers can write to mounted volumes
+if [ -f ".env" ]; then
+    source .env
+fi
+CONTAINER_UID="${PUID:-$(id -u "$REAL_USER" 2>/dev/null || echo "1000")}"
+CONTAINER_GID="${PGID:-$(id -g "$REAL_USER" 2>/dev/null || echo "1000")}"
 
-# Create directories that Docker containers need to write to
-# These need proper ownership for container users (PUID/PGID from .env)
 print_info "Creating data directories with proper permissions..."
+print_info "Using PUID:PGID = $CONTAINER_UID:$CONTAINER_GID for container volumes"
 
-# Grafana directory - container runs as PUID:PGID (default 1000:1000)
-mkdir -p grafana
-chown -R "$USER_UID:$USER_GID" grafana
-chmod 775 grafana
+# Function to fix directory permissions
+fix_directory_permissions() {
+    local dir="$1"
+    mkdir -p "$dir"
+    chown -R "$CONTAINER_UID:$CONTAINER_GID" "$dir"
+    chmod -R 775 "$dir"
+}
+
+# Grafana directory - container runs as PUID:PGID
+fix_directory_permissions "grafana"
 
 # VictoriaMetrics directories
-mkdir -p victoriametrics/data
-chown -R "$USER_UID:$USER_GID" victoriametrics
-chmod -R 775 victoriametrics
+fix_directory_permissions "victoriametrics/data"
 
 # vmagent directory
-mkdir -p vmagent/data
-chown -R "$USER_UID:$USER_GID" vmagent
-chmod -R 775 vmagent
+fix_directory_permissions "vmagent/data"
 
-# MySQL data directory
+# MySQL data directory (special - MariaDB handles its own permissions)
 mkdir -p mysql_data
 
 # Unown directories (logs, cache, jobs)
-mkdir -p unown/logs
-mkdir -p unown/golbat_cache
-mkdir -p unown/rotom_jobs
-chown -R "$USER_UID:$USER_GID" unown
-chmod -R 775 unown
+fix_directory_permissions "unown/logs"
+fix_directory_permissions "unown/golbat_cache"
+fix_directory_permissions "unown/rotom_jobs"
 
-print_success "Directories created."
+# Shellder data directory
+fix_directory_permissions "Shellder/data"
+fix_directory_permissions "Shellder/logs"
+
+print_success "Directories created with PUID:PGID ownership ($CONTAINER_UID:$CONTAINER_GID)"
 
 # Force copy with -f to overwrite any existing files
 cp -f env-default .env && track_file ".env"
