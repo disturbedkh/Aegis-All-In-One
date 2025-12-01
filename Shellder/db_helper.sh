@@ -1401,7 +1401,22 @@ EOF
 # Delete a stored config value
 delete_config_value() {
     local key="$1"
+    check_sqlite3 || return 1
     sqlite3 "$SHELLDER_DB" "DELETE FROM config_values WHERE config_key = '$key';"
+}
+
+# Clear config values for fresh setup (preserves root credentials)
+# Usage: clear_config_for_setup
+clear_config_for_setup() {
+    check_sqlite3 || return 1
+    
+    # Delete all config values EXCEPT MySQL root credentials
+    # These are preserved because they must match an existing database
+    sqlite3 "$SHELLDER_DB" <<EOF
+DELETE FROM config_values 
+WHERE config_key NOT IN ('MYSQL_ROOT_PASSWORD', 'MYSQL_ROOT_USER');
+EOF
+    return 0
 }
 
 # Clear all config discrepancies

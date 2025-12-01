@@ -2064,6 +2064,14 @@ echo ""
 # Step 7: Generate/prompt for secrets and passwords
 # =============================================================================
 echo "[7/9] Configuring secrets and passwords..."
+echo ""
+
+# Clear old config values from Shellder database (preserves root password)
+if [ "$DB_AVAILABLE" = "true" ] && type clear_config_for_setup &>/dev/null; then
+    print_info "Clearing old configuration values (root password preserved)..."
+    clear_config_for_setup 2>/dev/null
+fi
+
 echo "      (Press enter to auto-generate random values)"
 echo ""
 
@@ -2074,15 +2082,44 @@ generate_random() {
     openssl rand -base64 48 | tr -dc "$charset" | fold -w "$length" | head -n 1
 }
 
-# Database credentials
+# Try to get existing root password from:
+# 1. Existing .env file
+# 2. Shellder stored config
+EXISTING_ROOT_PW=""
+if [ -f ".env" ]; then
+    EXISTING_ROOT_PW=$(grep -E "^MYSQL_ROOT_PASSWORD=" .env 2>/dev/null | cut -d'=' -f2 | tr -d '"'"'" | head -1)
+    # Check it's not a template value
+    if [ "$EXISTING_ROOT_PW" = "V3ryS3cUr3MYSQL_ROOT_P4ssw0rd" ]; then
+        EXISTING_ROOT_PW=""
+    fi
+fi
+if [ -z "$EXISTING_ROOT_PW" ] && [ "$DB_AVAILABLE" = "true" ]; then
+    EXISTING_ROOT_PW=$(get_config_value "MYSQL_ROOT_PASSWORD" 2>/dev/null)
+fi
+
+# Database credentials - these CAN be auto-generated
 read -p "  DB_USER [auto-generate]: " DB_USER
 [ -z "$DB_USER" ] && DB_USER=$(generate_random 16 'a-zA-Z0-9')
 
 read -p "  DB_PASSWORD [auto-generate]: " DB_PASSWORD
 [ -z "$DB_PASSWORD" ] && DB_PASSWORD=$(generate_random 32 'a-zA-Z0-9')
 
-read -p "  MYSQL_ROOT_PASSWORD [auto-generate]: " MYSQL_ROOT_PASSWORD
-[ -z "$MYSQL_ROOT_PASSWORD" ] && MYSQL_ROOT_PASSWORD=$(generate_random 32 'a-zA-Z0-9')
+# Root password - CANNOT be auto-generated, must match existing database
+if [ -n "$EXISTING_ROOT_PW" ]; then
+    echo -e "  MYSQL_ROOT_PASSWORD: ${GREEN}[imported from existing config]${NC}"
+    MYSQL_ROOT_PASSWORD="$EXISTING_ROOT_PW"
+else
+    echo ""
+    echo -e "  ${YELLOW}Note: Root password must match your MariaDB installation.${NC}"
+    echo -e "  ${DIM}If this is a fresh install, enter a new password to be set.${NC}"
+    echo -e "  ${DIM}If MariaDB already exists, enter the existing root password.${NC}"
+    echo ""
+    read -p "  MYSQL_ROOT_PASSWORD (required): " MYSQL_ROOT_PASSWORD
+    while [ -z "$MYSQL_ROOT_PASSWORD" ]; do
+        echo -e "  ${RED}Root password is required.${NC}"
+        read -p "  MYSQL_ROOT_PASSWORD (required): " MYSQL_ROOT_PASSWORD
+    done
+fi
 
 # Service secrets
 read -p "  KOJI_BEARER [auto-generate]: " KOJI_BEARER
