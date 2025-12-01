@@ -291,7 +291,6 @@ services:
     build:
       context: ./Shellder
       dockerfile: Dockerfile
-    image: shellder:latest
     container_name: shellder
     restart: unless-stopped
     environment:
