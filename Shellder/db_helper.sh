@@ -1,10 +1,34 @@
 #!/bin/bash
 
 # =============================================================================
-# Shellder Database Helper Functions
+# Shellder Internal Database (SQLite) - NOT the same as dbsetup.sh!
 # =============================================================================
-# This file provides common SQLite database functions for all Shellder scripts.
-# Source this file to use the database: source "$(dirname "$0")/db_helper.sh"
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  IMPORTANT: This is NOT for your MariaDB/MySQL game databases!         │
+# │                                                                         │
+# │  • For MariaDB setup (Dragonite, Golbat, ReactMap databases):          │
+# │    → Use dbsetup.sh (menu option 2 in Shellder)                        │
+# │                                                                         │
+# │  • This file (db_helper.sh) manages SHELLDER'S OWN SQLite database:    │
+# │    → Stores: proxy stats, error stats, config values, container stats  │
+# │    → File: Shellder/shellder.db                                         │
+# │    → Purpose: Shellder's internal tracking and memory                  │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
+# WHAT THIS MANAGES (Shellder's internal SQLite):
+#   • All-time proxy statistics (survives log clearing)
+#   • Error tracking across sessions
+#   • Container start/stop/crash counts
+#   • Validated configuration values
+#   • System events
+#
+# WHAT THIS DOES NOT MANAGE:
+#   • MariaDB/MySQL databases (use dbsetup.sh)
+#   • Game data (Pokemon, stops, gyms, raids)
+#   • Account data
+#   • Any service databases (Dragonite, Golbat, ReactMap, Koji, Poracle)
+#
 # =============================================================================
 
 # Database file location (in Shellder directory)

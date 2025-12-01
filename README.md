@@ -110,9 +110,16 @@ Shellder serves as the **unified command center** for your entire Pokémon mappi
 | **Update Management** | Git pulls, Docker image updates, and stack rebuilds with config preservation |
 | **Optional Features** | Easy setup for Poracle (alerts) and Fletchling (nest detection) |
 
-### Shellder Statistics Database
+### Shellder Internal Database (SQLite - separate from MariaDB!)
 
-Shellder includes a built-in SQLite database (`Shellder/shellder.db`) that stores persistent statistics and validated configuration values across all scripts. This means you can:
+> **⚠️ This is different from `dbsetup.sh` (MariaDB Database Manager)!**
+>
+> | Tool | Database Type | What It Stores |
+> |------|---------------|----------------|
+> | `dbsetup.sh` | **MariaDB** | Game data (Pokemon, gyms, accounts, raids) |
+> | `db_helper.sh` | **SQLite** | Shellder's internal stats & config tracking |
+
+Shellder includes its own SQLite database (`Shellder/shellder.db`) that stores persistent statistics and validated configuration values. This means you can:
 
 - **View all-time proxy statistics** even after Xilriws logs are cleared
 - **Track historical error counts** by service and error type
@@ -208,13 +215,18 @@ bash Shellder/log_helper.sh --clear
 |--------|---------|-------------|
 | `shellder.sh` | **Main control panel** - unified interface to everything | Anytime |
 | `Shellder/setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
-| `Shellder/dbsetup.sh` | Database setup and maintenance | Initial setup or maintenance |
+| `Shellder/dbsetup.sh` | **MariaDB database** setup/maintenance (game data) | Database management |
 | `Shellder/check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
 | `Shellder/logs.sh` | **Docker container log viewer** (Dragonite, Golbat, etc.) | Monitoring services |
 | `Shellder/nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
 | `Shellder/poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
 | `Shellder/fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
-| `Shellder/log_helper.sh` | **Shellder operation log** (for debugging Shellder itself) | When Shellder crashes |
+
+**Internal Helper Scripts** (not typically run directly):
+| Script | Purpose |
+|--------|---------|
+| `Shellder/db_helper.sh` | Shellder's internal SQLite database (stats/config storage) |
+| `Shellder/log_helper.sh` | Shellder's operation log (for debugging Shellder scripts) |
 
 ### Quick Start with Shellder
 

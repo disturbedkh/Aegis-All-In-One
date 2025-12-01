@@ -1,13 +1,25 @@
 #!/bin/bash
 
 # =============================================================================
-# Shellder 2.0 - Database Setup & Maintenance Script for Aegis AIO
+# Shellder - MariaDB Database Setup & Maintenance (for Aegis AIO services)
 # =============================================================================
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  This script manages your MARIADB/MYSQL databases for Aegis AIO        │
+# │                                                                         │
+# │  Databases managed: dragonite, golbat, reactmap, koji, poracle          │
+# │  Contains: Pokemon data, accounts, gyms, stops, raids, quests, etc.    │
+# │                                                                         │
+# │  NOTE: This is different from db_helper.sh which manages Shellder's    │
+# │        own internal SQLite database (for stats and config tracking).   │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
 # This script has two modes:
+#
 #   SETUP MODE:
 #     - MariaDB installation (if needed)
 #     - System resource detection and MariaDB tuning
-#     - Database creation
+#     - Database creation (dragonite, golbat, reactmap, koji, poracle)
 #     - User creation with proper permissions
 #
 #   MAINTENANCE MODE:
@@ -16,6 +28,8 @@
 #     - Data cleanup (stale pokestops, gyms, spawnpoints)
 #     - Nest management (unknown nests)
 #     - General database maintenance (optimize, analyze, repair)
+#     - Shellder Statistics Database (internal SQLite for Shellder tracking)
+#
 # =============================================================================
 
 # Colors for output
@@ -1538,8 +1552,11 @@ shellder_db_menu() {
         clear
         echo ""
         draw_box_top
-        draw_box_line "         SHELLDER STATISTICS DATABASE"
+        draw_box_line "    SHELLDER INTERNAL DATABASE (SQLite - Not MariaDB)"
         draw_box_bottom
+        echo ""
+        echo -e "  ${DIM}This is Shellder's own database for tracking stats & configs.${NC}"
+        echo -e "  ${DIM}It is separate from your MariaDB game databases above.${NC}"
         echo ""
         
         # Show database info
@@ -1992,14 +2009,18 @@ run_maintenance_mode() {
     while true; do
         show_status_dashboard
 
-        echo "  ${WHITE}${BOLD}Maintenance Options${NC}"
+        echo "  ${WHITE}${BOLD}MariaDB Maintenance Options${NC}"
         echo "  ${DIM}────────────────────────────────────────${NC}"
         echo "    1) Account Cleanup"
         echo "    2) Map Data Cleanup"
         echo "    3) Nest Management"
         echo "    4) General Database Maintenance"
         echo "    5) Database & User Management"
-        echo "    6) Shellder Statistics Database"
+        echo ""
+        echo "  ${WHITE}${BOLD}Shellder Internal (SQLite)${NC}"
+        echo "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    6) Shellder Stats & Config DB (not MariaDB)"
+        echo ""
         echo "    7) Refresh Status"
         if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"
