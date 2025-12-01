@@ -134,6 +134,9 @@ fi
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         print_error "Please run this script as root (e.g., sudo bash Shellder/dbsetup.sh)"
+        echo ""
+        echo "  Press Enter to return..."
+        read -r
         exit 1
     fi
 }
@@ -154,6 +157,9 @@ trap restore_ownership EXIT
 load_env() {
 if [ ! -f ".env" ]; then
         print_error ".env file not found. Have you run the initial setup script?"
+        echo ""
+        echo "  Press Enter to return..."
+        read -r
   exit 1
 fi
 
@@ -2705,6 +2711,10 @@ run_maintenance_mode() {
     setup_mysql_cmd
     if ! test_db_connection; then
         print_error "Cannot connect to MariaDB. Check root password in .env"
+        echo ""
+        echo "  Make sure MariaDB container is running:"
+        echo "    docker compose up -d database"
+        echo ""
         press_enter
         return
     fi
