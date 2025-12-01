@@ -134,6 +134,110 @@ restore_repo_ownership() {
     fi
 }
 
+# =============================================================================
+# DEPENDENCY CHECK
+# =============================================================================
+# Check for optional dependencies and offer to install them
+
+check_shellder_dependencies() {
+    local missing=()
+    local installed_something=false
+    
+    # Check for sqlite3 (used by db_helper.sh for config storage)
+    if ! command -v sqlite3 &> /dev/null; then
+        missing+=("sqlite3")
+    fi
+    
+    # Check for jq (useful for JSON parsing)
+    if ! command -v jq &> /dev/null; then
+        missing+=("jq")
+    fi
+    
+    # If nothing missing, return silently
+    if [ ${#missing[@]} -eq 0 ]; then
+        return 0
+    fi
+    
+    # Detect package manager
+    local pkg_cmd=""
+    local pkg_name_sqlite="sqlite3"
+    local pkg_name_jq="jq"
+    
+    if command -v apt-get &> /dev/null; then
+        pkg_cmd="apt-get install -y"
+    elif command -v dnf &> /dev/null; then
+        pkg_cmd="dnf install -y"
+        pkg_name_sqlite="sqlite"
+    elif command -v yum &> /dev/null; then
+        pkg_cmd="yum install -y"
+        pkg_name_sqlite="sqlite"
+    elif command -v pacman &> /dev/null; then
+        pkg_cmd="pacman -S --noconfirm"
+        pkg_name_sqlite="sqlite"
+    fi
+    
+    # If we can't detect package manager, skip
+    if [ -z "$pkg_cmd" ]; then
+        return 0
+    fi
+    
+    # Check if we have sudo/root access
+    if [ "$EUID" -ne 0 ] && ! sudo -n true 2>/dev/null; then
+        # No sudo access, skip silently
+        return 0
+    fi
+    
+    # Show what's missing and offer to install
+    echo ""
+    echo -e "${YELLOW}━━━ Optional Dependencies ━━━${NC}"
+    echo ""
+    echo -e "  The following optional tools are not installed:"
+    for dep in "${missing[@]}"; do
+        case $dep in
+            sqlite3) echo -e "    • ${CYAN}sqlite3${NC} - Enables persistent config storage" ;;
+            jq)      echo -e "    • ${CYAN}jq${NC} - Improves JSON file handling" ;;
+        esac
+    done
+    echo ""
+    echo -e "  These are optional but improve Shellder functionality."
+    echo ""
+    read -p "  Install missing dependencies? (y/n) [y]: " install_deps
+    
+    if [ "$install_deps" != "n" ] && [ "$install_deps" != "N" ]; then
+        echo ""
+        for dep in "${missing[@]}"; do
+            local pkg_name="$dep"
+            [ "$dep" = "sqlite3" ] && pkg_name="$pkg_name_sqlite"
+            [ "$dep" = "jq" ] && pkg_name="$pkg_name_jq"
+            
+            echo -e "  Installing ${CYAN}$dep${NC}..."
+            if [ "$EUID" -eq 0 ]; then
+                $pkg_cmd $pkg_name >/dev/null 2>&1
+            else
+                sudo $pkg_cmd $pkg_name >/dev/null 2>&1
+            fi
+            
+            if [ $? -eq 0 ]; then
+                echo -e "  ${GREEN}✓${NC} $dep installed"
+                installed_something=true
+            else
+                echo -e "  ${YELLOW}⚠${NC} Could not install $dep (non-critical)"
+            fi
+        done
+        echo ""
+        
+        # Re-source db_helper if sqlite3 was just installed
+        if $installed_something && [ -f "$SCRIPT_DIR/Shellder/db_helper.sh" ]; then
+            source "$SCRIPT_DIR/Shellder/db_helper.sh"
+            DB_AVAILABLE=true
+            # Reset the sqlite3 check cache
+            SQLITE3_AVAILABLE=""
+        fi
+    fi
+    
+    sleep 1
+}
+
 # Source Shellder database helper for config management
 if [ -f "$SCRIPT_DIR/Shellder/db_helper.sh" ]; then
     source "$SCRIPT_DIR/Shellder/db_helper.sh"
@@ -2906,6 +3010,9 @@ main() {
     # CRITICAL: Fix any root-locked files from previous sudo runs
     # This runs silently on startup to prevent permission issues
     restore_repo_ownership
+    
+    # Check and install missing dependencies
+    check_shellder_dependencies
     
     # Check configuration on first launch
     check_config_on_launch
