@@ -112,9 +112,36 @@ CREATE TABLE IF NOT EXISTS db_metadata (
     updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
 );
 
+-- Configuration values table (stores user-entered config for cross-checking)
+CREATE TABLE IF NOT EXISTS config_values (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key TEXT UNIQUE NOT NULL,
+    config_value TEXT NOT NULL,
+    source_file TEXT,
+    description TEXT,
+    is_secret INTEGER DEFAULT 0,
+    first_set DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_verified DATETIME DEFAULT CURRENT_TIMESTAMP,
+    last_mismatch DATETIME,
+    mismatch_count INTEGER DEFAULT 0,
+    verified_match INTEGER DEFAULT 1
+);
+
+-- Configuration discrepancy log
+CREATE TABLE IF NOT EXISTS config_discrepancies (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_key TEXT NOT NULL,
+    expected_value TEXT,
+    found_value TEXT,
+    source_file TEXT,
+    detected_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+    resolved INTEGER DEFAULT 0,
+    resolved_at DATETIME
+);
+
 -- Insert or update database version
 INSERT OR REPLACE INTO db_metadata (key, value, updated_at) 
-VALUES ('version', '1.0', CURRENT_TIMESTAMP);
+VALUES ('version', '1.1', CURRENT_TIMESTAMP);
 
 INSERT OR REPLACE INTO db_metadata (key, value, updated_at) 
 VALUES ('created', COALESCE((SELECT value FROM db_metadata WHERE key='created'), CURRENT_TIMESTAMP), CURRENT_TIMESTAMP);
@@ -125,6 +152,8 @@ CREATE INDEX IF NOT EXISTS idx_error_stats_last_seen ON error_stats(last_seen);
 CREATE INDEX IF NOT EXISTS idx_log_summaries_date ON log_summaries(log_date);
 CREATE INDEX IF NOT EXISTS idx_system_events_type ON system_events(event_type);
 CREATE INDEX IF NOT EXISTS idx_system_events_created ON system_events(created_at);
+CREATE INDEX IF NOT EXISTS idx_config_values_key ON config_values(config_key);
+CREATE INDEX IF NOT EXISTS idx_config_discrepancies_key ON config_discrepancies(config_key);
 EOF
 
     return 0
@@ -631,6 +660,687 @@ export_table_csv() {
 # Check database integrity
 check_db_integrity() {
     sqlite3 "$SHELLDER_DB" "PRAGMA integrity_check;"
+}
+
+# =============================================================================
+# CONFIGURATION MANAGEMENT FUNCTIONS
+# =============================================================================
+
+# Default values from env-default and other template files (DO NOT SAVE THESE)
+# These indicate a fresh install that hasn't been configured yet
+declare -A DEFAULT_VALUES
+DEFAULT_VALUES=(
+    # Database defaults
+    ["MYSQL_ROOT_PASSWORD"]="V3ryS3cUr3MYSQL_ROOT_P4ssw0rd"
+    ["MYSQL_PASSWORD"]="SuperSecuredbuserPassword"
+    ["MYSQL_USER"]="dbuser"
+    # API secrets defaults
+    ["KOJI_SECRET"]="SuperSecureKojiSecret"
+    ["DRAGONITE_PASSWORD"]="SuperSecureDragoniteAdminPassword"
+    ["DRAGONITE_API_SECRET"]="SuperSecureDragoniteApiSecret"
+    ["GOLBAT_API_SECRET"]="SuperSecureGolbatApiSecret"
+    ["GOLBAT_RAW_SECRET"]="SuperSecureGolbatRawSecret"
+    # Common template placeholders
+    ["DOMAIN"]="example.com"
+    ["SERVER_IP"]="0.0.0.0"
+    ["YOUR_DOMAIN"]="your.domain.com"
+    ["YOUR_EMAIL"]="your@email.com"
+    # Poracle defaults
+    ["POKEMON_IMAGE_URL"]="https://raw.githubusercontent.com"
+    ["WEATHER_TILE_URL"]=""
+    # Bearer token defaults
+    ["ROTOM_AUTH_BEARER"]="SuperSecretAuthBearerForAegisDevices"
+)
+
+# Check if a value is a default/template value (should not be saved)
+is_default_value() {
+    local key="$1"
+    local value="$2"
+    
+    # Check against known defaults
+    if [ -n "${DEFAULT_VALUES[$key]}" ]; then
+        if [ "$value" = "${DEFAULT_VALUES[$key]}" ]; then
+            return 0  # It's a default
+        fi
+    fi
+    
+    # Check for common template patterns
+    if [[ "$value" =~ ^SuperSecure.*$ ]] || \
+       [[ "$value" =~ ^V3ryS3cUr3.*$ ]] || \
+       [[ "$value" =~ ^your.*$ ]] || \
+       [[ "$value" =~ ^example\.com$ ]] || \
+       [[ "$value" =~ ^YOUR_.*$ ]] || \
+       [[ "$value" =~ ^CHANGE_ME.*$ ]] || \
+       [[ "$value" =~ ^TODO.*$ ]] || \
+       [[ "$value" =~ ^REPLACE.*$ ]] || \
+       [[ "$value" = "0.0.0.0" ]] || \
+       [[ "$value" = "localhost" && "$key" =~ DOMAIN|HOST|URL ]]; then
+        return 0  # It's a default/template value
+    fi
+    
+    return 1  # Not a default value
+}
+
+# =============================================================================
+# CREDENTIAL VALIDATION FUNCTIONS
+# =============================================================================
+
+# Test MariaDB connection with given credentials
+# Usage: validate_mariadb_credentials "user" "password" ["host"] ["port"]
+# Returns: 0 = success, 1 = failed
+validate_mariadb_credentials() {
+    local user="$1"
+    local password="$2"
+    local host="${3:-localhost}"
+    local port="${4:-3306}"
+    
+    [ -z "$user" ] || [ -z "$password" ] && return 1
+    
+    # Determine which mysql client to use
+    local mysql_cmd=""
+    if command -v mariadb &> /dev/null; then
+        mysql_cmd="mariadb"
+    elif command -v mysql &> /dev/null; then
+        mysql_cmd="mysql"
+    else
+        # Try via Docker if no local client
+        if docker ps --filter "name=database" --format "{{.Names}}" 2>/dev/null | grep -q "database"; then
+            if docker exec database mariadb --version &>/dev/null; then
+                mysql_cmd="docker exec database mariadb"
+            elif docker exec database mysql --version &>/dev/null; then
+                mysql_cmd="docker exec database mysql"
+            fi
+        fi
+    fi
+    
+    if [ -z "$mysql_cmd" ]; then
+        # No mysql client available - can't validate
+        return 2  # Unknown (can't test)
+    fi
+    
+    # Test connection
+    if $mysql_cmd -u"$user" -p"$password" -h"$host" -P"$port" -e "SELECT 1" &>/dev/null; then
+        return 0  # Success
+    else
+        return 1  # Failed
+    fi
+}
+
+# Test MariaDB root credentials
+validate_mariadb_root() {
+    local password="$1"
+    validate_mariadb_credentials "root" "$password"
+    return $?
+}
+
+# Test if a database exists and is accessible
+validate_database_exists() {
+    local user="$1"
+    local password="$2"
+    local database="$3"
+    local host="${4:-localhost}"
+    
+    [ -z "$database" ] && return 1
+    
+    local mysql_cmd=""
+    if command -v mariadb &> /dev/null; then
+        mysql_cmd="mariadb"
+    elif command -v mysql &> /dev/null; then
+        mysql_cmd="mysql"
+    elif docker ps --filter "name=database" --format "{{.Names}}" 2>/dev/null | grep -q "database"; then
+        if docker exec database mariadb --version &>/dev/null; then
+            mysql_cmd="docker exec database mariadb"
+        else
+            mysql_cmd="docker exec database mysql"
+        fi
+    fi
+    
+    [ -z "$mysql_cmd" ] && return 2
+    
+    if $mysql_cmd -u"$user" -p"$password" -h"$host" -e "USE $database" &>/dev/null; then
+        return 0
+    else
+        return 1
+    fi
+}
+
+# Validate a config value based on its key type
+# Returns: 0 = valid, 1 = invalid, 2 = can't validate (no way to test)
+validate_config_value_type() {
+    local key="$1"
+    local value="$2"
+    local extra_param="$3"  # For some validations (e.g., user for password test)
+    
+    [ -z "$key" ] || [ -z "$value" ] && return 1
+    
+    case "$key" in
+        MYSQL_ROOT_PASSWORD)
+            validate_mariadb_root "$value"
+            return $?
+            ;;
+        MYSQL_PASSWORD)
+            # Need username to test - check if provided or use stored
+            local db_user="${extra_param:-}"
+            if [ -z "$db_user" ]; then
+                db_user=$(get_config_value "MYSQL_USER" 2>/dev/null)
+            fi
+            if [ -n "$db_user" ]; then
+                validate_mariadb_credentials "$db_user" "$value"
+                return $?
+            fi
+            return 2  # Can't validate without user
+            ;;
+        MYSQL_USER)
+            # Need password to test - check if provided or use stored
+            local db_pass="${extra_param:-}"
+            if [ -z "$db_pass" ]; then
+                db_pass=$(get_config_value "MYSQL_PASSWORD" 2>/dev/null)
+            fi
+            if [ -n "$db_pass" ]; then
+                validate_mariadb_credentials "$value" "$db_pass"
+                return $?
+            fi
+            return 2  # Can't validate without password
+            ;;
+        PUID|PGID)
+            # Validate it's a number
+            if [[ "$value" =~ ^[0-9]+$ ]]; then
+                return 0
+            else
+                return 1
+            fi
+            ;;
+        *_SECRET|*_PASSWORD|*_TOKEN|*_BEARER)
+            # These can't be validated without their respective services
+            # Just check they're not empty and meet minimum length
+            if [ ${#value} -ge 8 ]; then
+                return 0
+            else
+                return 1  # Too short to be a real secret
+            fi
+            ;;
+        *)
+            # Unknown key type - can't validate
+            return 2
+            ;;
+    esac
+}
+
+# Store config only if validation passes
+# Usage: store_validated_config "key" "value" "source_file" "description" [is_secret] [extra_param]
+# Returns: 0 = stored, 1 = validation failed, 2 = default value, 3 = store failed
+store_validated_config() {
+    local key="$1"
+    local value="$2"
+    local source_file="${3:-unknown}"
+    local description="${4:-}"
+    local is_secret="${5:-0}"
+    local extra_param="${6:-}"
+    
+    [ -z "$key" ] || [ -z "$value" ] && return 3
+    
+    # Don't store default values
+    if is_default_value "$key" "$value"; then
+        return 2
+    fi
+    
+    # Validate the value based on its type
+    validate_config_value_type "$key" "$value" "$extra_param"
+    local validation_result=$?
+    
+    if [ $validation_result -eq 1 ]; then
+        # Validation failed
+        return 1
+    fi
+    
+    # Validation passed or couldn't be tested - store it
+    store_config_value "$key" "$value" "$source_file" "$description" "$is_secret"
+    return $?
+}
+
+# Prompt user for value with validation
+# Usage: prompt_validated_config "key" "prompt_text" "source_file" "description" [is_secret] [validation_type]
+# Returns the validated value or empty if user cancels
+prompt_validated_config() {
+    local key="$1"
+    local prompt_text="$2"
+    local source_file="${3:-unknown}"
+    local description="${4:-}"
+    local is_secret="${5:-0}"
+    local extra_param="${6:-}"
+    local max_attempts=3
+    local attempt=0
+    
+    while [ $attempt -lt $max_attempts ]; do
+        ((attempt++))
+        
+        local value=""
+        if [ "$is_secret" = "1" ]; then
+            read -sp "$prompt_text: " value
+            echo ""  # New line after hidden input
+        else
+            read -p "$prompt_text: " value
+        fi
+        
+        # Check if empty
+        if [ -z "$value" ]; then
+            echo "  Value cannot be empty."
+            continue
+        fi
+        
+        # Check if default
+        if is_default_value "$key" "$value"; then
+            echo "  This appears to be a default/template value. Please enter a real value."
+            continue
+        fi
+        
+        # Validate
+        validate_config_value_type "$key" "$value" "$extra_param"
+        local result=$?
+        
+        if [ $result -eq 0 ]; then
+            # Valid - store and return
+            store_config_value "$key" "$value" "$source_file" "$description" "$is_secret"
+            echo "$value"
+            return 0
+        elif [ $result -eq 1 ]; then
+            # Invalid
+            echo "  Validation failed for $key. Please try again."
+            case "$key" in
+                MYSQL_ROOT_PASSWORD)
+                    echo "  Could not connect to MariaDB with this root password."
+                    ;;
+                MYSQL_PASSWORD|MYSQL_USER)
+                    echo "  Could not authenticate with MariaDB using these credentials."
+                    ;;
+            esac
+            continue
+        else
+            # Can't validate - accept it
+            store_config_value "$key" "$value" "$source_file" "$description" "$is_secret"
+            echo "$value"
+            return 0
+        fi
+    done
+    
+    echo ""
+    return 1  # Max attempts reached
+}
+
+# =============================================================================
+# CONFIG STORAGE FUNCTIONS
+# =============================================================================
+
+# Store a configuration value (only if not a default)
+# Usage: store_config_value "key" "value" "source_file" "description" [is_secret]
+store_config_value() {
+    local key="$1"
+    local value="$2"
+    local source_file="${3:-unknown}"
+    local description="${4:-}"
+    local is_secret="${5:-0}"
+    
+    [ -z "$key" ] || [ -z "$value" ] && return 1
+    
+    # Don't store default values
+    if is_default_value "$key" "$value"; then
+        return 2  # Indicates it was a default value
+    fi
+    
+    # Escape single quotes
+    value="${value//\'/\'\'}"
+    description="${description//\'/\'\'}"
+    
+    sqlite3 "$SHELLDER_DB" <<EOF
+INSERT INTO config_values (config_key, config_value, source_file, description, is_secret, last_verified, verified_match)
+VALUES ('$key', '$value', '$source_file', '$description', $is_secret, CURRENT_TIMESTAMP, 1)
+ON CONFLICT(config_key) DO UPDATE SET
+    config_value = '$value',
+    source_file = '$source_file',
+    description = COALESCE(NULLIF('$description', ''), description),
+    is_secret = $is_secret,
+    last_verified = CURRENT_TIMESTAMP,
+    verified_match = 1;
+EOF
+}
+
+# Get a stored configuration value
+# Usage: get_config_value "key"
+get_config_value() {
+    local key="$1"
+    [ -z "$key" ] && return 1
+    
+    sqlite3 "$SHELLDER_DB" "SELECT config_value FROM config_values WHERE config_key = '$key';" 2>/dev/null
+}
+
+# Check if a config key exists in database
+config_exists() {
+    local key="$1"
+    local count=$(sqlite3 "$SHELLDER_DB" "SELECT COUNT(*) FROM config_values WHERE config_key = '$key';" 2>/dev/null)
+    [ "$count" -gt 0 ]
+}
+
+# Validate a config value against what's stored
+# Returns: 0 = match, 1 = mismatch, 2 = not in database
+validate_config_value() {
+    local key="$1"
+    local current_value="$2"
+    local source_file="${3:-}"
+    
+    [ -z "$key" ] && return 1
+    
+    local stored_value=$(get_config_value "$key")
+    
+    if [ -z "$stored_value" ]; then
+        return 2  # Not in database
+    fi
+    
+    if [ "$current_value" = "$stored_value" ]; then
+        # Update verification timestamp
+        sqlite3 "$SHELLDER_DB" <<EOF
+UPDATE config_values SET last_verified = CURRENT_TIMESTAMP, verified_match = 1 WHERE config_key = '$key';
+EOF
+        return 0  # Match
+    else
+        # Record discrepancy
+        current_value="${current_value//\'/\'\'}"
+        stored_value="${stored_value//\'/\'\'}"
+        
+        sqlite3 "$SHELLDER_DB" <<EOF
+UPDATE config_values SET last_mismatch = CURRENT_TIMESTAMP, mismatch_count = mismatch_count + 1, verified_match = 0 WHERE config_key = '$key';
+INSERT INTO config_discrepancies (config_key, expected_value, found_value, source_file)
+VALUES ('$key', '$stored_value', '$current_value', '$source_file');
+EOF
+        return 1  # Mismatch
+    fi
+}
+
+# Get all config discrepancies
+get_config_discrepancies() {
+    sqlite3 -header -column "$SHELLDER_DB" <<EOF
+SELECT 
+    config_key AS "Config Key",
+    expected_value AS "Expected",
+    found_value AS "Found",
+    source_file AS "File",
+    datetime(detected_at, 'localtime') AS "Detected"
+FROM config_discrepancies
+WHERE resolved = 0
+ORDER BY detected_at DESC
+LIMIT 50;
+EOF
+}
+
+# Get all stored config values (masks secrets)
+get_all_config_values() {
+    sqlite3 -header -column "$SHELLDER_DB" <<EOF
+SELECT 
+    config_key AS "Key",
+    CASE WHEN is_secret = 1 THEN '********' ELSE config_value END AS "Value",
+    source_file AS "Source",
+    CASE WHEN verified_match = 1 THEN 'OK' ELSE 'MISMATCH' END AS "Status",
+    datetime(last_verified, 'localtime') AS "Last Check"
+FROM config_values
+ORDER BY config_key;
+EOF
+}
+
+# Get config value for display (masks secrets)
+get_config_display() {
+    local key="$1"
+    local is_secret=$(sqlite3 "$SHELLDER_DB" "SELECT is_secret FROM config_values WHERE config_key = '$key';" 2>/dev/null)
+    
+    if [ "$is_secret" = "1" ]; then
+        local value=$(get_config_value "$key")
+        if [ -n "$value" ]; then
+            # Show first 2 and last 2 characters
+            local len=${#value}
+            if [ $len -gt 6 ]; then
+                echo "${value:0:2}****${value: -2}"
+            else
+                echo "****"
+            fi
+        fi
+    else
+        get_config_value "$key"
+    fi
+}
+
+# Check all configs from .env file against database
+check_env_configs() {
+    local env_file="${1:-.env}"
+    local validate_before_store="${2:-true}"  # Whether to validate new configs before storing
+    local discrepancies=0
+    local new_configs=0
+    local matched=0
+    local rejected=0
+    
+    if [ ! -f "$env_file" ]; then
+        echo "ENV_FILE_NOT_FOUND"
+        return 1
+    fi
+    
+    # First pass: load all values into an associative array
+    declare -A env_values
+    while IFS='=' read -r key value; do
+        [[ "$key" =~ ^#.*$ ]] && continue
+        [[ -z "$key" ]] && continue
+        [[ "$key" == "UID" || "$key" == "GID" ]] && continue
+        
+        value="${value%\"}"
+        value="${value#\"}"
+        value="${value%\'}"
+        value="${value#\'}"
+        
+        [ -z "$value" ] && continue
+        env_values["$key"]="$value"
+    done < "$env_file"
+    
+    # Process each config
+    for key in "${!env_values[@]}"; do
+        local value="${env_values[$key]}"
+        
+        # Skip default values
+        if is_default_value "$key" "$value"; then
+            continue
+        fi
+        
+        # Check if config exists in database
+        if config_exists "$key"; then
+            validate_config_value "$key" "$value" "$env_file"
+            local result=$?
+            if [ $result -eq 0 ]; then
+                ((matched++))
+            elif [ $result -eq 1 ]; then
+                ((discrepancies++))
+            fi
+        else
+            # New config - validate before storing if enabled
+            local should_store=true
+            
+            if [ "$validate_before_store" = "true" ]; then
+                case "$key" in
+                    MYSQL_ROOT_PASSWORD)
+                        # Validate root password can connect
+                        if ! validate_mariadb_root "$value" 2>/dev/null; then
+                            should_store=false
+                            ((rejected++))
+                        fi
+                        ;;
+                    MYSQL_PASSWORD)
+                        # Validate with user if available
+                        local db_user="${env_values[MYSQL_USER]:-}"
+                        if [ -n "$db_user" ]; then
+                            if ! validate_mariadb_credentials "$db_user" "$value" 2>/dev/null; then
+                                should_store=false
+                                ((rejected++))
+                            fi
+                        fi
+                        ;;
+                    MYSQL_USER)
+                        # Validate with password if available
+                        local db_pass="${env_values[MYSQL_PASSWORD]:-}"
+                        if [ -n "$db_pass" ]; then
+                            if ! validate_mariadb_credentials "$value" "$db_pass" 2>/dev/null; then
+                                should_store=false
+                                ((rejected++))
+                            fi
+                        fi
+                        ;;
+                    PUID|PGID)
+                        # Must be a number
+                        if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                            should_store=false
+                            ((rejected++))
+                        fi
+                        ;;
+                    *_SECRET|*_PASSWORD|*_TOKEN|*_BEARER)
+                        # Must be at least 8 characters
+                        if [ ${#value} -lt 8 ]; then
+                            should_store=false
+                            ((rejected++))
+                        fi
+                        ;;
+                esac
+            fi
+            
+            if [ "$should_store" = "true" ]; then
+                local is_secret=0
+                if [[ "$key" =~ PASSWORD|SECRET|TOKEN|KEY|BEARER ]]; then
+                    is_secret=1
+                fi
+                store_config_value "$key" "$value" "$env_file" "" "$is_secret"
+                ((new_configs++))
+            fi
+        fi
+    done
+    
+    echo "$matched|$discrepancies|$new_configs|$rejected"
+}
+
+# Parse and store configs from a specific file type
+parse_and_store_configs() {
+    local file="$1"
+    local file_type="${2:-auto}"
+    
+    [ ! -f "$file" ] && return 1
+    
+    case "$file_type" in
+        env|auto)
+            if [[ "$file" =~ \.env$ ]] || [[ "$file" == "env-default" ]]; then
+                while IFS='=' read -r key value; do
+                    [[ "$key" =~ ^#.*$ ]] && continue
+                    [[ -z "$key" ]] && continue
+                    value="${value%\"}"
+                    value="${value#\"}"
+                    [ -z "$value" ] && continue
+                    
+                    if ! is_default_value "$key" "$value"; then
+                        local is_secret=0
+                        [[ "$key" =~ PASSWORD|SECRET|TOKEN|KEY|BEARER ]] && is_secret=1
+                        store_config_value "$key" "$value" "$file" "" "$is_secret"
+                    fi
+                done < "$file"
+            fi
+            ;;
+        json)
+            # For JSON files - extract key values (basic parsing)
+            if command -v jq &> /dev/null; then
+                # Use jq if available
+                jq -r 'to_entries | .[] | "\(.key)=\(.value)"' "$file" 2>/dev/null | while IFS='=' read -r key value; do
+                    [ -z "$key" ] && continue
+                    if ! is_default_value "$key" "$value"; then
+                        store_config_value "$key" "$value" "$file" ""
+                    fi
+                done
+            fi
+            ;;
+        toml)
+            # For TOML files - basic key=value extraction
+            grep -E "^[a-zA-Z_]+\s*=" "$file" 2>/dev/null | while IFS='=' read -r key value; do
+                key=$(echo "$key" | tr -d ' ')
+                value=$(echo "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' | tr -d '"'"'")
+                [ -z "$key" ] && continue
+                if ! is_default_value "$key" "$value"; then
+                    store_config_value "$key" "$value" "$file" ""
+                fi
+            done
+            ;;
+    esac
+}
+
+# Resolve a discrepancy (mark as resolved)
+resolve_discrepancy() {
+    local id="$1"
+    sqlite3 "$SHELLDER_DB" "UPDATE config_discrepancies SET resolved = 1, resolved_at = CURRENT_TIMESTAMP WHERE id = $id;"
+}
+
+# Resolve all discrepancies for a key
+resolve_discrepancies_for_key() {
+    local key="$1"
+    sqlite3 "$SHELLDER_DB" "UPDATE config_discrepancies SET resolved = 1, resolved_at = CURRENT_TIMESTAMP WHERE config_key = '$key' AND resolved = 0;"
+}
+
+# Update stored config value (when user confirms a change)
+update_stored_config() {
+    local key="$1"
+    local new_value="$2"
+    local source_file="${3:-}"
+    
+    if is_default_value "$key" "$new_value"; then
+        return 2  # Don't store defaults
+    fi
+    
+    new_value="${new_value//\'/\'\'}"
+    
+    sqlite3 "$SHELLDER_DB" <<EOF
+UPDATE config_values SET 
+    config_value = '$new_value',
+    source_file = COALESCE(NULLIF('$source_file', ''), source_file),
+    last_verified = CURRENT_TIMESTAMP,
+    verified_match = 1
+WHERE config_key = '$key';
+EOF
+
+    # Resolve any pending discrepancies
+    resolve_discrepancies_for_key "$key"
+}
+
+# Delete a stored config value
+delete_config_value() {
+    local key="$1"
+    sqlite3 "$SHELLDER_DB" "DELETE FROM config_values WHERE config_key = '$key';"
+}
+
+# Clear all config discrepancies
+clear_config_discrepancies() {
+    sqlite3 "$SHELLDER_DB" "DELETE FROM config_discrepancies;"
+}
+
+# Get count of unresolved discrepancies
+get_discrepancy_count() {
+    sqlite3 "$SHELLDER_DB" "SELECT COUNT(*) FROM config_discrepancies WHERE resolved = 0;" 2>/dev/null
+}
+
+# Get count of stored configs
+get_config_count() {
+    sqlite3 "$SHELLDER_DB" "SELECT COUNT(*) FROM config_values;" 2>/dev/null
+}
+
+# Run full config validation on all known files
+run_full_config_check() {
+    local total_discrepancies=0
+    
+    # Check .env file
+    if [ -f ".env" ]; then
+        local result=$(check_env_configs ".env")
+        local disc=$(echo "$result" | cut -d'|' -f2)
+        total_discrepancies=$((total_discrepancies + disc))
+    fi
+    
+    # Can add more file checks here as needed
+    
+    echo "$total_discrepancies"
 }
 
 # =============================================================================

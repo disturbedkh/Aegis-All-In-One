@@ -44,6 +44,17 @@ fi
 export REAL_USER
 export REAL_GROUP
 
+# Source Shellder database helper for config management
+if [ -f "$SCRIPT_DIR/Shellder/db_helper.sh" ]; then
+    source "$SCRIPT_DIR/Shellder/db_helper.sh"
+    DB_AVAILABLE=true
+else
+    DB_AVAILABLE=false
+fi
+
+# Track config alerts shown this session to avoid repetition
+CONFIG_ALERT_SHOWN=false
+
 # =============================================================================
 # UTILITY FUNCTIONS
 # =============================================================================
@@ -2282,6 +2293,64 @@ run_script() {
 }
 
 # =============================================================================
+# CONFIG VALIDATION
+# =============================================================================
+
+# Check configurations and alert on discrepancies
+check_config_on_launch() {
+    if [ "$DB_AVAILABLE" != "true" ]; then
+        return
+    fi
+    
+    # Initialize database if needed
+    if ! check_shellder_db 2>/dev/null; then
+        init_shellder_db 2>/dev/null
+    fi
+    
+    # Check if .env exists
+    if [ ! -f ".env" ]; then
+        return
+    fi
+    
+    # Run config check
+    local result=$(check_env_configs ".env" 2>/dev/null)
+    if [ -z "$result" ]; then
+        return
+    fi
+    
+    local matched=$(echo "$result" | cut -d'|' -f1)
+    local discrepancies=$(echo "$result" | cut -d'|' -f2)
+    local new_configs=$(echo "$result" | cut -d'|' -f3)
+    
+    # Show alert if there are discrepancies
+    if [ "$discrepancies" -gt 0 ] && [ "$CONFIG_ALERT_SHOWN" != "true" ]; then
+        echo ""
+        draw_box_top
+        draw_box_line ""
+        draw_box_line "  ⚠️  CONFIGURATION DISCREPANCY DETECTED"
+        draw_box_line ""
+        draw_box_line "  $discrepancies config value(s) differ from stored values."
+        draw_box_line "  This may indicate:"
+        draw_box_line "    • Config files were edited outside of Shellder"
+        draw_box_line "    • A file was restored from backup"
+        draw_box_line "    • Multiple installations with different settings"
+        draw_box_line ""
+        draw_box_line "  To view details: Database Setup (2) → Shellder Statistics (6)"
+        draw_box_line ""
+        draw_box_bottom
+        echo ""
+        CONFIG_ALERT_SHOWN=true
+        
+        read -p "  Press Enter to continue..." 
+    fi
+    
+    # Silently log new configs
+    if [ "$new_configs" -gt 0 ]; then
+        record_event "config_stored" "shellder.sh" "Stored $new_configs new config values from .env" "" 2>/dev/null
+    fi
+}
+
+# =============================================================================
 # MAIN LOOP
 # =============================================================================
 
@@ -2293,6 +2362,9 @@ main() {
         echo ""
         exit 1
     fi
+    
+    # Check configuration on first launch
+    check_config_on_launch
 
     while true; do
         show_status_dashboard

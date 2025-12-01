@@ -28,6 +28,15 @@ print_success() { echo -e "${GREEN}[SUCCESS]${NC} $1"; }
 print_warning() { echo -e "${YELLOW}[WARNING]${NC} $1"; }
 print_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 
+# Source Shellder database helper for config storage
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/db_helper.sh" ]; then
+    source "$SCRIPT_DIR/db_helper.sh"
+    DB_AVAILABLE=true
+else
+    DB_AVAILABLE=false
+fi
+
 # Return to main menu function
 return_to_main() {
     if [ "$SHELLDER_LAUNCHER" = "1" ]; then
@@ -2091,6 +2100,9 @@ sed -i "s/SuperSecurePoracleApiSecret/${PORACLE_API_SECRET}/g" reactmap/local.js
 track_file "Poracle/config/local.json"
 track_file "init/01.sql"
 
+# NOTE: Config values will be stored AFTER database validation completes
+# This ensures only working credentials are saved to the Shellder database
+
 # Restore file ownership to the original user (not root)
 restore_all_ownership
 
@@ -2262,11 +2274,106 @@ else
     done
     print_success "Databases verified: ${DBS[*]}"
     
+    # Database credentials verified - now safe to store in Shellder database
+    DB_CREDENTIALS_VERIFIED=true
+    
   else
     print_info "Database container not running."
     print_info "After running 'docker compose up -d', the user will be created from init/01.sql"
     print_warning "If database already exists, run 'Shellder/dbsetup.sh' to create the user."
+    DB_CREDENTIALS_VERIFIED=false
   fi
+fi
+
+# =============================================================================
+# Store Verified Configuration Values
+# =============================================================================
+# Only store configs in Shellder database after they've been validated
+# This ensures data integrity - only working credentials are saved
+
+if [ "$DB_AVAILABLE" = "true" ]; then
+    print_info "Storing validated configuration values..."
+    
+    # Initialize database if needed
+    if ! check_shellder_db 2>/dev/null; then
+        init_shellder_db 2>/dev/null
+    fi
+    
+    stored_count=0
+    skipped_count=0
+    
+    # Store database credentials only if verified
+    if [ "$DB_CREDENTIALS_VERIFIED" = "true" ]; then
+        # These credentials worked - safe to store
+        store_config_value "MYSQL_USER" "$DB_USER" ".env" "Database username (verified)" 0
+        store_config_value "MYSQL_PASSWORD" "$DB_PASSWORD" ".env" "Database password (verified)" 1
+        store_config_value "MYSQL_ROOT_PASSWORD" "$MYSQL_ROOT_PASSWORD" ".env" "Root password (verified)" 1
+        ((stored_count+=3))
+        print_success "Database credentials stored (verified working)"
+    else
+        print_warning "Database credentials NOT stored (could not verify)"
+        ((skipped_count+=3))
+    fi
+    
+    # Store non-database configs (these don't require service validation)
+    # But check they meet minimum requirements (not empty, not too short)
+    
+    # API tokens - validate minimum length for security
+    for config_pair in \
+        "KOJI_SECRET|$KOJI_BEARER|Koji API bearer token" \
+        "GOLBAT_RAW_SECRET|$GOLBAT_RAW_SECRET|Golbat raw data secret" \
+        "GOLBAT_API_SECRET|$GOLBAT_API_SECRET|Golbat API secret" \
+        "DRAGONITE_PASSWORD|$DRAGONITE_PASSWORD|Dragonite admin password" \
+        "DRAGONITE_API_SECRET|$DRAGONITE_API_SECRET|Dragonite API secret" \
+        "ROTOM_AUTH_BEARER|$ROTOM_AUTH_BEARER|Rotom device auth token" \
+        "PORACLE_API_SECRET|$PORACLE_API_SECRET|Poracle API secret"
+    do
+        IFS='|' read -r key value desc <<< "$config_pair"
+        
+        # Skip if value is empty or too short (less than 8 chars)
+        if [ -z "$value" ] || [ ${#value} -lt 8 ]; then
+            print_warning "Skipped $key (empty or too short)"
+            ((skipped_count++))
+            continue
+        fi
+        
+        # Skip if it's a default value
+        if is_default_value "$key" "$value"; then
+            print_warning "Skipped $key (default/template value)"
+            ((skipped_count++))
+            continue
+        fi
+        
+        store_config_value "$key" "$value" ".env" "$desc" 1
+        ((stored_count++))
+    done
+    
+    # Store PUID/PGID (validate they're numbers)
+    if [[ "$USER_UID" =~ ^[0-9]+$ ]]; then
+        store_config_value "PUID" "$USER_UID" ".env" "Docker container user ID" 0
+        ((stored_count++))
+    else
+        print_warning "Skipped PUID (invalid: $USER_UID)"
+        ((skipped_count++))
+    fi
+    
+    if [[ "$USER_GID" =~ ^[0-9]+$ ]]; then
+        store_config_value "PGID" "$USER_GID" ".env" "Docker container group ID" 0
+        ((stored_count++))
+    else
+        print_warning "Skipped PGID (invalid: $USER_GID)"
+        ((skipped_count++))
+    fi
+    
+    # Record setup event
+    record_event "initial_setup" "setup.sh" "Setup completed: $stored_count configs stored, $skipped_count skipped" ""
+    
+    if [ $stored_count -gt 0 ]; then
+        print_success "$stored_count configuration values stored for future reference"
+    fi
+    if [ $skipped_count -gt 0 ]; then
+        print_warning "$skipped_count values skipped (could not validate)"
+    fi
 fi
 
 # =============================================================================

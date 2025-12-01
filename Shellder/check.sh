@@ -610,6 +610,37 @@ check_config_alignment() {
         echo -e "  ${RED}$issues configuration issue(s) found${NC}"
     fi
     echo ""
+    
+    # Check against stored database values (if database is available)
+    if [ "$DB_AVAILABLE" = "true" ] && check_shellder_db 2>/dev/null; then
+        local disc_count=$(get_discrepancy_count 2>/dev/null || echo "0")
+        local config_count=$(get_config_count 2>/dev/null || echo "0")
+        
+        if [ "$config_count" -gt 0 ]; then
+            echo -e "${WHITE}${BOLD}Stored Config Check${NC}"
+            echo -e "${DIM}────────────────────────────────────────${NC}"
+            
+            # Validate current .env against stored values
+            if [ -f ".env" ]; then
+                local result=$(check_env_configs ".env" 2>/dev/null)
+                local matched=$(echo "$result" | cut -d'|' -f1)
+                local discrepancies=$(echo "$result" | cut -d'|' -f2)
+                local new_configs=$(echo "$result" | cut -d'|' -f3)
+                
+                if [ "$discrepancies" -gt 0 ]; then
+                    echo -e "  Stored Values:   ${RED}$discrepancies discrepancy(ies)${NC}"
+                    echo -e "  ${DIM}  Config values differ from initial setup${NC}"
+                else
+                    echo -e "  Stored Values:   ${GREEN}✓ All match ($matched checked)${NC}"
+                fi
+                
+                if [ "$new_configs" -gt 0 ]; then
+                    echo -e "  New Configs:     ${CYAN}$new_configs added${NC}"
+                fi
+            fi
+            echo ""
+        fi
+    fi
 }
 
 # Check required files

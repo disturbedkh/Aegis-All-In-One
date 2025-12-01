@@ -112,12 +112,13 @@ Shellder serves as the **unified command center** for your entire Pokémon mappi
 
 ### Shellder Statistics Database
 
-Shellder includes a built-in SQLite database (`Shellder/shellder.db`) that stores persistent statistics across all scripts. This means you can:
+Shellder includes a built-in SQLite database (`Shellder/shellder.db`) that stores persistent statistics and validated configuration values across all scripts. This means you can:
 
 - **View all-time proxy statistics** even after Xilriws logs are cleared
 - **Track historical error counts** by service and error type
 - **Monitor container health trends** over time
 - **See log summaries** for the past 30 days
+- **Detect configuration discrepancies** when values change unexpectedly
 
 **Access via:**
 - `logs.sh` → "All-Time Statistics" menu option
@@ -131,6 +132,24 @@ Shellder includes a built-in SQLite database (`Shellder/shellder.db`) that store
 | **Container Stats** | Start/restart/crash counts, total uptime, status history |
 | **Log Summaries** | Daily line counts, error/warning counts per service |
 | **System Events** | Important events logged with timestamps |
+| **Config Values** | Validated credentials and settings with discrepancy detection |
+
+### Configuration Validation & Integrity
+
+Shellder maintains configuration integrity through validation:
+
+- **Database credentials** are only stored after successful MariaDB connection
+- **API secrets/tokens** must meet minimum length requirements (8+ characters)
+- **PUID/PGID** values are validated as numeric
+- **Default/template values** (from `env-default`) are automatically rejected
+- **Discrepancy alerts** notify you when config files change unexpectedly
+
+On launch, Shellder checks your `.env` against stored values and alerts you to any discrepancies. This helps catch:
+- Accidental config changes
+- Files overwritten during updates
+- Mismatched credentials between files
+
+The validation ensures **only working, verified values** are stored—if a database password doesn't connect, it won't be saved to the database.
 
 ### Shellder Scripts
 

@@ -1538,6 +1538,18 @@ shellder_db_menu() {
         echo -e "  ${WHITE}Size:${NC} $db_size"
         echo ""
         
+        # Show discrepancy count
+        local disc_count=$(get_discrepancy_count 2>/dev/null || echo "0")
+        local config_count=$(get_config_count 2>/dev/null || echo "0")
+        
+        echo -e "  ${WHITE}Stored Configs:${NC} $config_count"
+        if [ "$disc_count" -gt 0 ]; then
+            echo -e "  ${RED}Config Discrepancies:${NC} $disc_count ${YELLOW}(requires attention)${NC}"
+        else
+            echo -e "  ${GREEN}Config Status:${NC} All values match"
+        fi
+        echo ""
+        
         echo "  ${WHITE}${BOLD}View Statistics${NC}"
         echo "  ${DIM}────────────────────────────────────────${NC}"
         echo "    1) All-Time Proxy Stats (Xilriws)"
@@ -1546,6 +1558,13 @@ shellder_db_menu() {
         echo "    4) Log Summaries (last 7 days)"
         echo "    5) Recent System Events"
         echo "    6) Full Database Statistics"
+        echo ""
+        echo "  ${WHITE}${BOLD}Configuration Management${NC}"
+        echo "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    c) View Stored Config Values"
+        echo "    d) View Config Discrepancies"
+        echo "    v) Validate Configs Now"
+        echo "    f) Fix/Update Stored Config"
         echo ""
         echo "  ${WHITE}${BOLD}Maintenance${NC}"
         echo "  ${DIM}────────────────────────────────────────${NC}"
@@ -1648,6 +1667,222 @@ shellder_db_menu() {
                 echo ""
                 get_db_stats
                 echo ""
+                press_enter
+                ;;
+            c|C)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         STORED CONFIGURATION VALUES"
+                draw_box_bottom
+                echo ""
+                echo -e "  ${DIM}Values marked ******** are secrets (hidden for security)${NC}"
+                echo ""
+                get_all_config_values
+                echo ""
+                press_enter
+                ;;
+            d|D)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         CONFIGURATION DISCREPANCIES"
+                draw_box_bottom
+                echo ""
+                local disc_count=$(get_discrepancy_count 2>/dev/null || echo "0")
+                if [ "$disc_count" -eq 0 ]; then
+                    echo -e "  ${GREEN}No discrepancies found!${NC}"
+                    echo ""
+                    echo "  All configuration values in your files match the stored values."
+                else
+                    echo -e "  ${RED}Found $disc_count discrepancy(ies):${NC}"
+                    echo ""
+                    get_config_discrepancies
+                fi
+                echo ""
+                press_enter
+                ;;
+            v|V)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         VALIDATE CONFIGURATIONS"
+                draw_box_bottom
+                echo ""
+                print_info "Checking .env file against stored values..."
+                echo ""
+                
+                if [ -f ".env" ]; then
+                    local result=$(check_env_configs ".env")
+                    local matched=$(echo "$result" | cut -d'|' -f1)
+                    local discrepancies=$(echo "$result" | cut -d'|' -f2)
+                    local new_configs=$(echo "$result" | cut -d'|' -f3)
+                    
+                    echo -e "  ${WHITE}Results:${NC}"
+                    echo -e "    Matched values:      ${GREEN}$matched${NC}"
+                    echo -e "    Discrepancies:       ${RED}$discrepancies${NC}"
+                    echo -e "    New values stored:   ${CYAN}$new_configs${NC}"
+                    echo ""
+                    
+                    if [ "$discrepancies" -gt 0 ]; then
+                        echo -e "  ${YELLOW}⚠ Some values differ from what was previously stored.${NC}"
+                        echo "  Use 'View Config Discrepancies' (d) to see details."
+                        echo "  Use 'Fix/Update Stored Config' (f) to update stored values."
+                    else
+                        echo -e "  ${GREEN}✓ All configurations match!${NC}"
+                    fi
+                else
+                    print_error ".env file not found"
+                fi
+                echo ""
+                press_enter
+                ;;
+            f|F)
+                echo ""
+                echo "  ${WHITE}Fix/Update Stored Configuration${NC}"
+                echo "  ${DIM}────────────────────────────────────────${NC}"
+                echo ""
+                echo "  Options:"
+                echo "    1) Accept current file values as correct (update database)"
+                echo "    2) View a stored value"
+                echo "    3) Clear all discrepancies (mark as resolved)"
+                echo "    4) Delete a stored config key"
+                echo ""
+                read -p "  Select option [1-4]: " fix_choice
+                
+                case $fix_choice in
+                    1)
+                        echo ""
+                        print_info "Validating and updating stored values from .env file..."
+                        echo ""
+                        
+                        if [ ! -f ".env" ]; then
+                            print_error ".env file not found"
+                            press_enter
+                            continue
+                        fi
+                        
+                        # Load env values
+                        local stored_count=0
+                        local skipped_count=0
+                        local failed_count=0
+                        
+                        # First, load all values
+                        declare -A env_values
+                        while IFS='=' read -r key value; do
+                            [[ "$key" =~ ^#.*$ ]] && continue
+                            [[ -z "$key" ]] && continue
+                            [[ "$key" == "UID" || "$key" == "GID" ]] && continue
+                            value="${value%\"}"
+                            value="${value#\"}"
+                            [ -z "$value" ] && continue
+                            env_values["$key"]="$value"
+                        done < ".env"
+                        
+                        # Validate database credentials before storing
+                        local db_validated=false
+                        if [ -n "${env_values[MYSQL_ROOT_PASSWORD]}" ]; then
+                            echo -n "  Validating MYSQL_ROOT_PASSWORD... "
+                            if validate_mariadb_root "${env_values[MYSQL_ROOT_PASSWORD]}"; then
+                                echo -e "${GREEN}OK${NC}"
+                                update_stored_config "MYSQL_ROOT_PASSWORD" "${env_values[MYSQL_ROOT_PASSWORD]}" ".env"
+                                ((stored_count++))
+                                db_validated=true
+                            else
+                                echo -e "${RED}FAILED${NC}"
+                                print_error "Cannot connect to MariaDB with this password - NOT storing"
+                                ((failed_count++))
+                            fi
+                        fi
+                        
+                        if [ -n "${env_values[MYSQL_USER]}" ] && [ -n "${env_values[MYSQL_PASSWORD]}" ]; then
+                            echo -n "  Validating MYSQL_USER/PASSWORD... "
+                            if validate_mariadb_credentials "${env_values[MYSQL_USER]}" "${env_values[MYSQL_PASSWORD]}"; then
+                                echo -e "${GREEN}OK${NC}"
+                                update_stored_config "MYSQL_USER" "${env_values[MYSQL_USER]}" ".env"
+                                update_stored_config "MYSQL_PASSWORD" "${env_values[MYSQL_PASSWORD]}" ".env"
+                                ((stored_count+=2))
+                            else
+                                echo -e "${RED}FAILED${NC}"
+                                print_error "Cannot authenticate with these DB credentials - NOT storing"
+                                ((failed_count+=2))
+                            fi
+                        fi
+                        
+                        # Store other values (can't validate but check they're not defaults)
+                        for key in "${!env_values[@]}"; do
+                            # Skip ones we already handled
+                            [[ "$key" == "MYSQL_ROOT_PASSWORD" ]] && continue
+                            [[ "$key" == "MYSQL_USER" ]] && continue
+                            [[ "$key" == "MYSQL_PASSWORD" ]] && continue
+                            
+                            local value="${env_values[$key]}"
+                            
+                            if is_default_value "$key" "$value"; then
+                                echo -e "  ${YELLOW}Skipped${NC} $key (default value)"
+                                ((skipped_count++))
+                                continue
+                            fi
+                            
+                            # Validate PUID/PGID are numbers
+                            if [[ "$key" == "PUID" || "$key" == "PGID" ]]; then
+                                if ! [[ "$value" =~ ^[0-9]+$ ]]; then
+                                    echo -e "  ${RED}Invalid${NC} $key (not a number)"
+                                    ((failed_count++))
+                                    continue
+                                fi
+                            fi
+                            
+                            # Validate secrets are long enough
+                            if [[ "$key" =~ SECRET|PASSWORD|TOKEN|BEARER ]]; then
+                                if [ ${#value} -lt 8 ]; then
+                                    echo -e "  ${RED}Invalid${NC} $key (too short)"
+                                    ((failed_count++))
+                                    continue
+                                fi
+                            fi
+                            
+                            update_stored_config "$key" "$value" ".env"
+                            ((stored_count++))
+                        done
+                        
+                        echo ""
+                        print_success "$stored_count values stored"
+                        [ $skipped_count -gt 0 ] && print_warning "$skipped_count values skipped (defaults)"
+                        [ $failed_count -gt 0 ] && print_error "$failed_count values rejected (validation failed)"
+                        ;;
+                    2)
+                        echo ""
+                        read -p "  Enter config key to view: " view_key
+                        if [ -n "$view_key" ]; then
+                            local stored=$(get_config_display "$view_key")
+                            if [ -n "$stored" ]; then
+                                echo -e "  ${WHITE}$view_key${NC} = ${CYAN}$stored${NC}"
+                            else
+                                echo -e "  ${YELLOW}Key not found in database${NC}"
+                            fi
+                        fi
+                        ;;
+                    3)
+                        echo ""
+                        read -p "  Clear all discrepancies? (y/n) [n]: " confirm
+                        if [ "$confirm" = "y" ]; then
+                            clear_config_discrepancies
+                            print_success "All discrepancies cleared"
+                        fi
+                        ;;
+                    4)
+                        echo ""
+                        read -p "  Enter config key to delete: " del_key
+                        if [ -n "$del_key" ]; then
+                            read -p "  Delete '$del_key'? (y/n) [n]: " confirm
+                            if [ "$confirm" = "y" ]; then
+                                delete_config_value "$del_key"
+                                print_success "Config key deleted"
+                            fi
+                        fi
+                        ;;
+                esac
                 press_enter
                 ;;
             7)
