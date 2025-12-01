@@ -2065,7 +2065,14 @@ function getEventIcon(event) {
         'container_unhealthy': '🏥',
         'high_memory': '📊',
         'container_down': '⬇️',
-        'container_error': '🔥'
+        'container_error': '🔥',
+        // Database events
+        'ready': '✅',
+        'aborted_connection': '🔌',
+        'startup': '🚀',
+        'warning': '⚠️',
+        'innodb': '💿',
+        'socket_listen': '📡'
     };
     return icons[event.type] || '📌';
 }

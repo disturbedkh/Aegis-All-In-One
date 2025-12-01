@@ -1248,7 +1248,7 @@ class DeviceMonitor:
         self.recent_events = []  # For correlation
         
         # Container monitoring targets
-        self.monitored_containers = ['rotom', 'dragonite', 'golbat']
+        self.monitored_containers = ['rotom', 'dragonite', 'golbat', 'database']
         self.log_threads = {}
         self.health_thread = None
         
@@ -1316,6 +1316,34 @@ class DeviceMonitor:
                 ),
                 'error': re.compile(
                     r'\[([^\]]+)\].*\[(ERROR|error)\].*(.+)', re.I
+                ),
+            },
+            'database': {
+                # MariaDB log format: 2025-11-27 22:54:09-05:00 [Note] message
+                # or: 2025-11-27 22:54:10 0 [Note] message
+                'ready': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*ready for connections'
+                ),
+                'aborted_connection': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Aborted connection \d+ to db: \'(\w+)\' user: \'(\w+)\' host: \'([^\']+)\' \((.+)\)'
+                ),
+                'timeout': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*(timeout|timed out)', re.I
+                ),
+                'startup': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Starting MariaDB ([^ ]+)'
+                ),
+                'warning': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*\[Warn(?:ing)?\].*(.+)'
+                ),
+                'error': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*\[ERROR\].*(.+)', re.I
+                ),
+                'innodb': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*InnoDB: (.+)'
+                ),
+                'socket_listen': re.compile(
+                    r'(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}).*Server socket created.*port: \'(\d+)\''
                 ),
             }
         }
@@ -1479,6 +1507,37 @@ class DeviceMonitor:
         
         elif container == 'golbat':
             event['severity'] = 'error' if 'error' in event_type else 'info'
+        
+        elif container == 'database':
+            if event_type == 'ready':
+                event['severity'] = 'success'
+                event['message'] = 'Database ready for connections'
+            elif event_type == 'aborted_connection':
+                event['database'] = groups[1] if len(groups) > 1 else None
+                event['db_user'] = groups[2] if len(groups) > 2 else None
+                event['host'] = groups[3] if len(groups) > 3 else None
+                event['reason'] = groups[4] if len(groups) > 4 else None
+                event['severity'] = 'warning'
+                # Try to identify which service this connection was from
+                if event.get('database'):
+                    event['affected_service'] = event['database']
+            elif event_type == 'timeout':
+                event['severity'] = 'warning'
+            elif event_type == 'startup':
+                event['version'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+            elif event_type == 'warning':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
+                event['severity'] = 'warning'
+            elif event_type == 'error':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
+                event['severity'] = 'error'
+            elif event_type == 'innodb':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
+                event['severity'] = 'info'
+            elif event_type == 'socket_listen':
+                event['port'] = groups[1] if len(groups) > 1 else '3306'
+                event['severity'] = 'success'
         
         return event
     

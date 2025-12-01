@@ -204,6 +204,44 @@ EXCLUSION_PATTERNS=(
     "pprof handlers"
     # Note: vmagent "warn" about cannot scrape are NOT excluded - they're real issues
     # but will be marked as [STARTUP] if within startup window
+    
+    # MariaDB/MySQL database container patterns
+    # These are informational/startup messages, not errors
+    "\[Note\]"
+    "\[Entrypoint\]"
+    "Starting MariaDB"
+    "InnoDB:"
+    "Completed initialization of buffer pool"
+    "Opened .* undo tablespaces"
+    "rollback segments .* are active"
+    "log sequence number"
+    "transaction id"
+    "Plugin .* is disabled"
+    "Loading buffer pool"
+    "Buffer pool.* load completed"
+    "Server socket created"
+    "Event Scheduler"
+    "scheduler thread started"
+    "ready for connections"
+    "mariadbd: ready"
+    "Switching to dedicated user"
+    "MariaDB upgrade.*required, but skipped"
+    "source revision"
+    "Compressed tables use"
+    "Number of transaction pools"
+    "Using crc32"
+    "O_TMPFILE is not supported"
+    "innodb_buffer_pool"
+    "Resizing redo log"
+    "Setting file.*size to"
+    "File.*size is now"
+    "End of log at LSN"
+    # MariaDB warnings that are informational (not actual errors)
+    "memory.pressure not writable"
+    "io_uring_queue_init.*failed.*EPERM"
+    "create_uring failed.*falling back"
+    "default-authentication-plugin.*MySQL 5.6"
+    "Using Linux native AIO"
 )
 
 # Startup window in seconds - errors within this window after container start are likely transient
@@ -383,12 +421,16 @@ count_total_errors() {
     
     # Count lines matching error patterns but NOT matching exclusions
     # BUT always include lines with error="/failed=" even if they match exclusions
+    # Include database-specific patterns: [Warning], Aborted connection
     local temp_file=$(mktemp)
-    docker logs "$container" 2>&1 | grep -iE "error|err\]|fatal|panic|critical|failed|exception|ERRO|FATL" 2>/dev/null > "$temp_file" || true
+    docker logs "$container" 2>&1 | grep -iE "error|err\]|fatal|panic|critical|failed|exception|ERRO|FATL|\[Warning\]|\[Warn\]|Aborted connection" 2>/dev/null > "$temp_file" || true
     
     while IFS= read -r line; do
         # Always count if it has actual error indicators like error="..."
         if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="'; then
+            ((count++))
+        # Always count database aborted connections
+        elif echo "$line" | grep -qE "Aborted connection [0-9]+ to db:"; then
             ((count++))
         # Otherwise check exclusions
         elif ! echo "$line" | grep -qiE "$exclusion_pattern"; then
@@ -467,7 +509,7 @@ is_excluded_line() {
 is_actual_error() {
     local line=$1
     # Must have an error keyword
-    if ! echo "$line" | grep -qiE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL|WARN"; then
+    if ! echo "$line" | grep -qiE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL|WARN|\[Warning\]|\[Warn\]|Aborted connection"; then
         return 1  # Not an error
     fi
     # Must not be excluded
@@ -475,6 +517,22 @@ is_actual_error() {
         return 1  # Excluded
     fi
     return 0  # Is an actual error
+}
+
+# Check if this is a database aborted connection (these are important warnings)
+is_database_connection_issue() {
+    local line=$1
+    echo "$line" | grep -qE "Aborted connection [0-9]+ to db:"
+}
+
+# Parse database aborted connection details
+parse_database_connection() {
+    local line=$1
+    local db=$(echo "$line" | grep -oP "db: '\K[^']+")
+    local user=$(echo "$line" | grep -oP "user: '\K[^']+")
+    local host=$(echo "$line" | grep -oP "host: '\K[^']+")
+    local reason=$(echo "$line" | grep -oP "\(\K[^)]+")
+    echo "DB: $db | User: $user | Host: $host | Reason: $reason"
 }
 
 # Get container start time in epoch seconds
@@ -748,6 +806,10 @@ show_service_detail() {
     echo "    5) Search in log"
     echo "    6) Clear this service's log"
     echo "    ${CYAN}e) View errors only (numbered list with context jump)${NC}"
+    # Show database-specific option for database container
+    if [ "$service" = "database" ]; then
+        echo "    ${MAGENTA}d) Database connection analysis${NC}"
+    fi
     echo "    0) Back to main menu"
     echo ""
     read -p "  Select option: " choice
@@ -760,9 +822,287 @@ show_service_detail() {
         5) search_in_log "$service" ;;
         6) clear_service_log "$service" ;;
         e|E) view_numbered_errors "$service" ;;
+        d|D) 
+            if [ "$service" = "database" ]; then
+                show_database_connection_analysis
+            else
+                show_service_detail "$service"
+            fi
+            ;;
         0) return ;;
         *) show_service_detail "$service" ;;
     esac
+}
+
+# =============================================================================
+# DATABASE CONNECTION ANALYSIS
+# =============================================================================
+
+# Analyze database connection issues from MariaDB logs
+show_database_connection_analysis() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         DATABASE CONNECTION ANALYSIS"
+    draw_box_bottom
+    echo ""
+    
+    # Check if database container exists
+    if ! docker ps -a --format '{{.Names}}' | grep -q "^database$"; then
+        echo -e "  ${RED}Database container not found${NC}"
+        press_enter
+        show_service_detail "database"
+        return
+    fi
+    
+    echo -e "  ${DIM}Analyzing connection logs...${NC}"
+    echo ""
+    
+    # Extract and analyze aborted connections
+    local temp_file=$(mktemp)
+    docker logs database 2>&1 | grep -E "Aborted connection" > "$temp_file" 2>/dev/null || true
+    
+    local total_aborted=$(wc -l < "$temp_file" 2>/dev/null || echo "0")
+    total_aborted=$((total_aborted + 0))
+    
+    echo -e "${WHITE}${BOLD}Connection Summary${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    echo -e "  Total Aborted Connections:  ${YELLOW}$total_aborted${NC}"
+    echo ""
+    
+    if [ "$total_aborted" -gt 0 ]; then
+        # Count by database
+        echo -e "${WHITE}${BOLD}By Database${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        printf "  ${DIM}%-15s %-10s${NC}\n" "DATABASE" "COUNT"
+        
+        grep -oP "db: '\K[^']+" "$temp_file" 2>/dev/null | sort | uniq -c | sort -rn | while read count db; do
+            local color="${GREEN}"
+            [ "$count" -gt 5 ] && color="${YELLOW}"
+            [ "$count" -gt 20 ] && color="${RED}"
+            printf "  %-15s ${color}%-10s${NC}\n" "$db" "$count"
+        done
+        echo ""
+        
+        # Count by reason
+        echo -e "${WHITE}${BOLD}By Reason${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        printf "  ${DIM}%-35s %-10s${NC}\n" "REASON" "COUNT"
+        
+        grep -oP "\(\K[^)]+" "$temp_file" 2>/dev/null | sort | uniq -c | sort -rn | while read count reason; do
+            local color="${GREEN}"
+            [ "$count" -gt 5 ] && color="${YELLOW}"
+            [ "$count" -gt 20 ] && color="${RED}"
+            local short_reason="${reason:0:33}"
+            printf "  %-35s ${color}%-10s${NC}\n" "$short_reason" "$count"
+        done
+        echo ""
+        
+        # Count by host (to identify which services have issues)
+        echo -e "${WHITE}${BOLD}By Source Host (Service IP)${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        printf "  ${DIM}%-18s %-10s %-15s${NC}\n" "HOST" "COUNT" "LIKELY SERVICE"
+        
+        grep -oP "host: '\K[^']+" "$temp_file" 2>/dev/null | sort | uniq -c | sort -rn | while read count host; do
+            local color="${GREEN}"
+            [ "$count" -gt 5 ] && color="${YELLOW}"
+            [ "$count" -gt 20 ] && color="${RED}"
+            
+            # Try to identify the service by looking up the container
+            local service_name=""
+            for container in dragonite golbat reactmap koji; do
+                local container_ip=$(docker inspect -f '{{range.NetworkSettings.Networks}}{{.IPAddress}}{{end}}' "$container" 2>/dev/null)
+                if [ "$container_ip" = "$host" ]; then
+                    service_name="$container"
+                    break
+                fi
+            done
+            [ -z "$service_name" ] && service_name="${DIM}unknown${NC}"
+            
+            printf "  %-18s ${color}%-10s${NC} %-15s\n" "$host" "$count" "$service_name"
+        done
+        echo ""
+        
+        # Time distribution
+        echo -e "${WHITE}${BOLD}Recent Connection Issues (last 10)${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        tail -10 "$temp_file" | while IFS= read -r line; do
+            local timestamp=$(echo "$line" | grep -oP "^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}")
+            local db=$(echo "$line" | grep -oP "db: '\K[^']+")
+            local reason=$(echo "$line" | grep -oP "\(\K[^)]+" | head -c 30)
+            printf "  ${DIM}%s${NC}  ${CYAN}%-12s${NC}  ${YELLOW}%s${NC}\n" "$timestamp" "$db" "$reason"
+        done
+        echo ""
+        
+        # Recommendations
+        echo -e "${WHITE}${BOLD}Recommendations${NC}"
+        echo -e "${DIM}────────────────────────────────────────${NC}"
+        
+        # Check for timeout patterns
+        local timeout_count=$(grep -c "timeout" "$temp_file" 2>/dev/null || echo "0")
+        if [ "$timeout_count" -gt 5 ]; then
+            echo -e "  ${YELLOW}⚠${NC}  High timeout count ($timeout_count) - consider:"
+            echo -e "      • Increasing wait_timeout in MariaDB config"
+            echo -e "      • Check network connectivity between containers"
+            echo -e "      • Review connection pool settings in services"
+        fi
+        
+        # Check for specific database issues
+        local golbat_count=$(grep -c "db: 'golbat'" "$temp_file" 2>/dev/null || echo "0")
+        local dragonite_count=$(grep -c "db: 'dragonite'" "$temp_file" 2>/dev/null || echo "0")
+        
+        if [ "$golbat_count" -gt 10 ]; then
+            echo -e "  ${YELLOW}⚠${NC}  Golbat has $golbat_count connection issues"
+            echo -e "      • Check Golbat's max_open_conns setting"
+            echo -e "      • Review Golbat logs for database errors"
+        fi
+        
+        if [ "$dragonite_count" -gt 10 ]; then
+            echo -e "  ${YELLOW}⚠${NC}  Dragonite has $dragonite_count connection issues"
+            echo -e "      • Check Dragonite's database configuration"
+            echo -e "      • Ensure database user has sufficient privileges"
+        fi
+        
+        if [ "$total_aborted" -lt 10 ]; then
+            echo -e "  ${GREEN}✓${NC}  Connection count is low - likely normal operation"
+        fi
+    else
+        echo -e "  ${GREEN}✓${NC}  No aborted connections found"
+        echo ""
+        echo -e "  ${DIM}This indicates healthy database connectivity${NC}"
+    fi
+    
+    rm -f "$temp_file"
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Options${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    echo "    1) View database startup logs"
+    echo "    2) View all database warnings"
+    echo "    3) View database configuration"
+    echo "    0) Back to database detail"
+    echo ""
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1) view_database_startup_logs ;;
+        2) view_database_warnings ;;
+        3) show_database_config ;;
+        0) show_service_detail "database" ;;
+        *) show_database_connection_analysis ;;
+    esac
+}
+
+# View database startup logs
+view_database_startup_logs() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         DATABASE STARTUP LOGS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${DIM}Showing InnoDB and startup messages...${NC}"
+    echo -e "  ${DIM}(Press 'q' to quit, arrow keys to scroll, '/' to search)${NC}"
+    echo ""
+    sleep 1
+    
+    docker logs database 2>&1 | grep -iE "Starting MariaDB|InnoDB:|ready for connections|Server socket|Event Scheduler|Buffer pool|Resizing redo" | less -R
+    
+    show_database_connection_analysis
+}
+
+# View all database warnings
+view_database_warnings() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         DATABASE WARNINGS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${DIM}Showing all [Warning] and [Warn] messages...${NC}"
+    echo -e "  ${DIM}(Press 'q' to quit, arrow keys to scroll, '/' to search)${NC}"
+    echo ""
+    sleep 1
+    
+    docker logs database 2>&1 | grep -iE "\[Warning\]|\[Warn\]|Aborted connection" | less -R
+    
+    show_database_connection_analysis
+}
+
+# Show database configuration
+show_database_config() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         DATABASE CONFIGURATION"
+    draw_box_bottom
+    echo ""
+    
+    # Check if we can connect to the database
+    local db_cmd="mysql"
+    if ! docker exec database which mysql >/dev/null 2>&1; then
+        if docker exec database which mariadb >/dev/null 2>&1; then
+            db_cmd="mariadb"
+        else
+            echo -e "  ${RED}Cannot find mysql/mariadb command in container${NC}"
+            press_enter
+            show_database_connection_analysis
+            return
+        fi
+    fi
+    
+    echo -e "${WHITE}${BOLD}Key Settings${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    # Try to get settings from database
+    local db_user="${POKEMON_DB_USER:-pokemap}"
+    local db_pass="${POKEMON_DB_PASS:-pokemap}"
+    
+    # Source .env if it exists
+    if [ -f ".env" ]; then
+        source .env 2>/dev/null || true
+        db_user="${POKEMON_DB_USER:-$db_user}"
+        db_pass="${POKEMON_DB_PASS:-$db_pass}"
+    fi
+    
+    # Show important variables
+    docker exec database $db_cmd -u"$db_user" -p"$db_pass" -e "
+        SHOW VARIABLES WHERE Variable_name IN (
+            'max_connections',
+            'wait_timeout',
+            'interactive_timeout',
+            'connect_timeout',
+            'innodb_buffer_pool_size',
+            'innodb_log_file_size',
+            'max_allowed_packet',
+            'thread_cache_size'
+        );
+    " 2>/dev/null | while IFS=$'\t' read -r var val; do
+        printf "  %-30s ${CYAN}%s${NC}\n" "$var" "$val"
+    done
+    
+    echo ""
+    echo -e "${WHITE}${BOLD}Connection Status${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    docker exec database $db_cmd -u"$db_user" -p"$db_pass" -e "
+        SHOW STATUS WHERE Variable_name IN (
+            'Threads_connected',
+            'Threads_running',
+            'Max_used_connections',
+            'Connections',
+            'Aborted_clients',
+            'Aborted_connects'
+        );
+    " 2>/dev/null | while IFS=$'\t' read -r var val; do
+        printf "  %-30s ${CYAN}%s${NC}\n" "$var" "$val"
+    done
+    
+    echo ""
+    press_enter
+    show_database_connection_analysis
 }
 
 # =============================================================================
@@ -790,7 +1130,8 @@ view_numbered_errors() {
     docker logs "$service" 2>&1 | nl -ba > "$log_file"
     
     # Extract error lines, filter out exclusions, and classify
-    grep -iE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL" "$log_file" 2>/dev/null | while IFS= read -r line; do
+    # Include database-specific patterns: Aborted connection, [Warning], [Warn]
+    grep -iE "error|err\]|failed|fatal|panic|critical|exception|ERRO|FATL|\[Warning\]|\[Warn\]|Aborted connection" "$log_file" 2>/dev/null | while IFS= read -r line; do
         local content=$(echo "$line" | cut -c8-)
         
         # Skip if it matches exclusion patterns
@@ -803,8 +1144,11 @@ view_numbered_errors() {
         done
         
         if [ "$excluded" = false ]; then
+            # Check for database-specific patterns
+            if is_database_connection_issue "$content"; then
+                echo "DB_CONN|$line" >> "$classified_file"
             # Check if it's a startup error
-            if is_startup_error "$content" "$container_start"; then
+            elif is_startup_error "$content" "$container_start"; then
                 echo "STARTUP|$line" >> "$classified_file"
             else
                 echo "ERROR|$line" >> "$classified_file"
@@ -871,6 +1215,13 @@ view_numbered_errors() {
                 local annotation=""
                 if [ "$classification" = "STARTUP" ]; then
                     annotation="${MAGENTA}[STARTUP]${NC} "
+                elif [ "$classification" = "DB_CONN" ]; then
+                    annotation="${CYAN}[DB CONN]${NC} "
+                    # For database connection issues, show parsed details
+                    if echo "$log_content" | grep -qE "Aborted connection"; then
+                        local db_info=$(parse_database_connection "$log_content")
+                        short_content="${short_content:0:30}... ${DIM}$db_info${NC}"
+                    fi
                 fi
                 
                 if echo "$log_content" | grep -qiE "fatal|panic|critical|FATL"; then
@@ -881,6 +1232,8 @@ view_numbered_errors() {
                     else
                         printf "  ${YELLOW}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}${YELLOW}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
                     fi
+                elif [ "$classification" = "DB_CONN" ]; then
+                    printf "  ${CYAN}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}${CYAN}%s${NC}\n" "$display_idx" "$log_line_num" "$short_content"
                 else
                     printf "  ${DIM}%4d${NC})  ${DIM}L%-6s${NC}  ${annotation}%s\n" "$display_idx" "$log_line_num" "$short_content"
                 fi
