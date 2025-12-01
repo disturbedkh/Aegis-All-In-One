@@ -2438,7 +2438,7 @@ if [ "$DB_AVAILABLE" = "true" ]; then
         print_success "Database credentials stored (verified working)"
     else
         # Show specific reason why verification failed
-        local reason="${DB_VERIFY_REASON:-unknown reason}"
+        reason="${DB_VERIFY_REASON:-unknown reason}"
         print_warning "Database credentials NOT stored ($reason)"
         print_info "Credentials will be verified when you run 'docker compose up -d'"
         ((skipped_count+=3)) || true
