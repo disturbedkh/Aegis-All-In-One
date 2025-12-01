@@ -170,8 +170,17 @@ load_env() {
 check_directory() {
     if [ ! -f "docker-compose.yaml" ]; then
         print_fail "Please run this script from the Aegis-All-In-One directory"
-        exit 1
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Wrong directory - docker-compose.yaml not found in $(pwd)"
+        echo ""
+        echo "  Current directory: $(pwd)"
+        echo ""
+        echo "  Navigate to the Aegis directory first:"
+        echo "    cd /path/to/Aegis-All-In-One"
+        echo ""
+        press_enter
+        return 1
     fi
+    return 0
 }
 
 # =============================================================================

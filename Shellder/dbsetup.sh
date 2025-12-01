@@ -134,6 +134,7 @@ fi
 check_root() {
     if [ "$EUID" -ne 0 ]; then
         print_error "Please run this script as root (e.g., sudo bash Shellder/dbsetup.sh)"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Script requires root privileges - current EUID: $EUID"
         echo ""
         echo "  Press Enter to return..."
         read -r
@@ -155,13 +156,27 @@ restore_ownership() {
 trap restore_ownership EXIT
 
 load_env() {
-if [ ! -f ".env" ]; then
-        print_error ".env file not found. Have you run the initial setup script?"
+    ENV_LOADED=false
+    
+    if [ ! -f ".env" ]; then
+        print_warn ".env file not found - running in manual configuration mode"
+        [ "$LOG_AVAILABLE" = "true" ] && log_warn "No .env file found - entering manual configuration mode"
         echo ""
-        echo "  Press Enter to return..."
-        read -r
-  exit 1
-fi
+        echo "  You can still use this script to:"
+        echo "    • Install MariaDB"
+        echo "    • Create databases and users manually"
+        echo "    • Configure credentials interactively"
+        echo ""
+        
+        # Set empty defaults - will prompt when needed
+        MYSQL_ROOT_PASSWORD=""
+        MYSQL_USER=""
+        MYSQL_PASSWORD=""
+        MYSQL_DATABASE=""
+        
+        sleep 2
+        return 0
+    fi
 
     # Source .env (skip UID/GID which are readonly bash variables)
     while IFS='=' read -r key value; do
@@ -174,6 +189,45 @@ fi
         value="${value#\"}"
         export "$key=$value"
     done < .env
+    
+    ENV_LOADED=true
+}
+
+# Prompt for MariaDB credentials if not set
+prompt_db_credentials() {
+    local need_prompt=false
+    
+    if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+        need_prompt=true
+    fi
+    
+    if [ "$need_prompt" = "true" ]; then
+        echo ""
+        echo -e "  ${WHITE}${BOLD}MariaDB Credentials Required${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────${NC}"
+        echo ""
+        
+        if [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+            read -sp "  Enter MariaDB root password: " MYSQL_ROOT_PASSWORD
+            echo ""
+        fi
+        
+        if [ -z "$MYSQL_USER" ]; then
+            read -p "  Enter database username [pokemon]: " MYSQL_USER
+            MYSQL_USER="${MYSQL_USER:-pokemon}"
+        fi
+        
+        if [ -z "$MYSQL_PASSWORD" ]; then
+            read -sp "  Enter database user password: " MYSQL_PASSWORD
+            echo ""
+        fi
+        
+        if [ -z "$MYSQL_DATABASE" ]; then
+            MYSQL_DATABASE="dragonite"
+        fi
+        
+        echo ""
+    fi
 }
 
 check_mariadb_installed() {
@@ -689,6 +743,8 @@ show_setup_complete() {
 }
 
 run_setup_mode() {
+    [ "$LOG_AVAILABLE" = "true" ] && log_info "Entering MariaDB Setup Mode"
+    
     clear
     echo ""
     draw_box_top
@@ -702,40 +758,107 @@ run_setup_mode() {
     draw_box_bottom
     echo ""
 
+    # Prompt for credentials if not loaded from .env
+    if [ "$ENV_LOADED" != "true" ] || [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+        echo -e "  ${YELLOW}No .env file found - entering manual configuration mode${NC}"
+        [ "$LOG_AVAILABLE" = "true" ] && log_warn "No .env file - using manual configuration"
+        echo ""
+        prompt_db_credentials
+    fi
+
     # Check/install MariaDB
     if ! check_mariadb_installed; then
-        read -p "MariaDB is not installed. Install now? (y/n) [y]: " INSTALL_CHOICE
+        read -p "  MariaDB is not installed. Install now? (y/n) [y]: " INSTALL_CHOICE
         INSTALL_CHOICE=${INSTALL_CHOICE:-y}
         if [ "$INSTALL_CHOICE" = "y" ] || [ "$INSTALL_CHOICE" = "Y" ]; then
-            install_mariadb || exit 1
+            [ "$LOG_AVAILABLE" = "true" ] && log_info "Starting MariaDB installation"
+            if ! install_mariadb; then
+                print_error "MariaDB installation failed"
+                [ "$LOG_AVAILABLE" = "true" ] && log_error "MariaDB installation failed"
+                echo ""
+                echo "  Please check the error messages above and try again."
+                echo "  You may need to install MariaDB manually:"
+                echo "    sudo apt install mariadb-server"
+                echo ""
+                press_enter
+                return
+            fi
+            [ "$LOG_AVAILABLE" = "true" ] && log_info "MariaDB installation completed"
         else
-            print_warning "Installation skipped. Please install MariaDB manually."
-      exit 1
-    fi
-  else
+            print_warn "Installation skipped. Please install MariaDB manually."
+            [ "$LOG_AVAILABLE" = "true" ] && log_warn "User skipped MariaDB installation"
+            echo ""
+            echo "  To install MariaDB:"
+            echo "    sudo apt install mariadb-server"
+            echo ""
+            press_enter
+            return
+        fi
+    else
         print_success "MariaDB is installed"
     fi
 
     # Check if running
     if ! check_mariadb_running; then
         print_info "Starting MariaDB..."
-        systemctl start mariadb 2>/dev/null || systemctl start mysql 2>/dev/null
+        if ! systemctl start mariadb 2>/dev/null && ! systemctl start mysql 2>/dev/null; then
+            print_error "Failed to start MariaDB"
+            [ "$LOG_AVAILABLE" = "true" ] && log_error "Failed to start MariaDB service"
+            echo ""
+            echo "  Try starting manually:"
+            echo "    sudo systemctl start mariadb"
+            echo "    sudo systemctl status mariadb"
+            echo ""
+            press_enter
+            return
+        fi
         sleep 2
     fi
+    print_success "MariaDB is running"
 
     # Setup MySQL command
     setup_mysql_cmd
 
-    # Test connection
+    # Test connection - with retry option
     if ! test_db_connection; then
-        print_error "Cannot connect to MariaDB. Check root password in .env"
-    exit 1
-  fi
+        print_error "Cannot connect to MariaDB"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "MariaDB connection failed during setup"
+        echo ""
+        echo "  Possible causes:"
+        echo "    • Root password is incorrect"
+        echo "    • MariaDB authentication is not configured"
+        echo "    • MariaDB is not accepting connections"
+        echo ""
+        
+        # Offer to try different password
+        read -p "  Would you like to enter a different root password? (y/n) [y]: " retry
+        retry=${retry:-y}
+        if [ "$retry" = "y" ]; then
+            read -sp "  Enter MariaDB root password: " MYSQL_ROOT_PASSWORD
+            echo ""
+            setup_mysql_cmd
+            if ! test_db_connection; then
+                print_error "Still cannot connect with provided password"
+                [ "$LOG_AVAILABLE" = "true" ] && log_error "MariaDB connection failed after password retry"
+                echo ""
+                echo "  If this is a fresh MariaDB install, try:"
+                echo "    sudo mysql_secure_installation"
+                echo ""
+                press_enter
+                return
+            fi
+        else
+            [ "$LOG_AVAILABLE" = "true" ] && log_warn "User declined to retry MariaDB password"
+            press_enter
+            return
+        fi
+    fi
     print_success "Connected to MariaDB"
+    [ "$LOG_AVAILABLE" = "true" ] && log_info "MariaDB connection successful"
 
     # Tuning
     echo ""
-    read -p "Would you like to tune MariaDB for your hardware? (y/n) [y]: " DO_TUNING
+    read -p "  Would you like to tune MariaDB for your hardware? (y/n) [y]: " DO_TUNING
     DO_TUNING=${DO_TUNING:-y}
     if [ "$DO_TUNING" = "y" ] || [ "$DO_TUNING" = "Y" ]; then
         tune_mariadb
@@ -2707,17 +2830,44 @@ show_replication_status() {
 
 # Main Maintenance Menu - Enhanced
 run_maintenance_mode() {
+    [ "$LOG_AVAILABLE" = "true" ] && log_info "Entering MariaDB Maintenance Mode"
+    
+    # Prompt for credentials if not loaded from .env
+    if [ "$ENV_LOADED" != "true" ] || [ -z "$MYSQL_ROOT_PASSWORD" ]; then
+        prompt_db_credentials
+    fi
+    
     # Check connection first
     setup_mysql_cmd
     if ! test_db_connection; then
-        print_error "Cannot connect to MariaDB. Check root password in .env"
+        print_error "Cannot connect to MariaDB"
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "MariaDB connection failed - cannot enter maintenance mode"
         echo ""
-        echo "  Make sure MariaDB container is running:"
-        echo "    docker compose up -d database"
+        echo "  Possible causes:"
+        echo "    • Wrong root password"
+        echo "    • MariaDB not running (try: docker compose up -d database)"
+        echo "    • MariaDB not installed (use Setup Mode first)"
         echo ""
-        press_enter
-        return
+        echo "  Would you like to enter different credentials? (y/n)"
+        read -p "  " retry
+        if [ "$retry" = "y" ]; then
+            MYSQL_ROOT_PASSWORD=""
+            prompt_db_credentials
+            setup_mysql_cmd
+            if ! test_db_connection; then
+                print_error "Still cannot connect. Please verify MariaDB is running."
+                [ "$LOG_AVAILABLE" = "true" ] && log_error "MariaDB connection failed after credential retry"
+                press_enter
+                return
+            fi
+        else
+            [ "$LOG_AVAILABLE" = "true" ] && log_warn "User declined to retry MariaDB credentials"
+            press_enter
+            return
+        fi
     fi
+    
+    [ "$LOG_AVAILABLE" = "true" ] && log_info "MariaDB connection successful"
 
     while true; do
         clear

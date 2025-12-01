@@ -284,12 +284,26 @@ press_enter() {
 check_docker() {
     if ! command -v docker &> /dev/null; then
         print_error "Docker is not installed"
-        exit 1
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Docker is not installed - cannot view container logs"
+        echo ""
+        echo "  Install Docker first:"
+        echo "    curl -fsSL https://get.docker.com | sh"
+        echo ""
+        press_enter
+        return 1
     fi
     if ! docker info &> /dev/null; then
         print_error "Docker daemon is not running or no permission"
-        exit 1
+        [ "$LOG_AVAILABLE" = "true" ] && log_error "Docker daemon not running or permission denied"
+        echo ""
+        echo "  Try:"
+        echo "    sudo systemctl start docker"
+        echo "    sudo usermod -aG docker \$USER"
+        echo ""
+        press_enter
+        return 1
     fi
+    return 0
 }
 
 # Get container status
@@ -3766,7 +3780,12 @@ show_main_menu() {
 # =============================================================================
 
 main() {
-    check_docker
+    if ! check_docker; then
+        if [ "$SHELLDER_LAUNCHER" = "1" ]; then
+            return_to_main
+        fi
+        return 1
+    fi
 
     # Check for command line arguments
     case "${1:-}" in
