@@ -55,6 +55,21 @@ SHELLDER_LOG_LEVEL="${SHELLDER_LOG_LEVEL:-$LOG_LEVEL_INFO}"
 SHELLDER_SESSION_ID="${SHELLDER_SESSION_ID:-$(date +%Y%m%d%H%M%S)_$$}"
 
 # =============================================================================
+# FILE OWNERSHIP HELPER
+# =============================================================================
+# Prevents log files from getting locked to root when running with sudo
+
+_fix_log_ownership() {
+    local file="$1"
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ] && [ -f "$file" ]; then
+        local current_owner=$(stat -c '%U' "$file" 2>/dev/null || echo "unknown")
+        if [ "$current_owner" = "root" ]; then
+            chown "$REAL_USER:${REAL_GROUP:-$REAL_USER}" "$file" 2>/dev/null || true
+        fi
+    fi
+}
+
+# =============================================================================
 # CORE LOGGING FUNCTIONS
 # =============================================================================
 
@@ -62,6 +77,14 @@ SHELLDER_SESSION_ID="${SHELLDER_SESSION_ID:-$(date +%Y%m%d%H%M%S)_$$}"
 init_logging() {
     local script_name="${1:-$SHELLDER_SCRIPT_NAME}"
     SHELLDER_SCRIPT_NAME="$script_name"
+    
+    # Fix ownership of log file if it was created as root
+    _fix_log_ownership "$SHELLDER_LOG_FILE"
+    
+    # Also fix rotated logs
+    for i in 1 2 3; do
+        _fix_log_ownership "${SHELLDER_LOG_FILE}.$i" 2>/dev/null
+    done
     
     # Rotate log if needed
     rotate_log_if_needed
@@ -77,6 +100,9 @@ init_logging() {
     
     # Set up error handling
     setup_error_handlers
+    
+    # Fix ownership again after writing (in case it was just created)
+    _fix_log_ownership "$SHELLDER_LOG_FILE"
 }
 
 # Write raw text to log (no formatting)

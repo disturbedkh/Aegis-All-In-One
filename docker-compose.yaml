@@ -293,10 +293,14 @@ services:
       dockerfile: Dockerfile
     container_name: shellder
     restart: unless-stopped
+    # Run as the same user as other containers to prevent root-locked files
+    user: "${PUID:-1000}:${PGID:-1000}"
     environment:
       - SHELLDER_PORT=5000
       - AEGIS_ROOT=/aegis
       - SECRET_KEY=${SHELLDER_SECRET:-shellder-default-secret}
+      - PUID=${PUID:-1000}
+      - PGID=${PGID:-1000}
     volumes:
       # Mount Docker socket for container management
       - /var/run/docker.sock:/var/run/docker.sock:ro

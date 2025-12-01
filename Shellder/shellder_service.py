@@ -95,9 +95,20 @@ STATIC_DIR = SHELLDER_DIR / 'gui_static'
 DATA_DIR = Path('/app/data') if Path('/app/data').exists() else SHELLDER_DIR / 'data'
 LOG_DIR = Path('/app/logs') if Path('/app/logs').exists() else SHELLDER_DIR / 'logs'
 
-# Ensure directories exist
-DATA_DIR.mkdir(exist_ok=True)
-LOG_DIR.mkdir(exist_ok=True)
+# Ensure directories exist (with graceful error handling for permission issues)
+try:
+    DATA_DIR.mkdir(exist_ok=True, mode=0o775)
+except PermissionError:
+    print(f"Warning: Cannot create {DATA_DIR} - using existing or will retry")
+except Exception as e:
+    print(f"Warning: Error creating {DATA_DIR}: {e}")
+
+try:
+    LOG_DIR.mkdir(exist_ok=True, mode=0o775)
+except PermissionError:
+    print(f"Warning: Cannot create {LOG_DIR} - using existing or will retry")
+except Exception as e:
+    print(f"Warning: Error creating {LOG_DIR}: {e}")
 
 # =============================================================================
 # FLASK APP SETUP

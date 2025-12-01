@@ -36,6 +36,32 @@ SHELLDER_DB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 SHELLDER_DB="$SHELLDER_DB_DIR/shellder.db"
 
 # =============================================================================
+# FILE OWNERSHIP HELPER
+# =============================================================================
+# Prevents files from getting locked to root when running with sudo
+
+fix_shellder_file_ownership() {
+    local file="$1"
+    # Only fix if we have REAL_USER set (meaning we're running via sudo)
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ] && [ -f "$file" ]; then
+        local current_owner=$(stat -c '%U' "$file" 2>/dev/null || echo "unknown")
+        if [ "$current_owner" = "root" ]; then
+            chown "$REAL_USER:${REAL_GROUP:-$REAL_USER}" "$file" 2>/dev/null || true
+        fi
+    fi
+}
+
+fix_shellder_dir_ownership() {
+    local dir="$1"
+    if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ] && [ -d "$dir" ]; then
+        local current_owner=$(stat -c '%U' "$dir" 2>/dev/null || echo "unknown")
+        if [ "$current_owner" = "root" ]; then
+            chown -R "$REAL_USER:${REAL_GROUP:-$REAL_USER}" "$dir" 2>/dev/null || true
+        fi
+    fi
+}
+
+# =============================================================================
 # DATABASE INITIALIZATION
 # =============================================================================
 
@@ -45,6 +71,10 @@ init_shellder_db() {
     if ! command -v sqlite3 &> /dev/null; then
         return 1
     fi
+    
+    # Ensure data directory exists and has correct ownership
+    mkdir -p "$SHELLDER_DB_DIR/data" 2>/dev/null || true
+    fix_shellder_dir_ownership "$SHELLDER_DB_DIR/data"
     
     # Create database and tables if they don't exist
     sqlite3 "$SHELLDER_DB" <<EOF
@@ -180,6 +210,12 @@ CREATE INDEX IF NOT EXISTS idx_config_values_key ON config_values(config_key);
 CREATE INDEX IF NOT EXISTS idx_config_discrepancies_key ON config_discrepancies(config_key);
 EOF
 
+    # Fix ownership to prevent root-locked files
+    fix_shellder_file_ownership "$SHELLDER_DB"
+    fix_shellder_file_ownership "$SHELLDER_DB-journal" 2>/dev/null || true
+    fix_shellder_file_ownership "$SHELLDER_DB-wal" 2>/dev/null || true
+    fix_shellder_file_ownership "$SHELLDER_DB-shm" 2>/dev/null || true
+    
     return 0
 }
 

@@ -40,8 +40,10 @@ COPY gui_static/ ./gui_static/
 COPY db_helper.sh ./db_helper.sh
 COPY log_helper.sh ./log_helper.sh
 
-# Create directories for data persistence
-RUN mkdir -p /app/data /app/logs
+# Create directories for data persistence with open permissions
+# These will be mounted from host anyway, but having them pre-created helps
+RUN mkdir -p /app/data /app/logs && \
+    chmod 777 /app/data /app/logs
 
 # Environment variables
 ENV PYTHONUNBUFFERED=1
@@ -57,5 +59,7 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
     CMD curl -f http://localhost:5000/api/health || exit 1
 
 # Run the service
+# Note: When running with user: directive in docker-compose.yaml,
+# the process runs as that user, preventing root-locked files
 CMD ["python", "shellder_service.py"]
 

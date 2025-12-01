@@ -44,6 +44,96 @@ fi
 export REAL_USER
 export REAL_GROUP
 
+# =============================================================================
+# FILE OWNERSHIP RESTORATION
+# =============================================================================
+# CRITICAL: Git operations run as root will lock files to root.
+# This function restores proper ownership after git pull/stash operations.
+
+restore_repo_ownership() {
+    # Only needed if running as root with a real user behind it
+    if [ -z "$REAL_USER" ] || [ "$REAL_USER" = "root" ]; then
+        return 0
+    fi
+    
+    local owner="${REAL_USER}:${REAL_GROUP:-$REAL_USER}"
+    
+    # Core repository files that git modifies
+    local repo_files=(
+        "shellder.sh"
+        ".gitignore"
+        "docker-compose.yaml"
+        "docker-compose.yml"
+        "README.md"
+    )
+    
+    # Directories that git modifies (not Docker data volumes)
+    local repo_dirs=(
+        "Shellder"
+        "wiki"
+        "mysql_data"
+    )
+    
+    # Docker data directories - use PUID:PGID from .env if available
+    local container_uid="${PUID:-1000}"
+    local container_gid="${PGID:-1000}"
+    if [ -f ".env" ]; then
+        local env_puid=$(grep -E "^PUID=" .env 2>/dev/null | cut -d'=' -f2 | tr -d ' "'"'"'')
+        local env_pgid=$(grep -E "^PGID=" .env 2>/dev/null | cut -d'=' -f2 | tr -d ' "'"'"'')
+        [ -n "$env_puid" ] && container_uid="$env_puid"
+        [ -n "$env_pgid" ] && container_gid="$env_pgid"
+    fi
+    local container_owner="${container_uid}:${container_gid}"
+    
+    # Data directories that containers write to
+    local data_dirs=(
+        "victoriametrics"
+        "vmagent"
+        "grafana"
+        "unown"
+        "Shellder/data"
+        "Shellder/logs"
+    )
+    
+    # Fix ownership of core repo files
+    for file in "${repo_files[@]}"; do
+        if [ -f "$file" ]; then
+            local current_owner=$(stat -c '%U' "$file" 2>/dev/null)
+            if [ "$current_owner" = "root" ]; then
+                chown "$owner" "$file" 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    # Fix ownership of repo directories (Shellder scripts, wiki, etc.)
+    for dir in "${repo_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            local current_owner=$(stat -c '%U' "$dir" 2>/dev/null)
+            if [ "$current_owner" = "root" ]; then
+                chown -R "$owner" "$dir" 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    # Fix ownership of data directories (for containers)
+    for dir in "${data_dirs[@]}"; do
+        if [ -d "$dir" ]; then
+            local current_owner=$(stat -c '%U' "$dir" 2>/dev/null)
+            if [ "$current_owner" = "root" ]; then
+                chown -R "$container_owner" "$dir" 2>/dev/null || true
+            fi
+        fi
+    done
+    
+    # Fix .git directory if owned by root (causes git operations to fail for user)
+    if [ -d ".git" ]; then
+        local git_owner=$(stat -c '%U' ".git" 2>/dev/null)
+        if [ "$git_owner" = "root" ]; then
+            chown -R "$owner" ".git" 2>/dev/null || true
+        fi
+    fi
+}
+
 # Source Shellder database helper for config management
 if [ -f "$SCRIPT_DIR/Shellder/db_helper.sh" ]; then
     source "$SCRIPT_DIR/Shellder/db_helper.sh"
@@ -926,6 +1016,9 @@ git_pull() {
     git pull origin $branch 2>&1
     local pull_result=$?
     
+    # CRITICAL: Restore file ownership after git pull (prevents root-locked files)
+    restore_repo_ownership
+    
     if [ $pull_result -eq 0 ]; then
         echo ""
         echo -e "${GREEN}✓ Updates downloaded successfully!${NC}"
@@ -938,6 +1031,9 @@ git_pull() {
             # Try to pop the stash
             git stash pop --quiet 2>&1
             local pop_result=$?
+            
+            # Restore ownership again after stash pop
+            restore_repo_ownership
             
             if [ $pop_result -eq 0 ]; then
                 echo -e "${GREEN}✓ Your configs have been restored!${NC}"
@@ -970,6 +1066,7 @@ git_pull() {
             echo ""
             echo -e "${CYAN}Restoring your configs...${NC}"
             git stash pop --quiet 2>/dev/null
+            restore_repo_ownership
             echo -e "${GREEN}✓ Configs restored${NC}"
         fi
         
@@ -1029,11 +1126,15 @@ update_and_rebuild() {
     
     git pull origin $branch 2>&1
     
+    # CRITICAL: Restore file ownership after git pull
+    restore_repo_ownership
+    
     if [ $? -ne 0 ]; then
         echo -e "${RED}Pull failed. Aborting.${NC}"
         # Restore stash
         if [ "$had_changes" = true ]; then
             git stash pop --quiet 2>/dev/null
+            restore_repo_ownership
         fi
         press_enter
         return
@@ -1043,6 +1144,7 @@ update_and_rebuild() {
     if [ "$had_changes" = true ]; then
         echo -e "${DIM}Restoring your configs...${NC}"
         git stash pop --quiet 2>/dev/null
+        restore_repo_ownership
         if [ $? -eq 0 ]; then
             echo -e "${GREEN}✓ Configs restored${NC}"
         else
@@ -2107,10 +2209,47 @@ fix_permissions() {
     local pgid="${PGID:-1000}"
     
     echo -e "  Using PUID:PGID = ${CYAN}$puid:$pgid${NC} (from .env)"
+    echo -e "  Real user: ${CYAN}$REAL_USER${NC}"
     echo ""
     
-    echo -e "${WHITE}${BOLD}Directories to fix:${NC}"
-    echo -e "  ${DIM}These directories must be writable by containers${NC}"
+    # ─────────────────────────────────────────────────────────────────────────
+    # SECTION 1: Repository files (owned by user, not container UID)
+    # ─────────────────────────────────────────────────────────────────────────
+    echo -e "${WHITE}${BOLD}Repository Files:${NC}"
+    echo -e "  ${DIM}These should be owned by $REAL_USER (you)${NC}"
+    echo ""
+    
+    local repo_issues=0
+    local repo_items=(
+        "shellder.sh:Main script"
+        ".gitignore:Git ignore"
+        "wiki:Wiki directory"
+        "Shellder:Shellder scripts"
+        ".git:Git repository"
+    )
+    
+    for item in "${repo_items[@]}"; do
+        local path="${item%%:*}"
+        local desc="${item##*:}"
+        
+        if [ -e "$path" ]; then
+            local owner=$(stat -c '%U' "$path" 2>/dev/null || echo "unknown")
+            if [ "$owner" = "$REAL_USER" ] || [ "$owner" != "root" ]; then
+                printf "  %-25s ${GREEN}✓ OK${NC} (owner: $owner)\n" "$desc:"
+            else
+                printf "  %-25s ${YELLOW}⚠ ROOT LOCKED${NC} (need: $REAL_USER)\n" "$desc:"
+                ((repo_issues++))
+            fi
+        fi
+    done
+    
+    echo ""
+    
+    # ─────────────────────────────────────────────────────────────────────────
+    # SECTION 2: Container data directories (owned by PUID:PGID)
+    # ─────────────────────────────────────────────────────────────────────────
+    echo -e "${WHITE}${BOLD}Container Data Directories:${NC}"
+    echo -e "  ${DIM}These must be writable by containers (PUID:PGID = $puid:$pgid)${NC}"
     echo ""
     
     # Directories that need fixing
@@ -2147,17 +2286,28 @@ fix_permissions() {
     
     echo ""
     
-    if [ $issues -eq 0 ]; then
-        echo -e "${GREEN}✓ All directory permissions look correct!${NC}"
+    local total_issues=$((repo_issues + issues))
+    
+    if [ $total_issues -eq 0 ]; then
+        echo -e "${GREEN}✓ All permissions look correct!${NC}"
         echo ""
         press_enter
         return
     fi
     
-    echo -e "${YELLOW}Found $issues directories that need permission fixes.${NC}"
     echo ""
-    echo -e "  1) ${GREEN}Fix all permissions${NC} (recommended)"
-    echo "  2) Fix specific directory"
+    echo -e "${YELLOW}Found $total_issues items that need permission fixes.${NC}"
+    if [ $repo_issues -gt 0 ]; then
+        echo -e "  ${RED}• $repo_issues repository files locked to root${NC}"
+    fi
+    if [ $issues -gt 0 ]; then
+        echo -e "  ${YELLOW}• $issues container directories need fixing${NC}"
+    fi
+    echo ""
+    echo -e "  1) ${GREEN}Fix ALL permissions${NC} (recommended)"
+    echo "  2) Fix repository files only"
+    echo "  3) Fix container directories only"
+    echo "  4) Fix specific directory"
     echo "  0) Cancel"
     echo ""
     
@@ -2166,15 +2316,38 @@ fix_permissions() {
     case $choice in
         1)
             echo ""
-            echo -e "${CYAN}Fixing all directory permissions...${NC}"
+            echo -e "${CYAN}Fixing all permissions...${NC}"
             echo ""
             
+            # Fix repository files first
+            if [ $repo_issues -gt 0 ]; then
+                echo -e "  ${WHITE}Repository files:${NC}"
+                for item in "${repo_items[@]}"; do
+                    local path="${item%%:*}"
+                    local desc="${item##*:}"
+                    
+                    if [ -e "$path" ]; then
+                        local owner=$(stat -c '%U' "$path" 2>/dev/null)
+                        if [ "$owner" = "root" ]; then
+                            if [ -d "$path" ]; then
+                                chown -R "$REAL_USER:$REAL_GROUP" "$path" 2>/dev/null
+                            else
+                                chown "$REAL_USER:$REAL_GROUP" "$path" 2>/dev/null
+                            fi
+                            echo -e "  ✓ Fixed $desc ($path)"
+                        fi
+                    fi
+                done
+                echo ""
+            fi
+            
+            # Fix container directories
+            echo -e "  ${WHITE}Container directories:${NC}"
             for item in "${dirs[@]}"; do
                 local dir="${item%%:*}"
                 local desc="${item##*:}"
                 
                 if [ -d "$dir" ]; then
-                    mkdir -p "$dir"
                     sudo chown -R "$puid:$pgid" "$dir"
                     sudo chmod -R 775 "$dir"
                     echo -e "  ✓ Fixed $desc ($dir)"
@@ -2194,6 +2367,43 @@ fix_permissions() {
             echo ""
             ;;
         2)
+            echo ""
+            echo -e "${CYAN}Fixing repository file permissions...${NC}"
+            for item in "${repo_items[@]}"; do
+                local path="${item%%:*}"
+                local desc="${item##*:}"
+                
+                if [ -e "$path" ]; then
+                    if [ -d "$path" ]; then
+                        chown -R "$REAL_USER:$REAL_GROUP" "$path" 2>/dev/null
+                    else
+                        chown "$REAL_USER:$REAL_GROUP" "$path" 2>/dev/null
+                    fi
+                    echo -e "  ✓ Fixed $desc ($path)"
+                fi
+            done
+            echo ""
+            echo -e "${GREEN}✓ Repository files fixed!${NC}"
+            ;;
+        3)
+            echo ""
+            echo -e "${CYAN}Fixing container directory permissions...${NC}"
+            for item in "${dirs[@]}"; do
+                local dir="${item%%:*}"
+                local desc="${item##*:}"
+                
+                mkdir -p "$dir"
+                sudo chown -R "$puid:$pgid" "$dir"
+                sudo chmod -R 775 "$dir"
+                echo -e "  ✓ Fixed $desc ($dir)"
+            done
+            echo ""
+            echo -e "${GREEN}✓ Container directories fixed!${NC}"
+            echo ""
+            echo -e "${CYAN}Tip: Restart affected containers:${NC}"
+            echo "  docker compose restart grafana victoriametrics vmagent"
+            ;;
+        4)
             echo ""
             echo "  Enter directory path (e.g., grafana):"
             read -p "  > " dir_path
@@ -2669,6 +2879,10 @@ main() {
         [ "$LOG_AVAILABLE" = "true" ] && log_error "Not in Aegis AIO directory" "docker-compose.yaml not found" "Run from the Aegis AIO installation directory"
         exit 1
     fi
+    
+    # CRITICAL: Fix any root-locked files from previous sudo runs
+    # This runs silently on startup to prevent permission issues
+    restore_repo_ownership
     
     # Check configuration on first launch
     check_config_on_launch
