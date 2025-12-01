@@ -1701,6 +1701,8 @@ class DeviceMonitor:
         # Record crash if significant
         if severity in ('error', 'critical') or 'disconnect' in event_type:
             self._record_crash_event(event)
+            # Analyze cross-container correlation
+            self._analyze_crash_correlation(event)
         
         # Add to activity feed
         self._add_to_feed(event)
@@ -1729,6 +1731,140 @@ class DeviceMonitor:
                     'message': f'Device disconnect followed by error within {int(elapsed)}s - likely related',
                     'original_error': error_event.get('message', error_event.get('raw', ''))[:100]
                 })
+    
+    def _analyze_crash_correlation(self, event):
+        """
+        Analyze if this crash correlates with crashes in other containers.
+        A crash in Rotom within 10 seconds of a crash in Dragonite = same incident.
+        """
+        device = event.get('device')
+        container = event.get('container')
+        event_time = time.time()
+        
+        # Store this crash for correlation
+        crash_key = f"{device}:{container}"
+        if not hasattr(self, 'crash_history'):
+            self.crash_history = {}
+        
+        self.crash_history[crash_key] = {
+            'time': event_time,
+            'event': event,
+            'container': container,
+            'device': device
+        }
+        
+        # Look for correlated crash in other container
+        other_container = 'dragonite' if container == 'rotom' else 'rotom'
+        other_key = f"{device}:{other_container}"
+        
+        if other_key in self.crash_history:
+            other_crash = self.crash_history[other_key]
+            time_diff = abs(event_time - other_crash['time'])
+            
+            if time_diff <= 10:  # Within 10 seconds = same incident
+                # Determine root cause - which happened first?
+                if other_crash['time'] < event_time:
+                    origin = other_container
+                    origin_event = other_crash['event']
+                    follow_event = event
+                else:
+                    origin = container
+                    origin_event = event
+                    follow_event = other_crash['event']
+                
+                # Analyze the root cause
+                root_cause = self._determine_root_cause(origin, origin_event, follow_event)
+                
+                correlation = {
+                    'type': 'correlated_crash',
+                    'device': device,
+                    'severity': 'error',
+                    'origin_container': origin,
+                    'time_diff_seconds': round(time_diff, 2),
+                    'root_cause': root_cause,
+                    'origin_event': origin_event.get('type'),
+                    'origin_message': origin_event.get('raw', '')[:150],
+                    'follow_event': follow_event.get('type'),
+                    'follow_message': follow_event.get('raw', '')[:150]
+                }
+                
+                self._emit_event(correlation)
+                self._add_to_feed(correlation)
+                
+                # Store for later analysis
+                if device:
+                    with self.lock:
+                        if device in self.devices:
+                            if 'correlated_crashes' not in self.devices[device]:
+                                self.devices[device]['correlated_crashes'] = []
+                            self.devices[device]['correlated_crashes'].append(correlation)
+                            # Keep last 10
+                            self.devices[device]['correlated_crashes'] = \
+                                self.devices[device]['correlated_crashes'][-10:]
+                
+                return correlation
+        
+        return None
+    
+    def _determine_root_cause(self, origin_container, origin_event, follow_event):
+        """Analyze events to determine the root cause of a correlated crash"""
+        origin_type = origin_event.get('type', '')
+        origin_msg = origin_event.get('raw', '').lower()
+        
+        # Common root causes
+        if origin_container == 'rotom':
+            if 'disconnect' in origin_type:
+                if 'network' in origin_msg or 'timeout' in origin_msg:
+                    return {
+                        'cause': 'network_issue',
+                        'description': 'Device lost network connection',
+                        'recommendation': 'Check device WiFi/cellular, Rotom server network'
+                    }
+                elif 'memory' in origin_msg:
+                    return {
+                        'cause': 'device_memory',
+                        'description': 'Device ran out of memory',
+                        'recommendation': 'Check device memory, close other apps'
+                    }
+                else:
+                    return {
+                        'cause': 'device_disconnect',
+                        'description': 'Device disconnected from Rotom (cause unknown)',
+                        'recommendation': 'Check device logs, battery, app stability'
+                    }
+            elif 'rejected' in origin_type:
+                return {
+                    'cause': 'no_workers',
+                    'description': 'No available workers in Rotom',
+                    'recommendation': 'Check max_workers setting in rotom_config.json'
+                }
+        
+        elif origin_container == 'dragonite':
+            if 'account' in origin_type or 'banned' in origin_msg or 'auth' in origin_msg:
+                return {
+                    'cause': 'account_issue',
+                    'description': 'Account problem (banned, invalid, or auth failure)',
+                    'recommendation': 'Check account status, Xilriws proxy health'
+                }
+            elif 'api' in origin_type.lower() or 'golbat' in origin_msg:
+                return {
+                    'cause': 'api_failure',
+                    'description': 'Internal API communication failure',
+                    'recommendation': 'Check Golbat status, database connection'
+                }
+            elif 'database' in origin_msg or 'sql' in origin_msg:
+                return {
+                    'cause': 'database_error',
+                    'description': 'Database connection or query failure',
+                    'recommendation': 'Check MariaDB status, connection pool'
+                }
+        
+        # Generic fallback
+        return {
+            'cause': 'unknown',
+            'description': f'Crash originated in {origin_container}',
+            'recommendation': 'Review logs for more context'
+        }
     
     def _add_to_feed(self, event):
         """Add event to activity feed"""
@@ -1945,6 +2081,193 @@ class DeviceMonitor:
                             'severity': 'warning',
                             'message': 'Device connected to Rotom but not registered in Dragonite'
                         })
+    
+    def get_port_7070_connections(self):
+        """
+        Monitor active connections to port 7070 (device WebSocket port).
+        Uses Docker exec to run netstat inside the Rotom container.
+        Returns list of connected IPs and connection states.
+        """
+        connections = []
+        
+        if not docker_client:
+            return {'error': 'Docker not available', 'connections': []}
+        
+        try:
+            container = docker_client.containers.get('rotom')
+            if container.status != 'running':
+                return {'error': 'Rotom not running', 'connections': []}
+            
+            # Run netstat inside the container to see connections on port 7070
+            # Try different approaches since not all containers have netstat
+            result = None
+            
+            # Try ss (modern replacement for netstat)
+            try:
+                result = container.exec_run(
+                    "ss -tn state established '( sport = :7070 )'",
+                    demux=True
+                )
+                if result.exit_code == 0 and result.output[0]:
+                    output = result.output[0].decode('utf-8', errors='ignore')
+                    for line in output.strip().split('\n')[1:]:  # Skip header
+                        parts = line.split()
+                        if len(parts) >= 5:
+                            remote = parts[4]  # Remote address:port
+                            if ':' in remote:
+                                ip = remote.rsplit(':', 1)[0]
+                                connections.append({
+                                    'remote_ip': ip,
+                                    'state': 'ESTABLISHED',
+                                    'local_port': 7070
+                                })
+            except:
+                pass
+            
+            # If ss didn't work, try /proc/net/tcp
+            if not connections:
+                try:
+                    result = container.exec_run("cat /proc/net/tcp", demux=True)
+                    if result.exit_code == 0 and result.output[0]:
+                        output = result.output[0].decode('utf-8', errors='ignore')
+                        # Parse /proc/net/tcp format
+                        # Port 7070 in hex = 1B9E
+                        for line in output.strip().split('\n')[1:]:
+                            parts = line.split()
+                            if len(parts) >= 3:
+                                local = parts[1]
+                                remote = parts[2]
+                                state = parts[3]
+                                
+                                # Check if local port is 7070 (0x1B9E)
+                                if ':1B9E' in local.upper():
+                                    # Parse remote IP
+                                    if ':' in remote:
+                                        hex_ip, hex_port = remote.split(':')
+                                        # Convert hex IP to dotted decimal (little endian)
+                                        try:
+                                            ip_int = int(hex_ip, 16)
+                                            ip = f"{ip_int & 0xFF}.{(ip_int >> 8) & 0xFF}.{(ip_int >> 16) & 0xFF}.{(ip_int >> 24) & 0xFF}"
+                                            port = int(hex_port, 16)
+                                            
+                                            state_map = {
+                                                '01': 'ESTABLISHED',
+                                                '02': 'SYN_SENT',
+                                                '03': 'SYN_RECV',
+                                                '04': 'FIN_WAIT1',
+                                                '05': 'FIN_WAIT2',
+                                                '06': 'TIME_WAIT',
+                                                '07': 'CLOSE',
+                                                '08': 'CLOSE_WAIT',
+                                                '09': 'LAST_ACK',
+                                                '0A': 'LISTEN'
+                                            }
+                                            
+                                            connections.append({
+                                                'remote_ip': ip,
+                                                'remote_port': port,
+                                                'state': state_map.get(state, state),
+                                                'local_port': 7070
+                                            })
+                                        except:
+                                            pass
+                except:
+                    pass
+            
+            # Get connection count and unique IPs
+            unique_ips = set(c['remote_ip'] for c in connections)
+            established = [c for c in connections if c.get('state') == 'ESTABLISHED']
+            
+            return {
+                'port': 7070,
+                'total_connections': len(connections),
+                'established': len(established),
+                'unique_devices': len(unique_ips),
+                'connections': connections,
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except docker.errors.NotFound:
+            return {'error': 'Rotom container not found', 'connections': []}
+        except Exception as e:
+            return {'error': str(e), 'connections': []}
+    
+    def get_rotom_device_traffic(self, lines=100):
+        """
+        Get recent device traffic from Rotom logs.
+        Parses and returns structured device communication events.
+        """
+        traffic = []
+        
+        if not docker_client:
+            return {'error': 'Docker not available', 'traffic': []}
+        
+        try:
+            container = docker_client.containers.get('rotom')
+            if container.status != 'running':
+                return {'error': 'Rotom not running', 'traffic': []}
+            
+            logs = container.logs(tail=lines, timestamps=True).decode('utf-8', errors='ignore')
+            
+            # Parse device-related log entries
+            device_patterns = {
+                'connect': re.compile(r'\[([^\]]+)\].*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)'),
+                'disconnect': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Disconnected'),
+                'id_packet': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Received id packet origin\s+(\S+)'),
+                'memory': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:Memory\s*=\s*(\{[^}]+\})'),
+                'data_received': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Received\s+(\d+)\s+bytes'),
+                'heartbeat': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*(heartbeat|ping|pong)', re.I),
+                'error': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*.*(error|failed|timeout)', re.I),
+            }
+            
+            for line in logs.split('\n'):
+                for event_type, pattern in device_patterns.items():
+                    match = pattern.search(line)
+                    if match:
+                        groups = match.groups()
+                        entry = {
+                            'type': event_type,
+                            'timestamp': groups[0] if groups else None,
+                            'device': groups[1] if len(groups) > 1 else None,
+                            'raw': line[:300]
+                        }
+                        
+                        if event_type == 'connect' and len(groups) > 2:
+                            entry['worker'] = groups[2]
+                        elif event_type == 'id_packet' and len(groups) > 2:
+                            entry['origin'] = groups[2]
+                        elif event_type == 'memory' and len(groups) > 2:
+                            try:
+                                entry['memory'] = json.loads(groups[2])
+                            except:
+                                entry['memory_raw'] = groups[2]
+                        elif event_type == 'data_received' and len(groups) > 2:
+                            entry['bytes'] = int(groups[2])
+                        
+                        traffic.append(entry)
+                        break  # Only match first pattern per line
+            
+            # Summarize
+            devices_seen = set(t['device'] for t in traffic if t.get('device'))
+            connects = len([t for t in traffic if t['type'] == 'connect'])
+            disconnects = len([t for t in traffic if t['type'] == 'disconnect'])
+            errors = len([t for t in traffic if t['type'] == 'error'])
+            
+            return {
+                'summary': {
+                    'devices_seen': len(devices_seen),
+                    'device_names': list(devices_seen)[:20],
+                    'connects': connects,
+                    'disconnects': disconnects,
+                    'errors': errors,
+                    'total_events': len(traffic)
+                },
+                'traffic': traffic[-50:],  # Last 50 events
+                'timestamp': datetime.now().isoformat()
+            }
+            
+        except Exception as e:
+            return {'error': str(e), 'traffic': []}
     
     def _calculate_cpu_percent(self, stats):
         """Calculate CPU percentage from Docker stats"""
@@ -4861,6 +5184,68 @@ def api_monitor_device(device_name):
     return jsonify({
         'state': device_state,
         'activity': activity
+    })
+
+@app.route('/api/monitor/port7070')
+def api_monitor_port7070():
+    """Get active connections to Rotom device port 7070"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    return jsonify(device_monitor.get_port_7070_connections())
+
+@app.route('/api/monitor/traffic')
+def api_monitor_traffic():
+    """Get recent device traffic from Rotom logs"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    lines = request.args.get('lines', 200, type=int)
+    return jsonify(device_monitor.get_rotom_device_traffic(lines))
+
+@app.route('/api/monitor/correlations')
+def api_monitor_correlations():
+    """Get correlated crashes (same incident across Rotom and Dragonite)"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    # Get all correlated crashes from devices
+    correlations = []
+    with device_monitor.lock:
+        for device_name, dev in device_monitor.devices.items():
+            if 'correlated_crashes' in dev:
+                for crash in dev['correlated_crashes']:
+                    crash['device'] = device_name
+                    correlations.append(crash)
+    
+    # Sort by most recent
+    correlations.sort(key=lambda x: x.get('timestamp', ''), reverse=True)
+    
+    return jsonify({
+        'total': len(correlations),
+        'correlations': correlations[:50]
+    })
+
+@app.route('/api/monitor/workflow')
+def api_monitor_workflow():
+    """Get the complete device workflow status"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    summary = device_monitor.get_live_summary()
+    port_connections = device_monitor.get_port_7070_connections()
+    
+    return jsonify({
+        'workflow': summary.get('workflow', {}),
+        'devices': summary.get('devices', {}),
+        'tasks': summary.get('tasks', {}),
+        'workers': summary.get('workers', {}),
+        'port_7070': {
+            'active_connections': port_connections.get('established', 0),
+            'unique_devices': port_connections.get('unique_devices', 0)
+        },
+        'activity': summary.get('activity', {}),
+        'timestamp': datetime.now().isoformat()
     })
 
 # =============================================================================
