@@ -2129,8 +2129,8 @@ sed -i "s/dbuser/${DB_USER}/g" .env reactmap/local.json unown/dragonite_config.t
 sed -i "s/V3ryS3cUr3MYSQL_ROOT_P4ssw0rd/${MYSQL_ROOT_PASSWORD}/g" .env
 
 # Update PUID/PGID to match current user (important for Grafana, etc.)
-sed -i "s/^PUID=.*/PUID=${USER_UID}/" .env
-sed -i "s/^PGID=.*/PGID=${USER_GID}/" .env
+sed -i "s/^PUID=.*/PUID=${CONTAINER_UID}/" .env
+sed -i "s/^PGID=.*/PGID=${CONTAINER_GID}/" .env
 
 # Koji bearer token
 sed -i "s/SuperSecureKojiSecret/${KOJI_BEARER}/g" .env reactmap/local.json unown/dragonite_config.toml unown/golbat_config.toml unown/rotom_config.json
@@ -2406,19 +2406,19 @@ if [ "$DB_AVAILABLE" = "true" ]; then
     done
     
     # Store PUID/PGID (validate they're numbers)
-    if [[ "$USER_UID" =~ ^[0-9]+$ ]]; then
-        store_config_value "PUID" "$USER_UID" ".env" "Docker container user ID" 0
+    if [[ "$CONTAINER_UID" =~ ^[0-9]+$ ]]; then
+        store_config_value "PUID" "$CONTAINER_UID" ".env" "Docker container user ID" 0
         ((stored_count++)) || true
     else
-        print_warning "Skipped PUID (invalid: $USER_UID)"
+        print_warning "Skipped PUID (invalid: $CONTAINER_UID)"
         ((skipped_count++)) || true
     fi
     
-    if [[ "$USER_GID" =~ ^[0-9]+$ ]]; then
-        store_config_value "PGID" "$USER_GID" ".env" "Docker container group ID" 0
+    if [[ "$CONTAINER_GID" =~ ^[0-9]+$ ]]; then
+        store_config_value "PGID" "$CONTAINER_GID" ".env" "Docker container group ID" 0
         ((stored_count++)) || true
     else
-        print_warning "Skipped PGID (invalid: $USER_GID)"
+        print_warning "Skipped PGID (invalid: $CONTAINER_GID)"
         ((skipped_count++)) || true
     fi
     
