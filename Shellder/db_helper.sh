@@ -62,13 +62,38 @@ fix_shellder_dir_ownership() {
 }
 
 # =============================================================================
+# SQLITE3 AVAILABILITY CHECK
+# =============================================================================
+
+# Check if sqlite3 is available (cached for performance)
+SQLITE3_AVAILABLE=""
+check_sqlite3() {
+    if [ -z "$SQLITE3_AVAILABLE" ]; then
+        if command -v sqlite3 &> /dev/null; then
+            SQLITE3_AVAILABLE="yes"
+        else
+            SQLITE3_AVAILABLE="no"
+        fi
+    fi
+    [ "$SQLITE3_AVAILABLE" = "yes" ]
+}
+
+# Run sqlite3 command only if available
+run_sqlite3() {
+    if ! check_sqlite3; then
+        return 1
+    fi
+    sqlite3 "$@"
+}
+
+# =============================================================================
 # DATABASE INITIALIZATION
 # =============================================================================
 
 # Initialize the database with all required tables
 init_shellder_db() {
     # Check if sqlite3 is available
-    if ! command -v sqlite3 &> /dev/null; then
+    if ! check_sqlite3; then
         return 1
     fi
     
@@ -1051,6 +1076,11 @@ store_config_value() {
     value="${value//\'/\'\'}"
     description="${description//\'/\'\'}"
     
+    # Check sqlite3 is available
+    if ! check_sqlite3; then
+        return 1
+    fi
+    
     sqlite3 "$SHELLDER_DB" <<EOF
 INSERT INTO config_values (config_key, config_value, source_file, description, is_secret, last_verified, verified_match)
 VALUES ('$key', '$value', '$source_file', '$description', $is_secret, CURRENT_TIMESTAMP, 1)
@@ -1069,6 +1099,7 @@ EOF
 get_config_value() {
     local key="$1"
     [ -z "$key" ] && return 1
+    check_sqlite3 || return 1
     
     sqlite3 "$SHELLDER_DB" "SELECT config_value FROM config_values WHERE config_key = '$key';" 2>/dev/null
 }
@@ -1076,6 +1107,7 @@ get_config_value() {
 # Check if a config key exists in database
 config_exists() {
     local key="$1"
+    check_sqlite3 || return 1
     local count=$(sqlite3 "$SHELLDER_DB" "SELECT COUNT(*) FROM config_values WHERE config_key = '$key';" 2>/dev/null)
     [ "$count" -gt 0 ]
 }

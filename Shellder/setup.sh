@@ -1286,6 +1286,22 @@ fi
 
 echo ""
 
+# Install sqlite3 for Shellder database (config storage)
+if ! command -v sqlite3 &> /dev/null; then
+    print_info "Installing sqlite3 for configuration storage..."
+    case "$PKG_MANAGER" in
+        apt)
+            apt-get install -y sqlite3 >/dev/null 2>&1 && print_success "sqlite3 installed" || print_warning "Could not install sqlite3 (non-critical)"
+            ;;
+        dnf|yum)
+            $PKG_MANAGER install -y sqlite >/dev/null 2>&1 && print_success "sqlite3 installed" || print_warning "Could not install sqlite3 (non-critical)"
+            ;;
+        pacman)
+            pacman -S --noconfirm sqlite >/dev/null 2>&1 && print_success "sqlite3 installed" || print_warning "Could not install sqlite3 (non-critical)"
+            ;;
+    esac
+fi
+
 # =============================================================================
 # Step 1b: Check Port Availability for Stack Services
 # =============================================================================
