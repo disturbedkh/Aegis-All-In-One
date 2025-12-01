@@ -515,6 +515,9 @@ show_main_menu() {
     echo "    6) Poracle Setup          - Discord/Telegram notifications"
     echo "    7) Fletchling Setup       - Pokemon nest detection"
     echo ""
+    echo -e "  ${CYAN}File Management${NC}"
+    echo "    8) File Manager           - Manage files, restore from GitHub"
+    echo ""
     echo -e "  ${CYAN}Stack Controls${NC}"
     echo "    s) Start Stack            - Start all containers"
     echo "    x) Stop Stack             - Stop all containers"
@@ -2427,6 +2430,8 @@ main() {
             # Optional Features
             6) run_script "poracle.sh" "Poracle Setup" ;;
             7) run_script "fletchling.sh" "Fletchling Setup" ;;
+            # File Management
+            8) run_script "files.sh" "File System Manager" ;;
             # Stack Controls
             s|S) docker_start ;;
             x|X) docker_stop ;;

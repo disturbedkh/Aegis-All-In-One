@@ -221,12 +221,38 @@ bash Shellder/log_helper.sh --clear
 | `Shellder/nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
 | `Shellder/poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
 | `Shellder/fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
+| `Shellder/files.sh` | **File System Manager** - restore files, GitHub sync | Missing files, updates |
 
 **Internal Helper Scripts** (not typically run directly):
 | Script | Purpose |
 |--------|---------|
 | `Shellder/db_helper.sh` | Shellder's internal SQLite database (stats/config storage) |
 | `Shellder/log_helper.sh` | Shellder's operation log (for debugging Shellder scripts) |
+
+### File System Manager
+
+The File System Manager (`Shellder/files.sh`) provides complete file management:
+
+**File Management:**
+- Check for missing essential files
+- Restore deleted/missing files from GitHub
+- Compare local files with GitHub versions
+- Browse and view files
+
+**Git & Updates:**
+- Monitor for new updates from GitHub
+- Pull updates with automatic stash/restore
+- View local modifications
+- Manage merge conflicts
+
+**Backup & Restore:**
+- Backup all configuration files
+- Restore from previous backups
+
+```bash
+# Access via Shellder menu (option 8) or directly:
+sudo bash Shellder/files.sh
+```
 
 ### Quick Start with Shellder
 
