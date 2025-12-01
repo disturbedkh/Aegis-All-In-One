@@ -1449,5 +1449,360 @@ showPage = function(page) {
         case 'files':
             navigateToPath('');
             break;
+        case 'stack':
+            loadStackData();
+            break;
     }
 };
+
+// =============================================================================
+// STACK DATABASE FUNCTIONS (Cross-Reference with MariaDB)
+// =============================================================================
+
+async function loadStackData() {
+    await Promise.all([
+        loadStackConnection(),
+        loadStackSummary(),
+        loadStackDevices()
+    ]);
+}
+
+async function refreshStackData() {
+    await loadStackData();
+    showToast('Stack data refreshed', 'success');
+}
+
+async function loadStackConnection() {
+    const el = document.getElementById('stackConnection');
+    if (!el) return;
+    
+    try {
+        const data = await fetchAPI('/api/stack/test');
+        if (data.connected) {
+            el.innerHTML = `
+                <div class="connection-success">
+                    <span class="status-dot online"></span>
+                    <span>Connected to MariaDB ${data.version || ''}</span>
+                </div>
+            `;
+            el.classList.add('connected');
+        } else {
+            el.innerHTML = `
+                <div class="connection-error">
+                    <span class="status-dot offline"></span>
+                    <span>Cannot connect to stack database: ${data.error || 'Unknown error'}</span>
+                    <small>Make sure database container is running and .env is configured</small>
+                </div>
+            `;
+        }
+    } catch (e) {
+        el.innerHTML = `
+            <div class="connection-error">
+                <span class="status-dot offline"></span>
+                <span>API Error: ${e.message}</span>
+            </div>
+        `;
+    }
+}
+
+async function loadStackSummary() {
+    try {
+        const [golbat, dragonite, koji, efficiency] = await Promise.all([
+            fetchAPI('/api/stack/golbat'),
+            fetchAPI('/api/stack/dragonite'),
+            fetchAPI('/api/stack/koji'),
+            fetchAPI('/api/stack/efficiency')
+        ]);
+        
+        // Update header stats
+        if (!golbat.error) {
+            document.getElementById('stackPokemon').textContent = 
+                formatNumber(golbat.active_pokemon || golbat.pokemon_count || 0);
+        }
+        if (!dragonite.error) {
+            document.getElementById('stackAccounts').textContent = 
+                formatNumber(dragonite.active_accounts || 0);
+            document.getElementById('stackDevices').textContent = 
+                formatNumber(dragonite.online_devices || 0);
+        }
+        if (!efficiency.error) {
+            document.getElementById('stackEfficiency').textContent = 
+                formatNumber(efficiency.pokemon_per_hour || 0);
+        }
+        
+        // Update Scanner Stats panel
+        updateScannerStats(dragonite);
+        
+        // Update Account Stats panel
+        updateAccountStats(dragonite);
+        
+        // Update Golbat Stats panel
+        updateGolbatStats(golbat);
+        
+        // Update Koji Stats panel
+        updateKojiStats(koji);
+        
+    } catch (e) {
+        console.error('Failed to load stack summary:', e);
+    }
+}
+
+function updateScannerStats(data) {
+    const el = document.getElementById('scannerStats');
+    if (!el) return;
+    
+    if (data.error) {
+        el.innerHTML = `<div class="error-msg">${data.error}</div>`;
+        return;
+    }
+    
+    el.innerHTML = `
+        <div class="stat-list">
+            <div class="stat-row">
+                <span class="stat-name">📱 Total Devices</span>
+                <span class="stat-val">${formatNumber(data.total_devices || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🟢 Online Devices</span>
+                <span class="stat-val success">${formatNumber(data.online_devices || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">📋 Total Instances</span>
+                <span class="stat-val">${formatNumber(data.total_instances || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🔄 Active Last Hour</span>
+                <span class="stat-val">${formatNumber(data.active_last_hour || 0)}</span>
+            </div>
+        </div>
+        ${data.instances && data.instances.length > 0 ? `
+        <div class="instances-list">
+            <h4>Active Instances</h4>
+            ${data.instances.map(i => `
+                <div class="instance-row">
+                    <span class="instance-name">${i.name}</span>
+                    <span class="instance-type">${i.type}</span>
+                </div>
+            `).join('')}
+        </div>
+        ` : ''}
+    `;
+}
+
+function updateAccountStats(data) {
+    const el = document.getElementById('accountStats');
+    if (!el) return;
+    
+    if (data.error) {
+        el.innerHTML = `<div class="error-msg">${data.error}</div>`;
+        return;
+    }
+    
+    const total = data.total_accounts || 0;
+    const active = data.active_accounts || 0;
+    const banned = data.banned_accounts || 0;
+    const authBanned = data.auth_banned_accounts || 0;
+    const warned = data.warned_accounts || 0;
+    
+    el.innerHTML = `
+        <div class="stat-list">
+            <div class="stat-row">
+                <span class="stat-name">📊 Total Accounts</span>
+                <span class="stat-val">${formatNumber(total)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">✅ Active/Usable</span>
+                <span class="stat-val success">${formatNumber(active)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🔑 With Refresh Token</span>
+                <span class="stat-val">${formatNumber(data.with_refresh_token || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">⚠️ Warned</span>
+                <span class="stat-val warning">${formatNumber(warned)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🚫 Banned</span>
+                <span class="stat-val danger">${formatNumber(banned)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🔒 Auth Banned</span>
+                <span class="stat-val danger">${formatNumber(authBanned)}</span>
+            </div>
+        </div>
+        ${data.by_provider ? `
+        <div class="provider-breakdown">
+            <h4>By Provider</h4>
+            ${Object.entries(data.by_provider).map(([prov, cnt]) => `
+                <div class="provider-row">
+                    <span>${prov}</span>
+                    <span>${formatNumber(cnt)}</span>
+                </div>
+            `).join('')}
+        </div>
+        ` : ''}
+    `;
+}
+
+function updateGolbatStats(data) {
+    const el = document.getElementById('golbatStats');
+    if (!el) return;
+    
+    if (data.error) {
+        el.innerHTML = `<div class="error-msg">${data.error}</div>`;
+        return;
+    }
+    
+    el.innerHTML = `
+        <div class="stat-list">
+            <div class="stat-row">
+                <span class="stat-name">📍 Active Pokemon</span>
+                <span class="stat-val success">${formatNumber(data.active_pokemon || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">📦 Total Pokemon (DB)</span>
+                <span class="stat-val">${formatNumber(data.pokemon_count || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🏪 Pokestops</span>
+                <span class="stat-val">${formatNumber(data.pokestop_count || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🏟️ Gyms</span>
+                <span class="stat-val">${formatNumber(data.gym_count || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">⚔️ Active Raids</span>
+                <span class="stat-val">${formatNumber(data.active_raids || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">📡 Spawnpoints</span>
+                <span class="stat-val">${formatNumber(data.spawnpoint_count || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">⏱️ Last Hour</span>
+                <span class="stat-val">${formatNumber(data.pokemon_last_hour || 0)}</span>
+            </div>
+        </div>
+        ${data.gyms_by_team ? `
+        <div class="gym-teams">
+            <h4>Gyms by Team</h4>
+            ${Object.entries(data.gyms_by_team).map(([team, cnt]) => `
+                <div class="team-row ${team.toLowerCase()}">
+                    <span>${team}</span>
+                    <span>${formatNumber(cnt)}</span>
+                </div>
+            `).join('')}
+        </div>
+        ` : ''}
+    `;
+}
+
+function updateKojiStats(data) {
+    const el = document.getElementById('kojiStats');
+    if (!el) return;
+    
+    if (data.error) {
+        el.innerHTML = `<div class="error-msg">${data.error}</div>`;
+        return;
+    }
+    
+    el.innerHTML = `
+        <div class="stat-list">
+            <div class="stat-row">
+                <span class="stat-name">📐 Total Geofences</span>
+                <span class="stat-val">${formatNumber(data.total_geofences || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">🛤️ Total Routes</span>
+                <span class="stat-val">${formatNumber(data.total_routes || 0)}</span>
+            </div>
+            <div class="stat-row">
+                <span class="stat-name">📁 Projects</span>
+                <span class="stat-val">${formatNumber(data.total_projects || 0)}</span>
+            </div>
+        </div>
+        ${data.geofences_by_mode ? `
+        <div class="mode-breakdown">
+            <h4>Geofences by Mode</h4>
+            ${Object.entries(data.geofences_by_mode).map(([mode, cnt]) => `
+                <div class="mode-row">
+                    <span>${mode}</span>
+                    <span>${formatNumber(cnt)}</span>
+                </div>
+            `).join('')}
+        </div>
+        ` : ''}
+    `;
+}
+
+async function loadStackDevices() {
+    const el = document.getElementById('deviceList');
+    const countEl = document.getElementById('deviceCount');
+    if (!el) return;
+    
+    try {
+        const devices = await fetchAPI('/api/stack/devices');
+        
+        if (!Array.isArray(devices) || devices.length === 0) {
+            el.innerHTML = '<div class="no-data">No devices found in database</div>';
+            if (countEl) countEl.textContent = '0 devices';
+            return;
+        }
+        
+        if (countEl) countEl.textContent = `${devices.length} device${devices.length !== 1 ? 's' : ''}`;
+        
+        el.innerHTML = `
+            <div class="device-grid">
+                ${devices.map(d => `
+                    <div class="device-card ${d.online ? 'online' : 'offline'}">
+                        <div class="device-header">
+                            <span class="device-status ${d.online ? 'online' : 'offline'}">●</span>
+                            <span class="device-uuid">${d.uuid || 'Unknown'}</span>
+                        </div>
+                        <div class="device-info">
+                            <div class="device-row">
+                                <span>Instance:</span>
+                                <span>${d.instance || '-'}</span>
+                            </div>
+                            <div class="device-row">
+                                <span>Account:</span>
+                                <span>${d.account || '-'}</span>
+                            </div>
+                            <div class="device-row">
+                                <span>Host:</span>
+                                <span>${d.host || '-'}</span>
+                            </div>
+                            <div class="device-row">
+                                <span>Last Seen:</span>
+                                <span>${d.last_seen ? formatTime(d.last_seen) : '-'}</span>
+                            </div>
+                        </div>
+                    </div>
+                `).join('')}
+            </div>
+        `;
+    } catch (e) {
+        el.innerHTML = `<div class="error-msg">Failed to load devices: ${e.message}</div>`;
+    }
+}
+
+function formatNumber(num) {
+    if (num === null || num === undefined || num === 'N/A') return '-';
+    const n = parseInt(num);
+    if (isNaN(n)) return num;
+    return n.toLocaleString();
+}
+
+function formatTime(isoString) {
+    if (!isoString) return '-';
+    const d = new Date(isoString);
+    const now = new Date();
+    const diff = (now - d) / 1000;
+    
+    if (diff < 60) return 'Just now';
+    if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+    if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+    return d.toLocaleDateString();
+}

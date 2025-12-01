@@ -35,6 +35,10 @@
             
             <div class="nav-section">
                 <div class="nav-label">Monitoring</div>
+                <a href="#" class="nav-item" data-page="stack">
+                    <span class="nav-icon">🎮</span>
+                    <span>Stack Data</span>
+                </a>
                 <a href="#" class="nav-item" data-page="xilriws">
                     <span class="nav-icon">🔐</span>
                     <span>Xilriws</span>
@@ -318,6 +322,110 @@
                         
                         <div id="updateOutput" class="update-output" style="display: none;">
                             <pre></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Stack Data Page - Cross-Referenced Database Stats -->
+            <div id="page-stack" class="page">
+                <!-- Connection Status -->
+                <div class="stack-connection" id="stackConnection">
+                    <div class="loading">Connecting to stack database...</div>
+                </div>
+                
+                <!-- Main Stats Grid -->
+                <div class="stats-grid stack-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon success">📍</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stackPokemon">-</div>
+                            <div class="stat-label">Active Pokemon</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">👤</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stackAccounts">-</div>
+                            <div class="stat-label">Active Accounts</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📱</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stackDevices">-</div>
+                            <div class="stat-label">Online Devices</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⚡</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="stackEfficiency">-</div>
+                            <div class="stat-label">Pokemon/Hour</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid stack-grid">
+                    <!-- Scanner Health -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🎮 Scanner Overview</h2>
+                            <button class="btn btn-sm btn-icon" onclick="refreshStackData()">🔄</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="scannerStats" class="scanner-stats">
+                                <div class="loading">Loading scanner data...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Account Health -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>👤 Account Health</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="accountStats" class="account-stats">
+                                <div class="loading">Loading account data...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Map Data -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🗺️ Map Data (Golbat)</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="golbatStats" class="golbat-stats">
+                                <div class="loading">Loading Golbat data...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Geofencing -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📐 Geofencing (Koji)</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="kojiStats" class="koji-stats">
+                                <div class="loading">Loading Koji data...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Device List -->
+                <div class="card full-width">
+                    <div class="card-header">
+                        <h2>📱 Connected Devices</h2>
+                        <span class="device-count" id="deviceCount">0 devices</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="deviceList" class="device-list">
+                            <div class="loading">Loading device list...</div>
                         </div>
                     </div>
                 </div>

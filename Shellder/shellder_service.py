@@ -126,7 +126,556 @@ if DOCKER_AVAILABLE:
         print(f"Warning: Could not connect to Docker: {e}")
 
 # =============================================================================
-# SQLITE DATABASE ACCESS
+# MARIADB STACK DATABASE ACCESS (Cross-Reference with Live Stack Data)
+# =============================================================================
+
+class StackDB:
+    """
+    Direct access to the Unown Stack's MariaDB databases for cross-referencing
+    Databases: golbat, dragonite, koji, reactmap
+    
+    This allows Shellder to query actual stack data for comprehensive monitoring
+    """
+    
+    def __init__(self):
+        self.connection_params = None
+        self._load_connection_params()
+    
+    def _load_connection_params(self):
+        """Load MariaDB connection parameters from .env file"""
+        env_file = AEGIS_ROOT / '.env'
+        if not env_file.exists():
+            return
+        
+        params = {}
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        value = value.strip('"\'')
+                        if key == 'POKEMON_DB_HOST':
+                            params['host'] = value
+                        elif key == 'POKEMON_DB_PORT':
+                            params['port'] = int(value) if value else 3306
+                        elif key == 'POKEMON_DB_USER':
+                            params['user'] = value
+                        elif key == 'POKEMON_DB_PASS':
+                            params['password'] = value
+                        elif key == 'POKEMON_DB_NAME':
+                            params['database'] = value
+            
+            if params.get('host') and params.get('user'):
+                self.connection_params = params
+        except Exception as e:
+            print(f"Error loading MariaDB params: {e}")
+    
+    def _connect(self, database=None):
+        """Create a connection to MariaDB"""
+        if not self.connection_params:
+            return None
+        
+        try:
+            import pymysql
+            params = dict(self.connection_params)
+            if database:
+                params['database'] = database
+            params['connect_timeout'] = 5
+            params['read_timeout'] = 10
+            return pymysql.connect(**params)
+        except ImportError:
+            print("pymysql not available - install with: pip install pymysql")
+            return None
+        except Exception as e:
+            print(f"MariaDB connection error: {e}")
+            return None
+    
+    def test_connection(self):
+        """Test if MariaDB is accessible"""
+        conn = self._connect()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("SELECT VERSION()")
+                version = cursor.fetchone()[0]
+                conn.close()
+                return {'connected': True, 'version': version}
+            except Exception as e:
+                return {'connected': False, 'error': str(e)}
+        return {'connected': False, 'error': 'No connection params'}
+    
+    def get_available_databases(self):
+        """List all databases in the stack"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("SHOW DATABASES")
+            dbs = [row[0] for row in cursor.fetchall()]
+            # Filter to stack databases
+            stack_dbs = [db for db in dbs if db in ['golbat', 'dragonite', 'koji', 'reactmap', 'mysql', 'information_schema']]
+            conn.close()
+            return stack_dbs
+        except Exception as e:
+            print(f"Error listing databases: {e}")
+            return []
+    
+    # =========================================================================
+    # GOLBAT DATABASE QUERIES (Pokemon/Gym/Pokestop data)
+    # =========================================================================
+    
+    def get_golbat_stats(self):
+        """Get Golbat database statistics"""
+        conn = self._connect('golbat')
+        if not conn:
+            return {'error': 'Cannot connect to golbat database'}
+        
+        try:
+            cursor = conn.cursor()
+            stats = {}
+            
+            # Pokemon stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM pokemon")
+                stats['pokemon_count'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM pokemon WHERE pokemon_id IS NOT NULL AND expire_timestamp > UNIX_TIMESTAMP()")
+                stats['active_pokemon'] = cursor.fetchone()[0]
+            except:
+                stats['pokemon_count'] = 'N/A'
+                stats['active_pokemon'] = 'N/A'
+            
+            # Pokestop stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM pokestop")
+                stats['pokestop_count'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM pokestop WHERE quest_type IS NOT NULL")
+                stats['pokestops_with_quests'] = cursor.fetchone()[0]
+            except:
+                stats['pokestop_count'] = 'N/A'
+            
+            # Gym stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM gym")
+                stats['gym_count'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT team_id, COUNT(*) as cnt FROM gym GROUP BY team_id")
+                teams = {0: 'Neutral', 1: 'Mystic', 2: 'Valor', 3: 'Instinct'}
+                stats['gyms_by_team'] = {teams.get(row[0], f'Team {row[0]}'): row[1] for row in cursor.fetchall()}
+            except:
+                stats['gym_count'] = 'N/A'
+            
+            # Raid stats
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM gym 
+                    WHERE raid_end_timestamp > UNIX_TIMESTAMP() 
+                    AND raid_level IS NOT NULL
+                """)
+                stats['active_raids'] = cursor.fetchone()[0]
+            except:
+                stats['active_raids'] = 'N/A'
+            
+            # Spawnpoint stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM spawnpoint")
+                stats['spawnpoint_count'] = cursor.fetchone()[0]
+            except:
+                stats['spawnpoint_count'] = 'N/A'
+            
+            # Recent activity
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) FROM pokemon 
+                    WHERE first_seen_timestamp > UNIX_TIMESTAMP() - 3600
+                """)
+                stats['pokemon_last_hour'] = cursor.fetchone()[0]
+            except:
+                stats['pokemon_last_hour'] = 'N/A'
+            
+            conn.close()
+            stats['timestamp'] = datetime.now().isoformat()
+            return stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_pokemon_summary(self, hours=24):
+        """Get Pokemon spawn summary"""
+        conn = self._connect('golbat')
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT pokemon_id, COUNT(*) as cnt 
+                FROM pokemon 
+                WHERE first_seen_timestamp > UNIX_TIMESTAMP() - %s
+                GROUP BY pokemon_id 
+                ORDER BY cnt DESC 
+                LIMIT 20
+            """, (hours * 3600,))
+            
+            results = [{'pokemon_id': row[0], 'count': row[1]} for row in cursor.fetchall()]
+            conn.close()
+            return results
+        except Exception as e:
+            print(f"Error getting pokemon summary: {e}")
+            return []
+    
+    # =========================================================================
+    # DRAGONITE DATABASE QUERIES (Scanner/Worker data)
+    # =========================================================================
+    
+    def get_dragonite_stats(self):
+        """Get Dragonite scanner statistics"""
+        conn = self._connect('dragonite')
+        if not conn:
+            return {'error': 'Cannot connect to dragonite database'}
+        
+        try:
+            cursor = conn.cursor()
+            stats = {}
+            
+            # Account stats - based on actual schema
+            # Columns: username, password, email, provider, level, warn, warn_expiration,
+            #          suspended, banned, invalid, auth_banned, ar_ban_state, ar_ban_last_checked,
+            #          last_selected, last_released, last_disabled, last_banned, last_suspended,
+            #          consecutive_disable_count, refresh_token, last_refreshed, next_available_time
+            try:
+                cursor.execute("SELECT COUNT(*) FROM account")
+                stats['total_accounts'] = cursor.fetchone()[0]
+                
+                # Active = not banned, not suspended, not invalid, not auth_banned
+                cursor.execute("""
+                    SELECT COUNT(*) FROM account 
+                    WHERE banned = '0' AND suspended = '0' AND invalid = '0' AND auth_banned = '0'
+                """)
+                stats['active_accounts'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM account WHERE banned != '0'")
+                stats['banned_accounts'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM account WHERE auth_banned != '0'")
+                stats['auth_banned_accounts'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM account WHERE warn != '0'")
+                stats['warned_accounts'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM account WHERE suspended != '0'")
+                stats['suspended_accounts'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT COUNT(*) FROM account WHERE invalid != '0'")
+                stats['invalid_accounts'] = cursor.fetchone()[0]
+                
+                # Level distribution
+                cursor.execute("""
+                    SELECT level, COUNT(*) as cnt FROM account 
+                    WHERE banned = '0' 
+                    GROUP BY level 
+                    ORDER BY level
+                """)
+                stats['level_distribution'] = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # Provider breakdown
+                cursor.execute("""
+                    SELECT provider, COUNT(*) as cnt FROM account 
+                    GROUP BY provider
+                """)
+                stats['by_provider'] = {row[0] or 'unknown': row[1] for row in cursor.fetchall()}
+                
+                # AR ban states
+                cursor.execute("""
+                    SELECT ar_ban_state, COUNT(*) as cnt FROM account 
+                    WHERE ar_ban_state IS NOT NULL 
+                    GROUP BY ar_ban_state
+                """)
+                stats['ar_ban_states'] = {row[0]: row[1] for row in cursor.fetchall()}
+                
+                # Recently active (last_selected in last hour)
+                cursor.execute("""
+                    SELECT COUNT(*) FROM account 
+                    WHERE last_selected > UNIX_TIMESTAMP() - 3600
+                """)
+                stats['active_last_hour'] = cursor.fetchone()[0]
+                
+                # Accounts with valid refresh tokens
+                cursor.execute("""
+                    SELECT COUNT(*) FROM account 
+                    WHERE refresh_token IS NOT NULL AND refresh_token != ''
+                """)
+                stats['with_refresh_token'] = cursor.fetchone()[0]
+                
+            except Exception as e:
+                stats['account_error'] = str(e)
+            
+            # Device stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM device")
+                stats['total_devices'] = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    SELECT COUNT(*) FROM device 
+                    WHERE last_seen > UNIX_TIMESTAMP() - 300
+                """)
+                stats['online_devices'] = cursor.fetchone()[0]
+            except:
+                stats['total_devices'] = 'N/A'
+            
+            # Instance stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM instance")
+                stats['total_instances'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT name, type FROM instance")
+                stats['instances'] = [{'name': row[0], 'type': row[1]} for row in cursor.fetchall()]
+            except:
+                stats['total_instances'] = 'N/A'
+            
+            conn.close()
+            stats['timestamp'] = datetime.now().isoformat()
+            return stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_device_status(self):
+        """Get detailed device status"""
+        conn = self._connect('dragonite')
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT uuid, instance_name, last_host, last_seen,
+                       account_username, last_lat, last_lon
+                FROM device 
+                ORDER BY last_seen DESC
+            """)
+            
+            devices = []
+            for row in cursor.fetchall():
+                last_seen = row[3]
+                is_online = last_seen and (time.time() - last_seen) < 300
+                devices.append({
+                    'uuid': row[0],
+                    'instance': row[1],
+                    'host': row[2],
+                    'last_seen': datetime.fromtimestamp(last_seen).isoformat() if last_seen else None,
+                    'account': row[4],
+                    'lat': row[5],
+                    'lon': row[6],
+                    'online': is_online
+                })
+            
+            conn.close()
+            return devices
+        except Exception as e:
+            print(f"Error getting device status: {e}")
+            return []
+    
+    def get_account_health(self):
+        """Get account health summary"""
+        conn = self._connect('dragonite')
+        if not conn:
+            return {}
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Account level distribution
+            cursor.execute("""
+                SELECT level, COUNT(*) FROM account 
+                WHERE banned = 0 
+                GROUP BY level 
+                ORDER BY level
+            """)
+            level_dist = {row[0]: row[1] for row in cursor.fetchall()}
+            
+            # Recently banned
+            cursor.execute("""
+                SELECT COUNT(*) FROM account 
+                WHERE banned = 1 
+                AND last_modified > UNIX_TIMESTAMP() - 86400
+            """)
+            recently_banned = cursor.fetchone()[0]
+            
+            # Recently warned
+            cursor.execute("""
+                SELECT COUNT(*) FROM account 
+                WHERE warn_expiration IS NOT NULL 
+                AND warn_expiration > UNIX_TIMESTAMP()
+            """)
+            currently_warned = cursor.fetchone()[0]
+            
+            conn.close()
+            return {
+                'level_distribution': level_dist,
+                'recently_banned_24h': recently_banned,
+                'currently_warned': currently_warned,
+                'timestamp': datetime.now().isoformat()
+            }
+        except Exception as e:
+            print(f"Error getting account health: {e}")
+            return {'error': str(e)}
+    
+    # =========================================================================
+    # KOJI DATABASE QUERIES (Geofence/Route data)
+    # =========================================================================
+    
+    def get_koji_stats(self):
+        """Get Koji geofence statistics"""
+        conn = self._connect('koji')
+        if not conn:
+            return {'error': 'Cannot connect to koji database'}
+        
+        try:
+            cursor = conn.cursor()
+            stats = {}
+            
+            # Geofence stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM geofence")
+                stats['total_geofences'] = cursor.fetchone()[0]
+                
+                cursor.execute("SELECT mode, COUNT(*) FROM geofence GROUP BY mode")
+                stats['geofences_by_mode'] = {row[0]: row[1] for row in cursor.fetchall()}
+            except:
+                stats['total_geofences'] = 'N/A'
+            
+            # Route stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM route")
+                stats['total_routes'] = cursor.fetchone()[0]
+            except:
+                stats['total_routes'] = 'N/A'
+            
+            # Project stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM project")
+                stats['total_projects'] = cursor.fetchone()[0]
+            except:
+                stats['total_projects'] = 'N/A'
+            
+            conn.close()
+            stats['timestamp'] = datetime.now().isoformat()
+            return stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    # =========================================================================
+    # REACTMAP DATABASE QUERIES (User/Session data)
+    # =========================================================================
+    
+    def get_reactmap_stats(self):
+        """Get Reactmap user/session statistics"""
+        conn = self._connect('reactmap')
+        if not conn:
+            return {'error': 'Cannot connect to reactmap database'}
+        
+        try:
+            cursor = conn.cursor()
+            stats = {}
+            
+            # User stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM users")
+                stats['total_users'] = cursor.fetchone()[0]
+            except:
+                stats['total_users'] = 'N/A'
+            
+            # Session stats
+            try:
+                cursor.execute("SELECT COUNT(*) FROM session")
+                stats['total_sessions'] = cursor.fetchone()[0]
+                
+                cursor.execute("""
+                    SELECT COUNT(*) FROM session 
+                    WHERE updated_at > DATE_SUB(NOW(), INTERVAL 1 HOUR)
+                """)
+                stats['active_sessions'] = cursor.fetchone()[0]
+            except:
+                stats['total_sessions'] = 'N/A'
+            
+            conn.close()
+            stats['timestamp'] = datetime.now().isoformat()
+            return stats
+        except Exception as e:
+            return {'error': str(e)}
+    
+    # =========================================================================
+    # CROSS-REFERENCE QUERIES (Combining data from multiple databases)
+    # =========================================================================
+    
+    def get_full_stack_summary(self):
+        """Get a comprehensive summary across all stack databases"""
+        summary = {
+            'golbat': self.get_golbat_stats(),
+            'dragonite': self.get_dragonite_stats(),
+            'koji': self.get_koji_stats(),
+            'reactmap': self.get_reactmap_stats(),
+            'connection_test': self.test_connection(),
+            'available_databases': self.get_available_databases(),
+            'generated_at': datetime.now().isoformat()
+        }
+        return summary
+    
+    def get_scanner_efficiency(self):
+        """
+        Cross-reference scanner data with pokemon spawns
+        to calculate scanning efficiency
+        """
+        golbat = self.get_golbat_stats()
+        dragonite = self.get_dragonite_stats()
+        
+        if 'error' in golbat or 'error' in dragonite:
+            return {'error': 'Could not get data from both databases'}
+        
+        try:
+            pokemon_per_hour = golbat.get('pokemon_last_hour', 0)
+            online_devices = dragonite.get('online_devices', 0)
+            active_accounts = dragonite.get('active_accounts', 0)
+            
+            efficiency = {
+                'pokemon_per_hour': pokemon_per_hour,
+                'online_devices': online_devices,
+                'active_accounts': active_accounts,
+                'pokemon_per_device_hour': round(pokemon_per_hour / max(online_devices, 1), 2),
+                'pokemon_per_account_hour': round(pokemon_per_hour / max(active_accounts, 1), 2),
+                'account_utilization': round((active_accounts / max(dragonite.get('total_accounts', 1), 1)) * 100, 1),
+                'device_utilization': round((online_devices / max(dragonite.get('total_devices', 1), 1)) * 100, 1),
+                'timestamp': datetime.now().isoformat()
+            }
+            return efficiency
+        except Exception as e:
+            return {'error': str(e)}
+    
+    def get_health_dashboard(self):
+        """
+        Comprehensive health dashboard combining all metrics
+        """
+        return {
+            'scanner': {
+                'devices': self.get_device_status()[:10],  # Top 10
+                'accounts': self.get_account_health()
+            },
+            'data': {
+                'golbat': self.get_golbat_stats()
+            },
+            'geofencing': self.get_koji_stats(),
+            'frontend': self.get_reactmap_stats(),
+            'efficiency': self.get_scanner_efficiency(),
+            'generated_at': datetime.now().isoformat()
+        }
+
+# Initialize stack database accessor
+stack_db = StackDB()
+
+# =============================================================================
+# SQLITE DATABASE ACCESS (Shellder's own database for persistence)
 # =============================================================================
 
 class ShellderDB:
@@ -336,16 +885,679 @@ class ShellderDB:
             return []
         finally:
             conn.close()
+    
+    # =========================================================================
+    # CROSS-REFERENCE & PERSISTENCE METHODS
+    # =========================================================================
+    
+    def ensure_service_tables(self):
+        """Create tables for service statistics if they don't exist"""
+        conn = self._connect()
+        if not conn:
+            # Create the database if it doesn't exist
+            try:
+                conn = sqlite3.connect(str(self.db_path), timeout=10)
+            except Exception as e:
+                print(f"Cannot create database: {e}")
+                return False
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Rotom device stats
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rotom_devices (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_name TEXT NOT NULL,
+                    worker_id TEXT,
+                    origin TEXT,
+                    version TEXT,
+                    last_memory_free INTEGER,
+                    last_memory_mitm INTEGER,
+                    total_connections INTEGER DEFAULT 0,
+                    total_disconnections INTEGER DEFAULT 0,
+                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(device_name)
+                )
+            """)
+            
+            # Rotom connection events
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS rotom_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    device_name TEXT,
+                    worker_id TEXT,
+                    ip_address TEXT,
+                    details TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Koji API stats
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS koji_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    endpoint TEXT NOT NULL,
+                    method TEXT,
+                    status_code INTEGER,
+                    response_time_ms REAL,
+                    client_ip TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Koji daily aggregates
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS koji_daily (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stat_date DATE NOT NULL,
+                    total_requests INTEGER DEFAULT 0,
+                    geofence_requests INTEGER DEFAULT 0,
+                    health_checks INTEGER DEFAULT 0,
+                    errors INTEGER DEFAULT 0,
+                    avg_response_time_ms REAL,
+                    UNIQUE(stat_date)
+                )
+            """)
+            
+            # Database connection stats
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS db_connection_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    db_name TEXT NOT NULL,
+                    user_name TEXT,
+                    host TEXT,
+                    total_connections INTEGER DEFAULT 0,
+                    aborted_connections INTEGER DEFAULT 0,
+                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(db_name, user_name, host)
+                )
+            """)
+            
+            # Database events
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS db_events (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    event_type TEXT NOT NULL,
+                    db_name TEXT,
+                    user_name TEXT,
+                    host TEXT,
+                    message TEXT,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Xilriws proxy stats (enhanced)
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS xilriws_proxy_stats (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    proxy_address TEXT NOT NULL,
+                    total_requests INTEGER DEFAULT 0,
+                    successful INTEGER DEFAULT 0,
+                    failed INTEGER DEFAULT 0,
+                    timeouts INTEGER DEFAULT 0,
+                    unreachable INTEGER DEFAULT 0,
+                    bot_blocked INTEGER DEFAULT 0,
+                    success_rate REAL,
+                    first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    UNIQUE(proxy_address)
+                )
+            """)
+            
+            # Xilriws daily aggregates
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS xilriws_daily (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    stat_date DATE NOT NULL,
+                    total_requests INTEGER DEFAULT 0,
+                    successful INTEGER DEFAULT 0,
+                    failed INTEGER DEFAULT 0,
+                    auth_banned INTEGER DEFAULT 0,
+                    code_15 INTEGER DEFAULT 0,
+                    tunnel_failed INTEGER DEFAULT 0,
+                    timeouts INTEGER DEFAULT 0,
+                    success_rate REAL,
+                    UNIQUE(stat_date)
+                )
+            """)
+            
+            # Service health snapshots
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS service_health (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    service_name TEXT NOT NULL,
+                    status TEXT,
+                    details TEXT,
+                    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            conn.commit()
+            return True
+        except Exception as e:
+            print(f"Error creating service tables: {e}")
+            return False
+        finally:
+            conn.close()
+    
+    def persist_rotom_stats(self, stats):
+        """Save Rotom stats to database"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Update device records
+            for device_name, device_info in stats.get('devices', {}).items():
+                cursor.execute("""
+                    INSERT INTO rotom_devices (device_name, worker_id, origin, version, 
+                                               last_memory_free, last_memory_mitm, last_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(device_name) DO UPDATE SET
+                        worker_id = COALESCE(excluded.worker_id, worker_id),
+                        origin = COALESCE(excluded.origin, origin),
+                        version = COALESCE(excluded.version, version),
+                        last_memory_free = COALESCE(excluded.last_memory_free, last_memory_free),
+                        last_memory_mitm = COALESCE(excluded.last_memory_mitm, last_memory_mitm),
+                        last_seen = CURRENT_TIMESTAMP
+                """, (
+                    device_name,
+                    device_info.get('worker_id'),
+                    device_info.get('origin'),
+                    device_info.get('version'),
+                    device_info.get('memory', {}).get('memFree'),
+                    device_info.get('memory', {}).get('memMitm')
+                ))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error persisting Rotom stats: {e}")
+        finally:
+            conn.close()
+    
+    def persist_xilriws_stats(self, stats):
+        """Save Xilriws stats to database"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Update daily aggregates
+            cursor.execute("""
+                INSERT INTO xilriws_daily (stat_date, total_requests, successful, failed,
+                                           auth_banned, code_15, tunnel_failed, timeouts, success_rate)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ON CONFLICT(stat_date) DO UPDATE SET
+                    total_requests = excluded.total_requests,
+                    successful = excluded.successful,
+                    failed = excluded.failed,
+                    auth_banned = excluded.auth_banned,
+                    code_15 = excluded.code_15,
+                    tunnel_failed = excluded.tunnel_failed,
+                    timeouts = excluded.timeouts,
+                    success_rate = excluded.success_rate
+            """, (
+                today,
+                stats.get('total_requests', 0),
+                stats.get('successful', 0),
+                stats.get('failed', 0),
+                stats.get('auth_banned', 0),
+                stats.get('browser_bot_protection', 0),
+                stats.get('ptc_tunnel_failed', 0),
+                stats.get('ptc_connection_timeout', 0),
+                stats.get('success_rate', 0)
+            ))
+            
+            # Update per-proxy stats
+            for proxy_addr, proxy_data in stats.get('proxy_stats', {}).items():
+                cursor.execute("""
+                    INSERT INTO xilriws_proxy_stats (proxy_address, total_requests, successful, 
+                                                     failed, timeouts, unreachable, bot_blocked, 
+                                                     success_rate, last_seen)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                    ON CONFLICT(proxy_address) DO UPDATE SET
+                        total_requests = total_requests + excluded.total_requests,
+                        successful = successful + excluded.successful,
+                        failed = failed + excluded.failed,
+                        timeouts = timeouts + excluded.timeouts,
+                        unreachable = unreachable + excluded.unreachable,
+                        bot_blocked = bot_blocked + excluded.bot_blocked,
+                        success_rate = excluded.success_rate,
+                        last_seen = CURRENT_TIMESTAMP
+                """, (
+                    proxy_addr,
+                    proxy_data.get('requests', 0),
+                    proxy_data.get('success', 0),
+                    proxy_data.get('fail', 0),
+                    proxy_data.get('timeout', 0),
+                    proxy_data.get('unreachable', 0),
+                    proxy_data.get('bot_blocked', 0),
+                    proxy_data.get('success_rate', 0)
+                ))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error persisting Xilriws stats: {e}")
+        finally:
+            conn.close()
+    
+    def persist_koji_stats(self, stats):
+        """Save Koji stats to database"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            today = datetime.now().strftime('%Y-%m-%d')
+            
+            # Update daily aggregates
+            cursor.execute("""
+                INSERT INTO koji_daily (stat_date, total_requests, geofence_requests, 
+                                        health_checks, errors, avg_response_time_ms)
+                VALUES (?, ?, ?, ?, ?, ?)
+                ON CONFLICT(stat_date) DO UPDATE SET
+                    total_requests = excluded.total_requests,
+                    geofence_requests = excluded.geofence_requests,
+                    health_checks = excluded.health_checks,
+                    errors = excluded.errors,
+                    avg_response_time_ms = excluded.avg_response_time_ms
+            """, (
+                today,
+                stats.get('requests', 0),
+                stats.get('geofence_requests', 0),
+                stats.get('health_checks', 0),
+                stats.get('errors', 0),
+                stats.get('avg_response_time_ms', 0)
+            ))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error persisting Koji stats: {e}")
+        finally:
+            conn.close()
+    
+    def persist_database_stats(self, stats):
+        """Save MariaDB connection stats to database"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Update connection stats per db/user/host
+            for db_name, db_info in stats.get('connections', {}).get('by_db', {}).items():
+                for user_name, user_info in stats.get('connections', {}).get('by_user', {}).items():
+                    for host, host_info in stats.get('connections', {}).get('by_host', {}).items():
+                        cursor.execute("""
+                            INSERT INTO db_connection_stats (db_name, user_name, host, 
+                                                             aborted_connections, last_seen)
+                            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+                            ON CONFLICT(db_name, user_name, host) DO UPDATE SET
+                                aborted_connections = aborted_connections + excluded.aborted_connections,
+                                last_seen = CURRENT_TIMESTAMP
+                        """, (
+                            db_name,
+                            user_name,
+                            host,
+                            db_info.get('aborted', 0)
+                        ))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error persisting Database stats: {e}")
+        finally:
+            conn.close()
+    
+    def record_service_health(self, service_name, status, details=None):
+        """Record a service health snapshot"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO service_health (service_name, status, details)
+                VALUES (?, ?, ?)
+            """, (service_name, status, json.dumps(details) if details else None))
+            conn.commit()
+        except Exception as e:
+            print(f"Error recording service health: {e}")
+        finally:
+            conn.close()
+    
+    # =========================================================================
+    # CROSS-REFERENCE QUERY METHODS
+    # =========================================================================
+    
+    def get_rotom_devices_history(self, limit=50):
+        """Get historical Rotom device data"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT device_name, worker_id, origin, version, 
+                       last_memory_free, last_memory_mitm,
+                       total_connections, total_disconnections,
+                       first_seen, last_seen
+                FROM rotom_devices 
+                ORDER BY last_seen DESC 
+                LIMIT ?
+            """, (limit,))
+            rows = cursor.fetchall()
+            return [
+                {
+                    'device': row[0],
+                    'worker_id': row[1],
+                    'origin': row[2],
+                    'version': row[3],
+                    'memory_free': row[4],
+                    'memory_mitm': row[5],
+                    'connections': row[6],
+                    'disconnections': row[7],
+                    'first_seen': row[8],
+                    'last_seen': row[9]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting Rotom device history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_xilriws_daily_stats(self, days=30):
+        """Get Xilriws daily statistics for trending"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT stat_date, total_requests, successful, failed,
+                       auth_banned, code_15, tunnel_failed, timeouts, success_rate
+                FROM xilriws_daily 
+                WHERE stat_date >= date('now', ?)
+                ORDER BY stat_date DESC
+            """, (f'-{days} days',))
+            rows = cursor.fetchall()
+            return [
+                {
+                    'date': row[0],
+                    'total': row[1],
+                    'successful': row[2],
+                    'failed': row[3],
+                    'banned': row[4],
+                    'code_15': row[5],
+                    'tunnel_failed': row[6],
+                    'timeouts': row[7],
+                    'success_rate': row[8]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting Xilriws daily stats: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_xilriws_proxy_history(self, limit=100):
+        """Get all-time proxy statistics"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT proxy_address, total_requests, successful, failed,
+                       timeouts, unreachable, bot_blocked, success_rate,
+                       first_seen, last_seen
+                FROM xilriws_proxy_stats 
+                ORDER BY total_requests DESC 
+                LIMIT ?
+            """, (limit,))
+            rows = cursor.fetchall()
+            return [
+                {
+                    'proxy': row[0],
+                    'total': row[1],
+                    'successful': row[2],
+                    'failed': row[3],
+                    'timeouts': row[4],
+                    'unreachable': row[5],
+                    'bot_blocked': row[6],
+                    'success_rate': row[7],
+                    'first_seen': row[8],
+                    'last_seen': row[9]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting Xilriws proxy history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_koji_daily_stats(self, days=30):
+        """Get Koji daily statistics"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT stat_date, total_requests, geofence_requests, 
+                       health_checks, errors, avg_response_time_ms
+                FROM koji_daily 
+                WHERE stat_date >= date('now', ?)
+                ORDER BY stat_date DESC
+            """, (f'-{days} days',))
+            rows = cursor.fetchall()
+            return [
+                {
+                    'date': row[0],
+                    'total': row[1],
+                    'geofence': row[2],
+                    'health': row[3],
+                    'errors': row[4],
+                    'avg_response_ms': row[5]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting Koji daily stats: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_db_connection_history(self):
+        """Get database connection statistics"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT db_name, user_name, host, 
+                       total_connections, aborted_connections,
+                       first_seen, last_seen
+                FROM db_connection_stats 
+                ORDER BY aborted_connections DESC
+            """)
+            rows = cursor.fetchall()
+            return [
+                {
+                    'db': row[0],
+                    'user': row[1],
+                    'host': row[2],
+                    'total': row[3],
+                    'aborted': row[4],
+                    'first_seen': row[5],
+                    'last_seen': row[6]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting DB connection history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_service_health_history(self, service_name=None, hours=24):
+        """Get service health history"""
+        conn = self._connect()
+        if not conn:
+            return []
+        try:
+            cursor = conn.cursor()
+            if service_name:
+                cursor.execute("""
+                    SELECT service_name, status, details, recorded_at
+                    FROM service_health 
+                    WHERE service_name = ? AND recorded_at >= datetime('now', ?)
+                    ORDER BY recorded_at DESC
+                """, (service_name, f'-{hours} hours'))
+            else:
+                cursor.execute("""
+                    SELECT service_name, status, details, recorded_at
+                    FROM service_health 
+                    WHERE recorded_at >= datetime('now', ?)
+                    ORDER BY recorded_at DESC
+                """, (f'-{hours} hours',))
+            rows = cursor.fetchall()
+            return [
+                {
+                    'service': row[0],
+                    'status': row[1],
+                    'details': json.loads(row[2]) if row[2] else None,
+                    'recorded_at': row[3]
+                }
+                for row in rows
+            ]
+        except Exception as e:
+            print(f"Error getting service health history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_cross_reference_summary(self):
+        """Get a cross-referenced summary of all services"""
+        conn = self._connect()
+        if not conn:
+            return {}
+        
+        try:
+            cursor = conn.cursor()
+            summary = {
+                'xilriws': {},
+                'rotom': {},
+                'koji': {},
+                'database': {},
+                'generated_at': datetime.now().isoformat()
+            }
+            
+            # Xilriws summary
+            cursor.execute("""
+                SELECT 
+                    COALESCE(SUM(total_requests), 0) as total,
+                    COALESCE(SUM(successful), 0) as success,
+                    COALESCE(SUM(failed), 0) as failed,
+                    COALESCE(AVG(success_rate), 0) as avg_rate
+                FROM xilriws_daily
+                WHERE stat_date >= date('now', '-7 days')
+            """)
+            row = cursor.fetchone()
+            if row:
+                summary['xilriws'] = {
+                    'week_total': row[0],
+                    'week_success': row[1],
+                    'week_failed': row[2],
+                    'week_avg_rate': round(row[3], 1) if row[3] else 0
+                }
+            
+            # Proxy count
+            cursor.execute("SELECT COUNT(*) FROM xilriws_proxy_stats")
+            row = cursor.fetchone()
+            summary['xilriws']['total_proxies_tracked'] = row[0] if row else 0
+            
+            # Rotom summary
+            cursor.execute("""
+                SELECT COUNT(*), 
+                       SUM(total_connections), 
+                       SUM(total_disconnections)
+                FROM rotom_devices
+            """)
+            row = cursor.fetchone()
+            if row:
+                summary['rotom'] = {
+                    'total_devices': row[0] or 0,
+                    'total_connections': row[1] or 0,
+                    'total_disconnections': row[2] or 0
+                }
+            
+            # Koji summary
+            cursor.execute("""
+                SELECT 
+                    COALESCE(SUM(total_requests), 0),
+                    COALESCE(SUM(errors), 0),
+                    COALESCE(AVG(avg_response_time_ms), 0)
+                FROM koji_daily
+                WHERE stat_date >= date('now', '-7 days')
+            """)
+            row = cursor.fetchone()
+            if row:
+                summary['koji'] = {
+                    'week_requests': row[0],
+                    'week_errors': row[1],
+                    'week_avg_response_ms': round(row[2], 2) if row[2] else 0
+                }
+            
+            # Database summary
+            cursor.execute("""
+                SELECT 
+                    COUNT(DISTINCT db_name),
+                    SUM(aborted_connections)
+                FROM db_connection_stats
+            """)
+            row = cursor.fetchone()
+            if row:
+                summary['database'] = {
+                    'databases_tracked': row[0] or 0,
+                    'total_aborted': row[1] or 0
+                }
+            
+            return summary
+        except Exception as e:
+            print(f"Error getting cross-reference summary: {e}")
+            return {'error': str(e)}
+        finally:
+            conn.close()
 
 # Initialize database accessor
 shellder_db = ShellderDB(SHELLDER_DB)
+
+# Ensure service tables exist on startup
+shellder_db.ensure_service_tables()
 
 # =============================================================================
 # STATS COLLECTOR (Real-time)
 # =============================================================================
 
 class StatsCollector:
-    """Collects and stores live statistics"""
+    """Collects and stores live statistics for all Aegis AIO components"""
     
     def __init__(self):
         self.container_stats = {}
@@ -364,6 +1576,56 @@ class StatsCollector:
             'by_proxy': {},
             'recent_errors': [],
             'success_rate': 0
+        }
+        # Rotom stats - Device management
+        self.rotom_stats = {
+            'devices': {},           # Device name -> info
+            'workers': {},           # Worker ID -> info
+            'connections': 0,
+            'disconnections': 0,
+            'rejected_connections': 0,
+            'memory_reports': [],
+            'recent_events': [],
+            'last_update': None
+        }
+        # Koji stats - Geofence/API service
+        self.koji_stats = {
+            'requests': 0,
+            'geofence_requests': 0,
+            'health_checks': 0,
+            'errors': 0,
+            'parse_errors': 0,
+            'http_errors': 0,
+            'recent_requests': [],
+            'recent_errors': [],
+            'last_update': None
+        }
+        # Reactmap stats - Frontend map
+        self.reactmap_stats = {
+            'build_status': 'unknown',
+            'build_time': None,
+            'locales_loaded': [],
+            'warnings': [],
+            'errors': [],
+            'version': None,
+            'last_update': None
+        }
+        # Database (MariaDB) stats
+        self.database_stats = {
+            'status': 'unknown',
+            'version': None,
+            'connections': {
+                'total': 0,
+                'aborted': 0,
+                'by_db': {},       # db name -> count
+                'by_host': {}     # host -> count
+            },
+            'warnings': [],
+            'errors': [],
+            'buffer_pool_size': None,
+            'innodb_status': {},
+            'recent_events': [],
+            'last_update': None
         }
         self.system_stats = {}
         self.port_status = {}
@@ -384,13 +1646,25 @@ class StatsCollector:
         # Xilriws log parser thread
         threading.Thread(target=self._parse_xilriws_logs, daemon=True).start()
         
+        # Rotom log parser thread
+        threading.Thread(target=self._parse_rotom_logs, daemon=True).start()
+        
+        # Koji log parser thread
+        threading.Thread(target=self._parse_koji_logs, daemon=True).start()
+        
+        # Reactmap log parser thread
+        threading.Thread(target=self._parse_reactmap_logs, daemon=True).start()
+        
+        # Database log parser thread
+        threading.Thread(target=self._parse_database_logs, daemon=True).start()
+        
         # Port scanner thread
         threading.Thread(target=self._scan_ports, daemon=True).start()
         
         # System services thread
         threading.Thread(target=self._check_system_services, daemon=True).start()
         
-        print("Stats collector started")
+        print("Stats collector started with parsers for: Xilriws, Rotom, Koji, Reactmap, Database")
     
     def stop(self):
         self.running = False
@@ -792,12 +2066,683 @@ class StatsCollector:
                     if socketio and SOCKETIO_AVAILABLE:
                         socketio.emit('xilriws_stats', stats)
                     
+                    # Persist to database for cross-referencing
+                    shellder_db.persist_xilriws_stats(stats)
+                    
                 except docker.errors.NotFound:
                     pass
                 except Exception as e:
                     print(f"Error parsing Xilriws logs: {e}")
             
             time.sleep(5)  # More frequent updates for live monitoring
+    
+    def _parse_rotom_logs(self):
+        """
+        Parse Rotom container logs for device/worker statistics
+        
+        Log format: [TIMESTAMP] [LEVEL] [rotom] MESSAGE
+        Example: [2025-11-30T05:57:59.198Z] [INFO] [rotom] CONTROLLER: Found OrangePi5 connects to workerId OrangePi5-1
+        
+        Key events:
+        - CONTROLLER: Found X connects to workerId Y - Device connection
+        - CONTROLLER: New connection from IP - will allocate WORKER - Worker allocation
+        - CONTROLLER: New connection from IP - no spare Workers, rejecting - Rejection
+        - CONTROLLER: Disconnected worker X - Worker disconnect
+        - X/Y: Disconnected; performing disconnection activities - Device disconnect
+        - X: unallocated connections = Y - Unallocated workers
+        - X/Y: Received id packet origin Z - version V - Device identification
+        - X/Y: Memory = {...} - Memory report
+        """
+        import re
+        
+        # Regex patterns
+        log_pattern = re.compile(r'^\[([^\]]+)\]\s*\[(\w+)\]\s*\[rotom\]\s*(.*)$')
+        device_connect = re.compile(r'CONTROLLER:\s*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)')
+        worker_allocate = re.compile(r'CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*will allocate\s+(\S+)')
+        worker_reject = re.compile(r'CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*no spare Workers')
+        worker_disconnect = re.compile(r'CONTROLLER:\s*Disconnected worker\s+(\S+)')
+        device_disconnect = re.compile(r'^(\S+)/(\d+):\s*Disconnected')
+        device_id = re.compile(r'^(\S+)/(\d+):\s*Received id packet origin\s+(\S+)\s*-\s*version\s+(\d+)')
+        memory_report = re.compile(r'^(\S+)/(\d+):Memory\s*=\s*(\{.*\})')
+        unallocated = re.compile(r'^(\S+):\s*unallocated connections\s*=\s*(.*)')
+        
+        while self.running:
+            if docker_client:
+                try:
+                    container = docker_client.containers.get('rotom')
+                    if container.status != 'running':
+                        time.sleep(30)
+                        continue
+                    
+                    logs = container.logs(tail=500, timestamps=False).decode('utf-8', errors='ignore')
+                    
+                    stats = {
+                        'devices': {},
+                        'workers': {},
+                        'connections': 0,
+                        'disconnections': 0,
+                        'rejected_connections': 0,
+                        'memory_reports': [],
+                        'recent_events': [],
+                        'last_update': datetime.now().isoformat()
+                    }
+                    
+                    for line in logs.split('\n'):
+                        if not line.strip():
+                            continue
+                        
+                        match = log_pattern.match(line.strip())
+                        if not match:
+                            continue
+                        
+                        timestamp, level, message = match.groups()
+                        
+                        # Device connection
+                        m = device_connect.search(message)
+                        if m:
+                            device_name, worker_id = m.groups()
+                            stats['devices'][device_name] = {
+                                'worker_id': worker_id,
+                                'status': 'connected',
+                                'last_seen': timestamp
+                            }
+                            stats['connections'] += 1
+                            stats['recent_events'].append({
+                                'time': timestamp,
+                                'type': 'connect',
+                                'device': device_name,
+                                'worker': worker_id
+                            })
+                            continue
+                        
+                        # Worker allocation
+                        m = worker_allocate.search(message)
+                        if m:
+                            ip, worker_id = m.groups()
+                            stats['workers'][worker_id] = {
+                                'ip': ip,
+                                'status': 'allocated',
+                                'last_seen': timestamp
+                            }
+                            continue
+                        
+                        # Worker rejection
+                        m = worker_reject.search(message)
+                        if m:
+                            ip = m.group(1)
+                            stats['rejected_connections'] += 1
+                            stats['recent_events'].append({
+                                'time': timestamp,
+                                'type': 'rejected',
+                                'ip': ip,
+                                'reason': 'no spare workers'
+                            })
+                            continue
+                        
+                        # Worker disconnect
+                        m = worker_disconnect.search(message)
+                        if m:
+                            worker_info = m.group(1)
+                            stats['disconnections'] += 1
+                            stats['recent_events'].append({
+                                'time': timestamp,
+                                'type': 'worker_disconnect',
+                                'worker': worker_info
+                            })
+                            continue
+                        
+                        # Device disconnect
+                        m = device_disconnect.match(message)
+                        if m:
+                            device_name, session = m.groups()
+                            if device_name in stats['devices']:
+                                stats['devices'][device_name]['status'] = 'disconnected'
+                            stats['recent_events'].append({
+                                'time': timestamp,
+                                'type': 'device_disconnect',
+                                'device': device_name
+                            })
+                            continue
+                        
+                        # Device identification
+                        m = device_id.match(message)
+                        if m:
+                            device_name, session, origin, version = m.groups()
+                            if device_name not in stats['devices']:
+                                stats['devices'][device_name] = {}
+                            stats['devices'][device_name].update({
+                                'origin': origin,
+                                'version': version,
+                                'last_seen': timestamp
+                            })
+                            continue
+                        
+                        # Memory report
+                        m = memory_report.match(message)
+                        if m:
+                            device_name, session, mem_json = m.groups()
+                            try:
+                                mem_data = json.loads(mem_json)
+                                if device_name not in stats['devices']:
+                                    stats['devices'][device_name] = {}
+                                stats['devices'][device_name]['memory'] = mem_data
+                                stats['devices'][device_name]['last_memory'] = timestamp
+                                stats['memory_reports'].append({
+                                    'time': timestamp,
+                                    'device': device_name,
+                                    'memory': mem_data
+                                })
+                            except json.JSONDecodeError:
+                                pass
+                            continue
+                    
+                    # Keep only recent events
+                    stats['recent_events'] = stats['recent_events'][-50:]
+                    stats['memory_reports'] = stats['memory_reports'][-20:]
+                    
+                    with self.lock:
+                        self.rotom_stats = stats
+                    
+                    if socketio and SOCKETIO_AVAILABLE:
+                        socketio.emit('rotom_stats', stats)
+                    
+                    # Persist to database for cross-referencing
+                    shellder_db.persist_rotom_stats(stats)
+                    
+                except docker.errors.NotFound:
+                    pass
+                except Exception as e:
+                    print(f"Error parsing Rotom logs: {e}")
+            
+            time.sleep(10)
+    
+    def _parse_koji_logs(self):
+        """
+        Parse Koji container logs for API statistics
+        
+        Log format: [TIMESTAMP] [LEVEL] [component] MESSAGE
+        Example: [2025-11-28T03:54:22Z INFO  api::public::v1::geofence] [GEOFENCES_FC_ALL] Returning 0 instances
+        
+        Key events:
+        - actix_web::middleware::logger - HTTP request logs
+        - api::public::v1::geofence - Geofence API calls
+        - actix_http::h1::dispatcher - HTTP errors
+        - model::utils - Scanner type detection
+        - sea_orm_migration - Database migrations
+        """
+        import re
+        
+        # Regex patterns
+        log_pattern = re.compile(r'^\[([^\]]+)\]\s*\[(\w+)\s*\]\s*\[?([^\]]*)\]?\s*(.*)$')
+        http_log = re.compile(r'(\d+)\s*\|\s*(\w+)\s+([^\s]+)\s+HTTP/[\d.]+\s*-\s*(\d+)\s*bytes\s+in\s+([\d.]+)\s*(\w+)\s*\(([^)]+)\)')
+        geofence_return = re.compile(r'\[GEOFENCES_FC_ALL\]\s*Returning\s+(\d+)\s+instances')
+        scanner_type = re.compile(r'Determined Scanner Type:\s*(\w+)')
+        migration = re.compile(r'(Applying|No pending)\s+migrations?')
+        error_pattern = re.compile(r'stream error:\s*(.+)')
+        
+        while self.running:
+            if docker_client:
+                try:
+                    container = docker_client.containers.get('koji')
+                    if container.status != 'running':
+                        time.sleep(30)
+                        continue
+                    
+                    logs = container.logs(tail=500, timestamps=False).decode('utf-8', errors='ignore')
+                    
+                    stats = {
+                        'requests': 0,
+                        'geofence_requests': 0,
+                        'health_checks': 0,
+                        'errors': 0,
+                        'parse_errors': 0,
+                        'http_errors': 0,
+                        'scanner_type': None,
+                        'migrations': 'unknown',
+                        'workers': 0,
+                        'recent_requests': [],
+                        'recent_errors': [],
+                        'endpoints_hit': {},
+                        'response_times': [],
+                        'last_update': datetime.now().isoformat()
+                    }
+                    
+                    for line in logs.split('\n'):
+                        if not line.strip():
+                            continue
+                        
+                        # HTTP request log (actix format)
+                        m = http_log.search(line)
+                        if m:
+                            status, method, path, bytes_sent, time_val, time_unit, client_ip = m.groups()
+                            stats['requests'] += 1
+                            
+                            # Track endpoint
+                            if path not in stats['endpoints_hit']:
+                                stats['endpoints_hit'][path] = 0
+                            stats['endpoints_hit'][path] += 1
+                            
+                            # Track response time
+                            try:
+                                resp_time = float(time_val)
+                                if time_unit == 's':
+                                    resp_time *= 1000  # Convert to ms
+                                stats['response_times'].append(resp_time)
+                            except ValueError:
+                                pass
+                            
+                            # Categorize request
+                            if '/health' in path:
+                                stats['health_checks'] += 1
+                            elif '/geofence' in path:
+                                stats['geofence_requests'] += 1
+                            
+                            stats['recent_requests'].append({
+                                'status': int(status),
+                                'method': method,
+                                'path': path,
+                                'bytes': int(bytes_sent),
+                                'time_ms': resp_time if 'resp_time' in dir() else 0,
+                                'client': client_ip
+                            })
+                            continue
+                        
+                        # Geofence return count
+                        m = geofence_return.search(line)
+                        if m:
+                            count = int(m.group(1))
+                            continue
+                        
+                        # Scanner type
+                        m = scanner_type.search(line)
+                        if m:
+                            stats['scanner_type'] = m.group(1)
+                            continue
+                        
+                        # Migration status
+                        m = migration.search(line)
+                        if m:
+                            stats['migrations'] = 'complete' if 'No pending' in m.group(0) else 'applied'
+                            continue
+                        
+                        # Workers count
+                        if 'starting' in line.lower() and 'workers' in line.lower():
+                            worker_match = re.search(r'(\d+)\s*workers', line)
+                            if worker_match:
+                                stats['workers'] = int(worker_match.group(1))
+                        
+                        # HTTP errors
+                        m = error_pattern.search(line)
+                        if m:
+                            stats['http_errors'] += 1
+                            error_msg = m.group(1)
+                            if 'parse error' in error_msg.lower():
+                                stats['parse_errors'] += 1
+                            stats['recent_errors'].append({
+                                'message': error_msg[:100],
+                                'line': line[:150]
+                            })
+                            continue
+                        
+                        # ERROR level logs
+                        if '[ERROR' in line or '[ ERROR' in line:
+                            stats['errors'] += 1
+                    
+                    # Calculate average response time
+                    if stats['response_times']:
+                        stats['avg_response_time_ms'] = round(
+                            sum(stats['response_times']) / len(stats['response_times']), 2
+                        )
+                    else:
+                        stats['avg_response_time_ms'] = 0
+                    
+                    # Keep only recent items
+                    stats['recent_requests'] = stats['recent_requests'][-30:]
+                    stats['recent_errors'] = stats['recent_errors'][-20:]
+                    stats['response_times'] = stats['response_times'][-100:]
+                    
+                    with self.lock:
+                        self.koji_stats = stats
+                    
+                    if socketio and SOCKETIO_AVAILABLE:
+                        socketio.emit('koji_stats', stats)
+                    
+                    # Persist to database for cross-referencing
+                    shellder_db.persist_koji_stats(stats)
+                    
+                except docker.errors.NotFound:
+                    pass
+                except Exception as e:
+                    print(f"Error parsing Koji logs: {e}")
+            
+            time.sleep(15)
+    
+    def _parse_reactmap_logs(self):
+        """
+        Parse Reactmap container logs for build/status info
+        
+        Log format: SYMBOL TIMESTAMP [COMPONENT] MESSAGE
+        Symbols: ℹ (info), ⚠ (warning), ✓ (success)
+        
+        Key events:
+        - [CONFIG] - Configuration messages
+        - [BUILD] - Build process
+        - [LOCALES] - Locale loading
+        - [MASTERFILE] - Masterfile generation
+        """
+        import re
+        
+        # Regex patterns
+        log_pattern = re.compile(r'^([ℹ⚠✓])\s*(\d{4}-\d{2}-\d{2}\s+\d{2}:\d{2}:\d{2})\s*\[(\w+)\]\s*(.*)$')
+        version_pattern = re.compile(r'Building production version:\s*([\d.]+(?:-[\w.]+)?)')
+        build_time = re.compile(r'built in\s+([\d.]+)s')
+        locale_done = re.compile(r'^(\w+(?:-\w+)?\.json)\s+done')
+        locale_missing = re.compile(r'No remote translation found for\s+(\S+)')
+        perms_pattern = re.compile(r'adding the following perms')
+        
+        while self.running:
+            if docker_client:
+                try:
+                    container = docker_client.containers.get('reactmap')
+                    if container.status != 'running':
+                        time.sleep(30)
+                        continue
+                    
+                    logs = container.logs(tail=300, timestamps=False).decode('utf-8', errors='ignore')
+                    
+                    stats = {
+                        'build_status': 'unknown',
+                        'build_time': None,
+                        'version': None,
+                        'locales_loaded': [],
+                        'locales_missing': [],
+                        'warnings': [],
+                        'errors': [],
+                        'config_notes': [],
+                        'modules_transformed': 0,
+                        'auth_enabled': True,
+                        'last_update': datetime.now().isoformat()
+                    }
+                    
+                    for line in logs.split('\n'):
+                        if not line.strip():
+                            continue
+                        
+                        # Check for version
+                        m = version_pattern.search(line)
+                        if m:
+                            stats['version'] = m.group(1)
+                            stats['build_status'] = 'building'
+                            continue
+                        
+                        # Check for build completion
+                        m = build_time.search(line)
+                        if m:
+                            stats['build_time'] = float(m.group(1))
+                            stats['build_status'] = 'complete'
+                            continue
+                        
+                        # Locale loaded
+                        m = locale_done.search(line)
+                        if m:
+                            locale = m.group(1).replace('.json', '')
+                            if locale not in stats['locales_loaded']:
+                                stats['locales_loaded'].append(locale)
+                            continue
+                        
+                        # Missing locale
+                        m = locale_missing.search(line)
+                        if m:
+                            locale = m.group(1)
+                            if locale not in stats['locales_missing']:
+                                stats['locales_missing'].append(locale)
+                            continue
+                        
+                        # Modules transformed
+                        if 'modules transformed' in line:
+                            m = re.search(r'(\d+)\s*modules transformed', line)
+                            if m:
+                                stats['modules_transformed'] = int(m.group(1))
+                            continue
+                        
+                        # Auth disabled check
+                        if 'No authentication strategies enabled' in line:
+                            stats['auth_enabled'] = False
+                            continue
+                        
+                        # Build completed message
+                        if 'React Map Compiled' in line:
+                            stats['build_status'] = 'complete'
+                            continue
+                        
+                        # Warnings (⚠ symbol or [WARN])
+                        if '⚠' in line or '[WARN' in line.upper():
+                            warning_text = line.split(']')[-1].strip() if ']' in line else line
+                            if warning_text and len(warning_text) > 5:
+                                stats['warnings'].append(warning_text[:150])
+                            continue
+                        
+                        # Config notes
+                        if '[CONFIG]' in line:
+                            config_text = line.split('[CONFIG]')[-1].strip()
+                            if config_text:
+                                stats['config_notes'].append(config_text[:100])
+                            continue
+                    
+                    # Limit arrays
+                    stats['warnings'] = stats['warnings'][-20:]
+                    stats['config_notes'] = stats['config_notes'][-10:]
+                    
+                    with self.lock:
+                        self.reactmap_stats = stats
+                    
+                    if socketio and SOCKETIO_AVAILABLE:
+                        socketio.emit('reactmap_stats', stats)
+                    
+                except docker.errors.NotFound:
+                    pass
+                except Exception as e:
+                    print(f"Error parsing Reactmap logs: {e}")
+            
+            time.sleep(30)  # Reactmap logs don't change frequently
+    
+    def _parse_database_logs(self):
+        """
+        Parse MariaDB/Database container logs for connection statistics
+        
+        Log format: TIMESTAMP THREAD_ID [LEVEL] MESSAGE
+        Example: 2025-11-27 23:10:55 4 [Warning] Aborted connection 4 to db: 'golbat' user: 'pokemap' host: '172.18.0.13'
+        
+        Key events:
+        - [Note] Starting MariaDB - Startup
+        - [Note] ready for connections - Ready
+        - [Warning] Aborted connection - Connection issues
+        - [Note] InnoDB: - InnoDB status
+        - [Warning] io_uring - System warnings
+        """
+        import re
+        
+        # Regex patterns
+        timestamp_pattern = re.compile(r'^(\d{4}-\d{2}-\d{2}[T\s]\d{2}:\d{2}:\d{2}(?:[+-]\d{2}:\d{2})?)')
+        thread_log = re.compile(r'(\d+)\s*\[(\w+)\]\s*(.*)$')
+        entrypoint = re.compile(r'\[Entrypoint\]:\s*(.*)$')
+        aborted_conn = re.compile(r'Aborted connection\s+(\d+)\s+to db:\s*[\'"]?(\w+)[\'"]?\s+user:\s*[\'"]?(\w+)[\'"]?\s+host:\s*[\'"]?([^\'"\s]+)[\'"]?')
+        version_pattern = re.compile(r"Version:\s*'([^']+)'")
+        buffer_pool = re.compile(r'innodb_buffer_pool_size[_=](\d+)([mMgG]?)')
+        ready_pattern = re.compile(r'ready for connections')
+        starting_pattern = re.compile(r'Starting MariaDB\s+([\d.]+)')
+        
+        while self.running:
+            if docker_client:
+                try:
+                    container = docker_client.containers.get('database')
+                    if container.status != 'running':
+                        time.sleep(30)
+                        continue
+                    
+                    logs = container.logs(tail=500, timestamps=False).decode('utf-8', errors='ignore')
+                    
+                    stats = {
+                        'status': 'unknown',
+                        'version': None,
+                        'connections': {
+                            'total': 0,
+                            'aborted': 0,
+                            'by_db': {},
+                            'by_host': {},
+                            'by_user': {}
+                        },
+                        'warnings': [],
+                        'errors': [],
+                        'innodb': {
+                            'buffer_pool_size': None,
+                            'compressed': False,
+                            'transaction_pools': 0,
+                            'undo_tablespaces': 0,
+                            'rollback_segments': 0
+                        },
+                        'recent_events': [],
+                        'startup_notes': [],
+                        'last_update': datetime.now().isoformat()
+                    }
+                    
+                    for line in logs.split('\n'):
+                        if not line.strip():
+                            continue
+                        
+                        # Extract timestamp if present
+                        timestamp = None
+                        ts_match = timestamp_pattern.match(line)
+                        if ts_match:
+                            timestamp = ts_match.group(1)
+                            line = line[ts_match.end():].strip()
+                        
+                        # Entrypoint messages
+                        m = entrypoint.search(line)
+                        if m:
+                            msg = m.group(1)
+                            if 'started' in msg.lower():
+                                stats['startup_notes'].append(msg[:100])
+                            continue
+                        
+                        # Thread-based log messages
+                        m = thread_log.search(line)
+                        if m:
+                            thread_id, level, message = m.groups()
+                            
+                            # Ready for connections
+                            if ready_pattern.search(message):
+                                stats['status'] = 'ready'
+                                continue
+                            
+                            # Version
+                            m2 = version_pattern.search(message)
+                            if m2:
+                                stats['version'] = m2.group(1)
+                                continue
+                            
+                            # Starting
+                            m2 = starting_pattern.search(message)
+                            if m2:
+                                stats['version'] = m2.group(1)
+                                stats['status'] = 'starting'
+                                continue
+                            
+                            # Aborted connection
+                            m2 = aborted_conn.search(message)
+                            if m2:
+                                conn_id, db_name, user, host = m2.groups()
+                                stats['connections']['aborted'] += 1
+                                
+                                # Track by database
+                                if db_name not in stats['connections']['by_db']:
+                                    stats['connections']['by_db'][db_name] = {'total': 0, 'aborted': 0}
+                                stats['connections']['by_db'][db_name]['aborted'] += 1
+                                
+                                # Track by host
+                                if host not in stats['connections']['by_host']:
+                                    stats['connections']['by_host'][host] = {'total': 0, 'aborted': 0}
+                                stats['connections']['by_host'][host]['aborted'] += 1
+                                
+                                # Track by user
+                                if user not in stats['connections']['by_user']:
+                                    stats['connections']['by_user'][user] = {'total': 0, 'aborted': 0}
+                                stats['connections']['by_user'][user]['aborted'] += 1
+                                
+                                stats['recent_events'].append({
+                                    'time': timestamp,
+                                    'type': 'aborted_connection',
+                                    'db': db_name,
+                                    'user': user,
+                                    'host': host
+                                })
+                                continue
+                            
+                            # InnoDB buffer pool
+                            m2 = buffer_pool.search(message)
+                            if m2:
+                                size = int(m2.group(1))
+                                unit = m2.group(2).lower() if m2.group(2) else ''
+                                if unit == 'g':
+                                    size *= 1024
+                                stats['innodb']['buffer_pool_size'] = f"{size}MB"
+                                continue
+                            
+                            # InnoDB info
+                            if 'InnoDB:' in message:
+                                if 'Compressed tables' in message:
+                                    stats['innodb']['compressed'] = True
+                                elif 'transaction pools' in message:
+                                    m2 = re.search(r'(\d+)', message)
+                                    if m2:
+                                        stats['innodb']['transaction_pools'] = int(m2.group(1))
+                                elif 'undo tablespaces' in message:
+                                    m2 = re.search(r'(\d+)\s+undo tablespaces', message)
+                                    if m2:
+                                        stats['innodb']['undo_tablespaces'] = int(m2.group(1))
+                                elif 'rollback segments' in message:
+                                    m2 = re.search(r'(\d+)\s+rollback segments', message)
+                                    if m2:
+                                        stats['innodb']['rollback_segments'] = int(m2.group(1))
+                                continue
+                            
+                            # Warnings
+                            if level == 'Warning':
+                                stats['warnings'].append({
+                                    'message': message[:150],
+                                    'time': timestamp
+                                })
+                                continue
+                            
+                            # Errors
+                            if level == 'Error':
+                                stats['errors'].append({
+                                    'message': message[:150],
+                                    'time': timestamp
+                                })
+                                continue
+                    
+                    # Limit arrays
+                    stats['warnings'] = stats['warnings'][-20:]
+                    stats['errors'] = stats['errors'][-20:]
+                    stats['recent_events'] = stats['recent_events'][-50:]
+                    stats['startup_notes'] = stats['startup_notes'][-10:]
+                    
+                    with self.lock:
+                        self.database_stats = stats
+                    
+                    if socketio and SOCKETIO_AVAILABLE:
+                        socketio.emit('database_stats', stats)
+                    
+                    # Persist to database for cross-referencing
+                    shellder_db.persist_database_stats(stats)
+                    
+                except docker.errors.NotFound:
+                    pass
+                except Exception as e:
+                    print(f"Error parsing Database logs: {e}")
+            
+            time.sleep(15)
     
     def _scan_ports(self):
         """Scan important ports"""
@@ -870,6 +2815,10 @@ class StatsCollector:
                 'containers': dict(self.container_stats),
                 'system': dict(self.system_stats),
                 'xilriws': dict(self.xilriws_stats),
+                'rotom': dict(self.rotom_stats),
+                'koji': dict(self.koji_stats),
+                'reactmap': dict(self.reactmap_stats),
+                'database': dict(self.database_stats),
                 'ports': dict(self.port_status),
                 'services': dict(self.service_status)
             }
@@ -1107,6 +3056,72 @@ def api_xilriws_proxies():
         return jsonify({'exists': False, 'error': str(e)})
 
 # =============================================================================
+# ROTOM ENDPOINTS
+# =============================================================================
+
+@app.route('/api/rotom/stats')
+def api_rotom_stats():
+    """Get Rotom device/worker statistics"""
+    stats = stats_collector.get_all_stats()
+    return jsonify(stats.get('rotom', {}))
+
+@app.route('/api/rotom/devices')
+def api_rotom_devices():
+    """Get Rotom device list with status"""
+    stats = stats_collector.get_all_stats()
+    return jsonify(stats.get('rotom', {}).get('devices', {}))
+
+@app.route('/api/rotom/live')
+def api_rotom_live():
+    """Stream Rotom logs in real-time"""
+    return api_container_logs_stream('rotom')
+
+# =============================================================================
+# KOJI ENDPOINTS
+# =============================================================================
+
+@app.route('/api/koji/stats')
+def api_koji_stats():
+    """Get Koji API statistics"""
+    stats = stats_collector.get_all_stats()
+    return jsonify(stats.get('koji', {}))
+
+@app.route('/api/koji/live')
+def api_koji_live():
+    """Stream Koji logs in real-time"""
+    return api_container_logs_stream('koji')
+
+# =============================================================================
+# REACTMAP ENDPOINTS
+# =============================================================================
+
+@app.route('/api/reactmap/stats')
+def api_reactmap_stats():
+    """Get Reactmap build/status info"""
+    stats = stats_collector.get_all_stats()
+    return jsonify(stats.get('reactmap', {}))
+
+@app.route('/api/reactmap/live')
+def api_reactmap_live():
+    """Stream Reactmap logs in real-time"""
+    return api_container_logs_stream('reactmap')
+
+# =============================================================================
+# DATABASE ENDPOINTS
+# =============================================================================
+
+@app.route('/api/database/stats')
+def api_database_stats():
+    """Get MariaDB connection statistics"""
+    stats = stats_collector.get_all_stats()
+    return jsonify(stats.get('database', {}))
+
+@app.route('/api/database/live')
+def api_database_live():
+    """Stream Database logs in real-time"""
+    return api_container_logs_stream('database')
+
+# =============================================================================
 # HISTORICAL DATA ENDPOINTS (from SQLite)
 # =============================================================================
 
@@ -1144,6 +3159,73 @@ def api_db_events():
     """Get system events from SQLite"""
     limit = request.args.get('limit', 50, type=int)
     return jsonify(shellder_db.get_system_events(limit))
+
+# =============================================================================
+# STACK DATABASE ENDPOINTS (Cross-reference with MariaDB)
+# =============================================================================
+# These endpoints query the actual Unown Stack databases (golbat, dragonite, 
+# koji, reactmap) for live scanner data cross-referenced with logs
+
+@app.route('/api/stack/test')
+def api_stack_test():
+    """Test MariaDB stack connection"""
+    return jsonify(stack_db.test_connection())
+
+@app.route('/api/stack/databases')
+def api_stack_databases():
+    """List available stack databases"""
+    return jsonify(stack_db.get_available_databases())
+
+@app.route('/api/stack/summary')
+def api_stack_summary():
+    """Get comprehensive stack summary (all databases)"""
+    return jsonify(stack_db.get_full_stack_summary())
+
+@app.route('/api/stack/golbat')
+def api_stack_golbat():
+    """Get Golbat database stats (Pokemon, Gyms, Stops)"""
+    return jsonify(stack_db.get_golbat_stats())
+
+@app.route('/api/stack/dragonite')
+def api_stack_dragonite():
+    """Get Dragonite database stats (Accounts, Devices, Instances)"""
+    return jsonify(stack_db.get_dragonite_stats())
+
+@app.route('/api/stack/koji')
+def api_stack_koji():
+    """Get Koji database stats (Geofences, Routes, Projects)"""
+    return jsonify(stack_db.get_koji_stats())
+
+@app.route('/api/stack/reactmap')
+def api_stack_reactmap():
+    """Get Reactmap database stats (Users, Sessions)"""
+    return jsonify(stack_db.get_reactmap_stats())
+
+@app.route('/api/stack/devices')
+def api_stack_devices():
+    """Get detailed device status from Dragonite DB"""
+    return jsonify(stack_db.get_device_status())
+
+@app.route('/api/stack/accounts')
+def api_stack_accounts():
+    """Get account health summary from Dragonite DB"""
+    return jsonify(stack_db.get_account_health())
+
+@app.route('/api/stack/pokemon')
+def api_stack_pokemon():
+    """Get Pokemon spawn summary from Golbat DB"""
+    hours = request.args.get('hours', 24, type=int)
+    return jsonify(stack_db.get_pokemon_summary(hours))
+
+@app.route('/api/stack/efficiency')
+def api_stack_efficiency():
+    """Get scanner efficiency (cross-reference Dragonite + Golbat)"""
+    return jsonify(stack_db.get_scanner_efficiency())
+
+@app.route('/api/stack/health')
+def api_stack_health():
+    """Get comprehensive health dashboard from all databases"""
+    return jsonify(stack_db.get_health_dashboard())
 
 # =============================================================================
 # SYSTEM ENDPOINTS

@@ -1527,6 +1527,220 @@ select:focus {
 .text-muted { color: var(--text-muted); }
 
 /* =============================================================================
+   STACK DATA PAGE
+   ============================================================================= */
+
+.stack-connection {
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    padding: 12px 20px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border-color);
+}
+
+.stack-connection.connected {
+    border-color: var(--success);
+    background: rgba(16, 185, 129, 0.1);
+}
+
+.connection-success, .connection-error {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.connection-success {
+    color: var(--success);
+}
+
+.connection-error {
+    color: var(--danger);
+    flex-direction: column;
+    align-items: flex-start;
+}
+
+.connection-error small {
+    color: var(--text-muted);
+    font-size: 0.85em;
+}
+
+.stack-stats-grid {
+    margin-bottom: 24px;
+}
+
+.stack-grid {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 20px;
+    margin-bottom: 24px;
+}
+
+.stat-list {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.stat-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.stat-name {
+    color: var(--text-secondary);
+    font-size: 0.9em;
+}
+
+.stat-val {
+    font-weight: 600;
+    font-family: var(--font-mono);
+}
+
+.stat-val.success { color: var(--success); }
+.stat-val.warning { color: var(--warning); }
+.stat-val.danger { color: var(--danger); }
+
+.instances-list, .provider-breakdown, .gym-teams, .mode-breakdown {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.instances-list h4, .provider-breakdown h4, .gym-teams h4, .mode-breakdown h4 {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    margin-bottom: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.instance-row, .provider-row, .team-row, .mode-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 10px;
+    font-size: 0.9em;
+    background: var(--bg-hover);
+    border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+}
+
+.instance-name, .provider-row span:first-child, .mode-row span:first-child {
+    color: var(--text-primary);
+}
+
+.instance-type {
+    color: var(--accent-secondary);
+    font-size: 0.85em;
+}
+
+.team-row.mystic { border-left: 3px solid #3b82f6; }
+.team-row.valor { border-left: 3px solid #ef4444; }
+.team-row.instinct { border-left: 3px solid #f59e0b; }
+.team-row.neutral { border-left: 3px solid var(--text-muted); }
+
+.card.full-width {
+    grid-column: 1 / -1;
+}
+
+.device-count {
+    background: var(--bg-tertiary);
+    padding: 4px 12px;
+    border-radius: 20px;
+    font-size: 0.85em;
+    color: var(--text-secondary);
+}
+
+.device-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 16px;
+}
+
+.device-card {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid var(--border-color);
+    transition: var(--transition-fast);
+}
+
+.device-card:hover {
+    border-color: var(--accent-primary);
+}
+
+.device-card.online {
+    border-left: 3px solid var(--success);
+}
+
+.device-card.offline {
+    border-left: 3px solid var(--danger);
+    opacity: 0.7;
+}
+
+.device-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 12px;
+    padding-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.device-status {
+    font-size: 10px;
+}
+
+.device-status.online { color: var(--success); }
+.device-status.offline { color: var(--danger); }
+
+.device-uuid {
+    font-family: var(--font-mono);
+    font-size: 0.9em;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.device-info {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.device-info .device-row {
+    display: flex;
+    justify-content: space-between;
+    font-size: 0.85em;
+    background: none;
+    padding: 0;
+}
+
+.device-info .device-row span:first-child {
+    color: var(--text-muted);
+}
+
+.device-info .device-row span:last-child {
+    color: var(--text-secondary);
+}
+
+.no-data, .error-msg {
+    text-align: center;
+    padding: 30px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.error-msg {
+    color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+    border-radius: var(--radius-sm);
+}
+
+/* =============================================================================
    RESPONSIVE
    ============================================================================= */
 
