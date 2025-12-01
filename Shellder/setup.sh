@@ -2390,36 +2390,36 @@ if [ "$DB_AVAILABLE" = "true" ]; then
         # Skip if value is empty or too short (less than 8 chars)
         if [ -z "$value" ] || [ ${#value} -lt 8 ]; then
             print_warning "Skipped $key (empty or too short)"
-            ((skipped_count++))
+            ((skipped_count++)) || true
             continue
         fi
         
         # Skip if it's a default value
         if is_default_value "$key" "$value"; then
             print_warning "Skipped $key (default/template value)"
-            ((skipped_count++))
+            ((skipped_count++)) || true
             continue
         fi
         
         store_config_value "$key" "$value" ".env" "$desc" 1
-        ((stored_count++))
+        ((stored_count++)) || true
     done
     
     # Store PUID/PGID (validate they're numbers)
     if [[ "$USER_UID" =~ ^[0-9]+$ ]]; then
         store_config_value "PUID" "$USER_UID" ".env" "Docker container user ID" 0
-        ((stored_count++))
+        ((stored_count++)) || true
     else
         print_warning "Skipped PUID (invalid: $USER_UID)"
-        ((skipped_count++))
+        ((skipped_count++)) || true
     fi
     
     if [[ "$USER_GID" =~ ^[0-9]+$ ]]; then
         store_config_value "PGID" "$USER_GID" ".env" "Docker container group ID" 0
-        ((stored_count++))
+        ((stored_count++)) || true
     else
         print_warning "Skipped PGID (invalid: $USER_GID)"
-        ((skipped_count++))
+        ((skipped_count++)) || true
     fi
     
     # Record setup event
