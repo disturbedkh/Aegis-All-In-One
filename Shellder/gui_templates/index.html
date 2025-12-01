@@ -154,13 +154,29 @@
                     </div>
                 </div>
                 
-                <div class="card">
-                    <div class="card-header">
-                        <h2>Container Status</h2>
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Container Status</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="containerList" class="container-list">
+                                <div class="loading">Loading containers...</div>
+                            </div>
+                        </div>
                     </div>
-                    <div class="card-body">
-                        <div id="containerList" class="container-list">
-                            <div class="loading">Loading containers...</div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Xilriws Proxy Status</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="xilriwsStats" class="xilriws-panel">
+                                <div class="loading">Loading Xilriws stats...</div>
+                            </div>
+                            <div class="xilriws-details" id="xilriwsDetails">
+                                <!-- Details populated by JS -->
+                            </div>
                         </div>
                     </div>
                 </div>

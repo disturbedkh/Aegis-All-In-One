@@ -31,10 +31,14 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy application files
-COPY gui_server.py .
+# Note: gui_server.py is deprecated, shellder_service.py is the unified server
+COPY shellder_service.py .
 COPY gui_templates/ ./gui_templates/
 COPY gui_static/ ./gui_static/
-COPY shellder_service.py .
+
+# Copy helper scripts for reference (read-only access)
+COPY db_helper.sh ./db_helper.sh
+COPY log_helper.sh ./log_helper.sh
 
 # Create directories for data persistence
 RUN mkdir -p /app/data /app/logs

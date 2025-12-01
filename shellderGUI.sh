@@ -30,7 +30,9 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR" || exit 1
 
 # Configuration
-GUI_SERVER="$SCRIPT_DIR/Shellder/gui_server.py"
+# NOTE: We use shellder_service.py for both modes as it's the unified server
+# gui_server.py is deprecated and will be removed
+GUI_SERVER="$SCRIPT_DIR/Shellder/shellder_service.py"
 SERVICE_SERVER="$SCRIPT_DIR/Shellder/shellder_service.py"
 PID_FILE="$SCRIPT_DIR/Shellder/.gui_pid"
 LOG_FILE="$SCRIPT_DIR/Shellder/gui_server.log"
@@ -213,13 +215,21 @@ check_dependencies() {
     
     # Check if Flask is installed in venv
     if ! "$PYTHON_CMD" -c "import flask" 2>/dev/null; then
-        echo -e "${YELLOW}Installing Flask...${NC}"
+        echo -e "${YELLOW}Installing dependencies...${NC}"
         "$PIP_CMD" install --upgrade pip -q 2>/dev/null
-        "$PIP_CMD" install flask flask-cors -q
+        
+        # Install all required dependencies for shellder_service.py
+        "$PIP_CMD" install flask flask-cors flask-socketio python-socketio eventlet requests psutil -q
         if [ $? -ne 0 ]; then
-            echo -e "${RED}Failed to install Flask${NC}"
+            echo -e "${RED}Failed to install dependencies${NC}"
             exit 1
         fi
+    fi
+    
+    # Check for optional docker package
+    if ! "$PYTHON_CMD" -c "import docker" 2>/dev/null; then
+        echo -e "${YELLOW}Installing docker package...${NC}"
+        "$PIP_CMD" install docker -q 2>/dev/null || true
     fi
     
     echo -e "${GREEN}✓ Dependencies OK${NC}"

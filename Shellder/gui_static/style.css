@@ -877,6 +877,104 @@ select:focus {
 }
 
 /* =============================================================================
+   XILRIWS PANEL
+   ============================================================================= */
+
+.xilriws-panel {
+    padding: 8px 0;
+}
+
+.xilriws-empty {
+    text-align: center;
+    padding: 24px;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.xilriws-summary {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 16px;
+    margin-bottom: 16px;
+}
+
+.xilriws-stat {
+    text-align: center;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+}
+
+.xilriws-stat.primary {
+    grid-column: span 1;
+    background: linear-gradient(135deg, var(--bg-tertiary), var(--bg-hover));
+    border: 1px solid var(--border-color);
+}
+
+.xilriws-stat .stat-value {
+    display: block;
+    font-size: 1.5rem;
+    font-weight: 700;
+    font-family: var(--font-mono);
+    margin-bottom: 4px;
+}
+
+.xilriws-stat .stat-value.excellent { color: var(--success); }
+.xilriws-stat .stat-value.good { color: #22c55e; }
+.xilriws-stat .stat-value.warning { color: var(--warning); }
+.xilriws-stat .stat-value.critical { color: var(--danger); }
+.xilriws-stat .stat-value.success { color: var(--success); }
+.xilriws-stat .stat-value.error { color: var(--danger); }
+
+.xilriws-stat .stat-label {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.xilriws-errors {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-top: 12px;
+}
+
+.xilriws-errors .error-title {
+    font-size: 0.8rem;
+    font-weight: 600;
+    color: var(--danger);
+    margin-bottom: 8px;
+}
+
+.error-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.error-item {
+    background: rgba(239, 68, 68, 0.15);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+}
+
+.error-item .count {
+    font-weight: 700;
+    color: var(--danger);
+    margin-right: 4px;
+}
+
+@media (max-width: 768px) {
+    .xilriws-summary {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
+/* =============================================================================
    UTILITIES
    ============================================================================= */
 

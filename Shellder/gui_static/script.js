@@ -1,6 +1,7 @@
 /**
  * Shellder GUI - JavaScript
  * Client-side functionality for the Aegis AIO control panel
+ * With WebSocket support for real-time updates
  */
 
 // =============================================================================
@@ -10,6 +11,89 @@
 const API_BASE = '';
 let refreshInterval = null;
 let currentPage = 'dashboard';
+let socket = null;
+let wsConnected = false;
+
+// =============================================================================
+// WEBSOCKET CONNECTION
+// =============================================================================
+
+function initWebSocket() {
+    // Check if Socket.IO is available
+    if (typeof io === 'undefined') {
+        console.log('Socket.IO not available, using polling fallback');
+        return;
+    }
+    
+    try {
+        socket = io({
+            transports: ['websocket', 'polling'],
+            reconnection: true,
+            reconnectionDelay: 1000,
+            reconnectionAttempts: 10
+        });
+        
+        socket.on('connect', () => {
+            console.log('WebSocket connected');
+            wsConnected = true;
+            updateConnectionStatus(true, 'live');
+            
+            // Subscribe to all stats
+            socket.emit('subscribe', { channel: 'all' });
+        });
+        
+        socket.on('disconnect', () => {
+            console.log('WebSocket disconnected');
+            wsConnected = false;
+            updateConnectionStatus(false);
+        });
+        
+        socket.on('connected', (data) => {
+            console.log('Server acknowledged connection:', data);
+        });
+        
+        // Real-time container stats
+        socket.on('container_stats', (data) => {
+            if (currentPage === 'dashboard' || currentPage === 'containers') {
+                updateContainerStats(data);
+            }
+        });
+        
+        // Real-time system stats
+        socket.on('system_stats', (data) => {
+            if (currentPage === 'dashboard') {
+                updateSystemStats(data);
+            }
+        });
+        
+        // Real-time Xilriws stats
+        socket.on('xilriws_stats', (data) => {
+            updateXilriwsStats(data);
+        });
+        
+        // Port status updates
+        socket.on('port_status', (data) => {
+            updatePortStatus(data);
+        });
+        
+        // Service status updates
+        socket.on('service_status', (data) => {
+            updateServiceStatus(data);
+        });
+        
+        // Action results
+        socket.on('action_result', (data) => {
+            if (data.success) {
+                showToast(data.message, 'success');
+            } else {
+                showToast(`Error: ${data.error}`, 'error');
+            }
+        });
+        
+    } catch (error) {
+        console.error('WebSocket initialization failed:', error);
+    }
+}
 
 // =============================================================================
 // INITIALIZATION
@@ -17,8 +101,17 @@ let currentPage = 'dashboard';
 
 document.addEventListener('DOMContentLoaded', () => {
     initNavigation();
+    initWebSocket();
     refreshData();
     startAutoRefresh();
+    
+    // Load Socket.IO library if not present
+    if (typeof io === 'undefined') {
+        const script = document.createElement('script');
+        script.src = 'https://cdn.socket.io/4.6.0/socket.io.min.js';
+        script.onload = initWebSocket;
+        document.head.appendChild(script);
+    }
 });
 
 function initNavigation() {
@@ -88,8 +181,11 @@ async function refreshData() {
     try {
         const data = await fetchAPI('/api/status');
         updateDashboard(data);
-        updateConnectionStatus(true);
+        updateConnectionStatus(true, wsConnected ? 'live' : 'polling');
         updateLastUpdate();
+        
+        // Also refresh Xilriws stats
+        loadXilriwsStats();
     } catch (error) {
         updateConnectionStatus(false);
         showToast('Failed to fetch status', 'error');
@@ -98,7 +194,9 @@ async function refreshData() {
 
 function startAutoRefresh() {
     if (refreshInterval) clearInterval(refreshInterval);
-    refreshInterval = setInterval(refreshData, 10000); // Every 10 seconds
+    // Use longer interval if WebSocket is connected
+    const interval = wsConnected ? 30000 : 10000;
+    refreshInterval = setInterval(refreshData, interval);
 }
 
 // =============================================================================
@@ -128,6 +226,130 @@ function updateDashboard(data) {
     
     // Container list
     updateContainerList(data.containers.list);
+    
+    // Update Xilriws if available
+    if (data.xilriws) {
+        updateXilriwsStats(data.xilriws);
+    }
+}
+
+function updateContainerStats(containers) {
+    // Update running/stopped counts
+    let running = 0, stopped = 0;
+    Object.values(containers).forEach(c => {
+        if (c.status === 'running') running++;
+        else stopped++;
+    });
+    
+    document.getElementById('containersRunning').textContent = running;
+    document.getElementById('containersStopped').textContent = stopped;
+    
+    // Update container list
+    const list = Object.values(containers);
+    updateContainerList(list);
+    
+    // Update detail list if on containers page
+    if (currentPage === 'containers') {
+        updateContainerDetailList(list);
+    }
+}
+
+function updateSystemStats(data) {
+    if (data.memory) {
+        const memUsed = formatBytes(data.memory.used);
+        const memTotal = formatBytes(data.memory.total);
+        document.getElementById('memoryUsed').textContent = `${data.memory.percent}%`;
+        document.getElementById('memoryInfo').textContent = `${memUsed} / ${memTotal}`;
+    }
+    
+    if (data.disk) {
+        const diskUsed = formatBytes(data.disk.used);
+        const diskTotal = formatBytes(data.disk.total);
+        document.getElementById('diskUsed').textContent = `${data.disk.percent}%`;
+        document.getElementById('diskInfo').textContent = `${diskUsed} / ${diskTotal}`;
+    }
+}
+
+function updateXilriwsStats(data) {
+    // If we have an Xilriws stats section, update it
+    const statsEl = document.getElementById('xilriwsStats');
+    if (!statsEl) return;
+    
+    if (!data || Object.keys(data).length === 0) {
+        statsEl.innerHTML = '<div class="xilriws-empty">Xilriws not running or no data yet</div>';
+        return;
+    }
+    
+    const successRate = data.success_rate || 0;
+    const rateClass = successRate > 80 ? 'excellent' : successRate > 50 ? 'good' : successRate > 20 ? 'warning' : 'critical';
+    
+    statsEl.innerHTML = `
+        <div class="xilriws-summary">
+            <div class="xilriws-stat primary">
+                <span class="stat-value ${rateClass}">${successRate.toFixed(1)}%</span>
+                <span class="stat-label">Success Rate</span>
+            </div>
+            <div class="xilriws-stat">
+                <span class="stat-value success">${data.successful || 0}</span>
+                <span class="stat-label">Successful</span>
+            </div>
+            <div class="xilriws-stat">
+                <span class="stat-value error">${data.failed || 0}</span>
+                <span class="stat-label">Failed</span>
+            </div>
+            <div class="xilriws-stat">
+                <span class="stat-value">${data.total_requests || 0}</span>
+                <span class="stat-label">Total Requests</span>
+            </div>
+        </div>
+        ${data.auth_banned > 0 || data.code_15 > 0 || data.rate_limited > 0 ? `
+        <div class="xilriws-errors">
+            <div class="error-title">Error Breakdown</div>
+            <div class="error-grid">
+                ${data.auth_banned > 0 ? `<div class="error-item"><span class="count">${data.auth_banned}</span> Auth Banned</div>` : ''}
+                ${data.code_15 > 0 ? `<div class="error-item"><span class="count">${data.code_15}</span> Code 15</div>` : ''}
+                ${data.rate_limited > 0 ? `<div class="error-item"><span class="count">${data.rate_limited}</span> Rate Limited</div>` : ''}
+                ${data.invalid_credentials > 0 ? `<div class="error-item"><span class="count">${data.invalid_credentials}</span> Invalid Creds</div>` : ''}
+                ${data.tunneling_errors > 0 ? `<div class="error-item"><span class="count">${data.tunneling_errors}</span> Tunnel Errors</div>` : ''}
+                ${data.timeouts > 0 ? `<div class="error-item"><span class="count">${data.timeouts}</span> Timeouts</div>` : ''}
+            </div>
+        </div>
+        ` : ''}
+    `;
+}
+
+async function loadXilriwsStats() {
+    try {
+        const data = await fetchAPI('/api/xilriws/stats');
+        updateXilriwsStats(data);
+    } catch (error) {
+        console.error('Failed to load Xilriws stats:', error);
+    }
+}
+
+function updatePortStatus(ports) {
+    const portsEl = document.getElementById('portStatus');
+    if (!portsEl) return;
+    
+    portsEl.innerHTML = Object.values(ports).map(p => `
+        <div class="port-item ${p.open ? 'open' : 'closed'}">
+            <span class="port-number">${p.port}</span>
+            <span class="port-name">${p.name}</span>
+            <span class="port-state">${p.open ? '●' : '○'}</span>
+        </div>
+    `).join('');
+}
+
+function updateServiceStatus(services) {
+    const servicesEl = document.getElementById('serviceStatus');
+    if (!servicesEl) return;
+    
+    servicesEl.innerHTML = Object.entries(services).map(([name, active]) => `
+        <div class="service-item ${active ? 'active' : 'inactive'}">
+            <span class="service-name">${name}</span>
+            <span class="service-state">${active ? '✓' : '✗'}</span>
+        </div>
+    `).join('');
 }
 
 function updateContainerList(containers) {
@@ -140,20 +362,65 @@ function updateContainerList(containers) {
     
     listEl.innerHTML = containers.map(c => `
         <div class="container-item">
-            <div class="container-status ${c.state}"></div>
+            <div class="container-status ${c.status || c.state}"></div>
             <div class="container-name">${c.name}</div>
-            <div class="container-state">${c.state}</div>
+            <div class="container-state">${c.status || c.state}</div>
+            ${c.cpu_percent !== undefined ? `
+                <div class="container-stats">
+                    <span title="CPU">${c.cpu_percent}%</span>
+                    <span title="Memory">${c.memory_percent || 0}%</span>
+                </div>
+            ` : ''}
         </div>
     `).join('');
 }
 
-function updateConnectionStatus(connected) {
+function updateContainerDetailList(containers) {
+    const listEl = document.getElementById('containerDetailList');
+    if (!listEl) return;
+    
+    if (!containers || containers.length === 0) {
+        listEl.innerHTML = '<div class="loading">No containers found</div>';
+        return;
+    }
+    
+    listEl.innerHTML = containers.map(c => `
+        <div class="container-detail">
+            <div class="container-status ${c.status || c.state}"></div>
+            <div class="container-info">
+                <div class="container-name">${c.name}</div>
+                <div class="container-status-text">${c.status || c.state}</div>
+                ${c.cpu_percent !== undefined ? `
+                    <div class="container-metrics">
+                        CPU: ${c.cpu_percent}% | Memory: ${c.memory_percent || 0}%
+                    </div>
+                ` : ''}
+            </div>
+            <div class="container-actions">
+                ${(c.status || c.state) === 'running' ? `
+                    <button class="btn btn-sm" onclick="containerAction('${c.name}', 'restart')">🔄</button>
+                    <button class="btn btn-sm btn-danger" onclick="containerAction('${c.name}', 'stop')">⏹️</button>
+                ` : `
+                    <button class="btn btn-sm btn-success" onclick="containerAction('${c.name}', 'start')">▶️</button>
+                `}
+                <button class="btn btn-sm" onclick="viewContainerLogs('${c.name}')">📋</button>
+            </div>
+        </div>
+    `).join('');
+}
+
+function updateConnectionStatus(connected, mode = '') {
     const dot = document.getElementById('connectionStatus');
     const text = document.getElementById('connectionText');
     
     if (connected) {
         dot.className = 'status-dot connected';
-        text.textContent = 'Connected';
+        if (mode === 'live') {
+            text.textContent = 'Live';
+            dot.classList.add('live');
+        } else {
+            text.textContent = 'Connected';
+        }
     } else {
         dot.className = 'status-dot error';
         text.textContent = 'Disconnected';
@@ -176,30 +443,7 @@ async function loadContainerDetails() {
     
     try {
         const containers = await fetchAPI('/api/containers');
-        
-        if (!containers || containers.length === 0) {
-            listEl.innerHTML = '<div class="loading">No containers found</div>';
-            return;
-        }
-        
-        listEl.innerHTML = containers.map(c => `
-            <div class="container-detail">
-                <div class="container-status ${c.state}"></div>
-                <div class="container-info">
-                    <div class="container-name">${c.name}</div>
-                    <div class="container-status-text">${c.status}</div>
-                </div>
-                <div class="container-actions">
-                    ${c.state === 'running' ? `
-                        <button class="btn btn-sm" onclick="containerAction('${c.name}', 'restart')">🔄 Restart</button>
-                        <button class="btn btn-sm btn-danger" onclick="containerAction('${c.name}', 'stop')">⏹️ Stop</button>
-                    ` : `
-                        <button class="btn btn-sm btn-success" onclick="containerAction('${c.name}', 'start')">▶️ Start</button>
-                    `}
-                    <button class="btn btn-sm" onclick="viewContainerLogs('${c.name}')">📋 Logs</button>
-                </div>
-            </div>
-        `).join('');
+        updateContainerDetailList(containers);
     } catch (error) {
         listEl.innerHTML = '<div class="loading">Failed to load containers</div>';
     }
@@ -208,6 +452,13 @@ async function loadContainerDetails() {
 async function containerAction(name, action) {
     showToast(`${action}ing ${name}...`, 'info');
     
+    // Use WebSocket if available
+    if (socket && wsConnected) {
+        socket.emit('container_action', { name, action });
+        return;
+    }
+    
+    // Fall back to REST API
     try {
         const result = await fetchAPI(`/api/container/${name}/${action}`, {
             method: 'POST'
@@ -233,11 +484,15 @@ async function viewContainerLogs(name) {
     openModal(`Logs: ${name}`, '<div class="loading">Loading logs...</div>');
     
     try {
-        const result = await fetchAPI(`/api/container/${name}/logs?lines=100`);
+        const result = await fetchAPI(`/api/container/${name}/logs?lines=200`);
         
         if (result.success) {
             document.getElementById('modalBody').innerHTML = 
                 `<pre class="log-viewer">${escapeHtml(result.logs)}</pre>`;
+            
+            // Scroll to bottom
+            const logViewer = document.querySelector('.modal .log-viewer');
+            if (logViewer) logViewer.scrollTop = logViewer.scrollHeight;
         } else {
             document.getElementById('modalBody').innerHTML = 
                 `<div class="text-danger">Failed to load logs: ${result.error}</div>`;
@@ -480,3 +735,13 @@ function escapeHtml(text) {
     return div.innerHTML;
 }
 
+function formatBytes(bytes) {
+    if (!bytes) return '0 B';
+    const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+    let i = 0;
+    while (bytes >= 1024 && i < units.length - 1) {
+        bytes /= 1024;
+        i++;
+    }
+    return `${bytes.toFixed(1)} ${units[i]}`;
+}
