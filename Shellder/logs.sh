@@ -184,7 +184,7 @@ EXCLUSION_PATTERNS=(
     "Starting.*Public"
     "APICHECK.*is OK"
     "Loaded [0-9]+ proxies"
-    # Koji patterns (Rust/Actix)
+    # Koji patterns (Rust/Actix log format: [timestamp LEVEL module] message)
     "Listening on"
     "Connected to"
     "INFO.*actix_server"
@@ -198,12 +198,25 @@ EXCLUSION_PATTERNS=(
     "Migrations successful"
     "sea_orm_migration::migrator"
     "GEOFENCES_FC_ALL.*Returning"
-    # Koji stream errors from bots/scanners (harmless HTTP parse errors)
-    "actix_http::h1::dispatcher.*stream error.*parse error"
+    "api::public::v1::geofence"
+    "model::utils"
+    "actix_server::builder"
+    # Koji HTTP request logs (these are access logs, not errors)
+    "[0-9]+ | GET .* HTTP"
+    "[0-9]+ | POST .* HTTP"
+    "[0-9]+ | OPTIONS .* HTTP"
+    "bytes in [0-9.]+ ms"
+    # Koji stream errors from bots/scanners - these are HARMLESS
+    # External bots probe with malformed HTTP requests, not actual errors
+    "actix_http::h1::dispatcher.*stream error"
+    "request parse error"
     "invalid Header provided"
+    "invalid HTTP version specified"
     "invalid HTTP version"
-    # SQLx pool warnings (slow but not errors)
+    # SQLx pool warnings (slow acquisition, but system is working)
     "sqlx::pool::acquire.*acquired connection"
+    "slow_acquire_threshold"
+    "aquired_after_secs"
     # VictoriaMetrics/vmagent info patterns (tab-separated format)
     "	info	"
     "	debug	"
@@ -823,9 +836,11 @@ show_service_detail() {
     echo "    5) Search in log"
     echo "    6) Clear this service's log"
     echo "    ${CYAN}e) View errors only (numbered list with context jump)${NC}"
-    # Show database-specific option for database container
+    # Show container-specific options
     if [ "$service" = "database" ]; then
         echo "    ${MAGENTA}d) Database connection analysis${NC}"
+    elif [ "$service" = "koji" ]; then
+        echo "    ${MAGENTA}k) Koji API & geofence analysis${NC}"
     fi
     echo "    0) Back to main menu"
     echo ""
@@ -842,6 +857,13 @@ show_service_detail() {
         d|D) 
             if [ "$service" = "database" ]; then
                 show_database_connection_analysis
+            else
+                show_service_detail "$service"
+            fi
+            ;;
+        k|K)
+            if [ "$service" = "koji" ]; then
+                show_koji_analysis
             else
                 show_service_detail "$service"
             fi
@@ -1120,6 +1142,202 @@ show_database_config() {
     echo ""
     press_enter
     show_database_connection_analysis
+}
+
+# =============================================================================
+# KOJI ANALYSIS
+# =============================================================================
+
+# Analyze Koji API usage and geofence activity
+show_koji_analysis() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "            KOJI API & GEOFENCE ANALYSIS"
+    draw_box_bottom
+    echo ""
+    
+    # Check if koji container exists
+    if ! docker ps -a --format '{{.Names}}' | grep -q "^koji$"; then
+        echo -e "  ${RED}Koji container not found${NC}"
+        press_enter
+        show_service_detail "koji"
+        return
+    fi
+    
+    echo -e "  ${DIM}Analyzing Koji logs...${NC}"
+    echo ""
+    
+    local temp_file=$(mktemp)
+    docker logs koji 2>&1 > "$temp_file" 2>/dev/null || true
+    
+    # Scanner Type Detection
+    echo -e "${WHITE}${BOLD}Scanner Configuration${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    local scanner_type=$(grep -oP "Determined Scanner Type: \K\w+" "$temp_file" | tail -1)
+    echo -e "  Scanner Type:        ${CYAN}${scanner_type:-unknown}${NC}"
+    
+    local workers=$(grep -oP "starting \K\d+ workers" "$temp_file" | tail -1)
+    echo -e "  Actix Workers:       ${CYAN}${workers:-unknown}${NC}"
+    
+    local listen_addr=$(grep -oP "listening on: \K[^\s]+" "$temp_file" | tail -1)
+    echo -e "  Listen Address:      ${CYAN}${listen_addr:-unknown}${NC}"
+    echo ""
+    
+    # Migration Status
+    echo -e "${WHITE}${BOLD}Database Migrations${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    if grep -q "No pending migrations" "$temp_file"; then
+        echo -e "  Status:              ${GREEN}✓ All migrations applied${NC}"
+    elif grep -q "Applying all pending migrations" "$temp_file"; then
+        echo -e "  Status:              ${YELLOW}⚠ Migrations were applied on startup${NC}"
+    else
+        echo -e "  Status:              ${DIM}Unknown${NC}"
+    fi
+    echo ""
+    
+    # Geofence Activity
+    echo -e "${WHITE}${BOLD}Geofence API Activity${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    # Count geofence requests by type
+    local mapping_requests=$(grep -c "geofence/feature-collection/Mapping" "$temp_file" 2>/dev/null || echo "0")
+    local reactmap_requests=$(grep -c "geofence/feature-collection/Reactmap" "$temp_file" 2>/dev/null || echo "0")
+    local health_checks=$(grep -c "/api/v1/health" "$temp_file" 2>/dev/null || echo "0")
+    
+    printf "  %-25s ${CYAN}%-10s${NC}\n" "Mapping requests:" "$mapping_requests"
+    printf "  %-25s ${CYAN}%-10s${NC}\n" "Reactmap requests:" "$reactmap_requests"
+    printf "  %-25s ${CYAN}%-10s${NC}\n" "Health checks:" "$health_checks"
+    
+    # Check geofence instance counts
+    local geofence_counts=$(grep -oP "Returning \K\d+ instances" "$temp_file" | sort | uniq -c | sort -rn)
+    if [ -n "$geofence_counts" ]; then
+        echo ""
+        echo -e "  ${DIM}Geofence instance counts:${NC}"
+        echo "$geofence_counts" | while read count value; do
+            printf "    ${CYAN}%s${NC} (seen %s times)\n" "$value" "$count"
+        done
+    fi
+    echo ""
+    
+    # HTTP Status Analysis
+    echo -e "${WHITE}${BOLD}HTTP Response Analysis${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    # Count by status code
+    local status_200=$(grep -cE "\b200 \| (GET|POST)" "$temp_file" 2>/dev/null || echo "0")
+    local status_400=$(grep -cE "\b400 \| (GET|POST)" "$temp_file" 2>/dev/null || echo "0")
+    local status_404=$(grep -cE "\b404 \| (GET|POST)" "$temp_file" 2>/dev/null || echo "0")
+    local status_405=$(grep -cE "\b405 \| (GET|POST|OPTIONS)" "$temp_file" 2>/dev/null || echo "0")
+    local status_500=$(grep -cE "\b500 \| (GET|POST)" "$temp_file" 2>/dev/null || echo "0")
+    
+    printf "  %-15s ${GREEN}%-10s${NC}\n" "200 OK:" "$status_200"
+    [ "$status_400" -gt 0 ] && printf "  %-15s ${YELLOW}%-10s${NC}\n" "400 Bad Req:" "$status_400"
+    [ "$status_404" -gt 0 ] && printf "  %-15s ${YELLOW}%-10s${NC}\n" "404 Not Found:" "$status_404"
+    [ "$status_405" -gt 0 ] && printf "  %-15s ${YELLOW}%-10s${NC}\n" "405 Not Allowed:" "$status_405"
+    [ "$status_500" -gt 0 ] && printf "  %-15s ${RED}%-10s${NC}\n" "500 Server Err:" "$status_500"
+    echo ""
+    
+    # Bot/Scanner Probe Analysis
+    echo -e "${WHITE}${BOLD}External Bot Probes (Harmless)${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    local invalid_header=$(grep -c "invalid Header provided" "$temp_file" 2>/dev/null || echo "0")
+    local invalid_http=$(grep -c "invalid HTTP version" "$temp_file" 2>/dev/null || echo "0")
+    local total_probes=$((invalid_header + invalid_http))
+    
+    if [ "$total_probes" -gt 0 ]; then
+        echo -e "  ${DIM}These are from bots/vulnerability scanners - NOT actual errors${NC}"
+        printf "  %-25s ${DIM}%-10s${NC}\n" "Invalid headers:" "$invalid_header"
+        printf "  %-25s ${DIM}%-10s${NC}\n" "Invalid HTTP version:" "$invalid_http"
+        printf "  %-25s ${DIM}%-10s${NC}\n" "Total probe attempts:" "$total_probes"
+        
+        # Show unique IPs probing
+        echo ""
+        echo -e "  ${DIM}Probe source IPs (last 5):${NC}"
+        grep -E "actix_web.*\([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+\)" "$temp_file" | \
+            grep -oP "\([0-9.]+\)" | tr -d '()' | sort | uniq -c | sort -rn | head -5 | \
+            while read count ip; do
+                printf "    ${DIM}%-18s (%s requests)${NC}\n" "$ip" "$count"
+            done
+    else
+        echo -e "  ${GREEN}No bot probes detected${NC}"
+    fi
+    echo ""
+    
+    # Database Connection Warnings
+    echo -e "${WHITE}${BOLD}Database Connection Health${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    
+    local slow_acquires=$(grep -c "slow_acquire_threshold" "$temp_file" 2>/dev/null || echo "0")
+    if [ "$slow_acquires" -gt 0 ]; then
+        echo -e "  ${YELLOW}⚠ Slow DB connections:${NC} $slow_acquires"
+        # Get the acquisition times
+        echo -e "  ${DIM}Recent slow acquisitions:${NC}"
+        grep "aquired_after_secs" "$temp_file" | tail -3 | while read -r line; do
+            local secs=$(echo "$line" | grep -oP "aquired_after_secs=\K[0-9.]+")
+            printf "    ${YELLOW}%.2f seconds${NC}\n" "$secs"
+        done
+        echo ""
+        echo -e "  ${DIM}Recommendation: Check MariaDB load and connection pool settings${NC}"
+    else
+        echo -e "  ${GREEN}✓ No slow database connections${NC}"
+    fi
+    
+    rm -f "$temp_file"
+    echo ""
+    
+    echo -e "${WHITE}${BOLD}Options${NC}"
+    echo -e "${DIM}────────────────────────────────────────${NC}"
+    echo "    1) View recent API requests"
+    echo "    2) View all warnings"
+    echo "    0) Back to Koji detail"
+    echo ""
+    read -p "  Select option: " choice
+    
+    case $choice in
+        1) view_koji_api_requests ;;
+        2) view_koji_warnings ;;
+        0) show_service_detail "koji" ;;
+        *) show_koji_analysis ;;
+    esac
+}
+
+# View recent Koji API requests
+view_koji_api_requests() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         KOJI RECENT API REQUESTS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${DIM}Showing recent API requests (press 'q' to quit, '/' to search)${NC}"
+    echo ""
+    sleep 1
+    
+    docker logs koji 2>&1 | grep "actix_web::middleware::logger" | tail -50 | less -R
+    
+    show_koji_analysis
+}
+
+# View Koji warnings (excluding bot probes)
+view_koji_warnings() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "         KOJI WARNINGS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${DIM}Showing warnings (excluding bot probes)...${NC}"
+    echo -e "  ${DIM}(Press 'q' to quit, '/' to search)${NC}"
+    echo ""
+    sleep 1
+    
+    docker logs koji 2>&1 | grep -E "WARN|ERROR" | grep -v "actix_http::h1::dispatcher" | grep -v "invalid Header" | grep -v "invalid HTTP" | less -R
+    
+    show_koji_analysis
 }
 
 # =============================================================================
