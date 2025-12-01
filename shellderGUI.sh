@@ -29,6 +29,7 @@ cd "$SCRIPT_DIR" || exit 1
 GUI_SERVER="$SCRIPT_DIR/Shellder/gui_server.py"
 PID_FILE="$SCRIPT_DIR/Shellder/.gui_pid"
 LOG_FILE="$SCRIPT_DIR/Shellder/gui_server.log"
+VENV_DIR="$SCRIPT_DIR/Shellder/.venv"
 PORT=5000
 
 # =============================================================================
@@ -53,18 +54,56 @@ check_python() {
     else
         echo -e "${RED}Error: Python is not installed${NC}"
         echo "  Install Python 3:"
-        echo "    sudo apt install python3 python3-pip"
+        echo "    sudo apt install python3 python3-venv"
         exit 1
     fi
+}
+
+setup_venv() {
+    echo -e "${CYAN}Setting up Python virtual environment...${NC}"
+    
+    # Check if python3-venv is available
+    if ! $PYTHON_CMD -m venv --help &>/dev/null; then
+        echo -e "${YELLOW}Installing python3-venv...${NC}"
+        if command -v apt-get &>/dev/null; then
+            sudo apt-get update -qq && sudo apt-get install -y python3-venv python3-full -qq
+        elif command -v dnf &>/dev/null; then
+            sudo dnf install -y python3-virtualenv -q
+        elif command -v yum &>/dev/null; then
+            sudo yum install -y python3-virtualenv -q
+        fi
+    fi
+    
+    # Create venv if it doesn't exist
+    if [ ! -d "$VENV_DIR" ]; then
+        echo -e "${CYAN}Creating virtual environment...${NC}"
+        $PYTHON_CMD -m venv "$VENV_DIR"
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to create virtual environment${NC}"
+            echo "  Try: sudo apt install python3-venv python3-full"
+            exit 1
+        fi
+    fi
+    
+    # Set the Python command to use venv
+    PYTHON_CMD="$VENV_DIR/bin/python"
+    PIP_CMD="$VENV_DIR/bin/pip"
+    
+    echo -e "${GREEN}✓ Virtual environment ready${NC}"
 }
 
 check_dependencies() {
     echo -e "${CYAN}Checking dependencies...${NC}"
     
-    # Check if Flask is installed
-    if ! $PYTHON_CMD -c "import flask" 2>/dev/null; then
+    # Check if Flask is installed in venv
+    if ! "$PYTHON_CMD" -c "import flask" 2>/dev/null; then
         echo -e "${YELLOW}Installing Flask...${NC}"
-        $PYTHON_CMD -m pip install flask flask-cors -q
+        "$PIP_CMD" install --upgrade pip -q 2>/dev/null
+        "$PIP_CMD" install flask flask-cors -q
+        if [ $? -ne 0 ]; then
+            echo -e "${RED}Failed to install Flask${NC}"
+            exit 1
+        fi
     fi
     
     echo -e "${GREEN}✓ Dependencies OK${NC}"
@@ -115,12 +154,13 @@ start_server() {
     fi
     
     check_python
+    setup_venv
     check_dependencies
     
     echo -e "${CYAN}Starting Shellder GUI server...${NC}"
     
-    # Start server in background
-    nohup $PYTHON_CMD "$GUI_SERVER" > "$LOG_FILE" 2>&1 &
+    # Start server in background using venv python
+    nohup "$PYTHON_CMD" "$GUI_SERVER" > "$LOG_FILE" 2>&1 &
     local pid=$!
     echo $pid > "$PID_FILE"
     

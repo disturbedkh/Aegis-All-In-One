@@ -3,7 +3,9 @@
 Shellder GUI Server
 A web-based interface for managing Aegis AIO through Shellder
 
-Run with: python3 Shellder/gui_server.py
+Run with: ./shellderGUI.sh (recommended - handles venv setup)
+Or directly: python3 Shellder/gui_server.py (requires flask installed)
+
 Access at: http://localhost:5000
 """
 
@@ -21,10 +23,14 @@ try:
     from flask import Flask, render_template, jsonify, request, Response
     from flask_cors import CORS
 except ImportError:
-    print("Installing required packages...")
-    subprocess.check_call([sys.executable, "-m", "pip", "install", "flask", "flask-cors", "-q"])
-    from flask import Flask, render_template, jsonify, request, Response
-    from flask_cors import CORS
+    print("Error: Flask is not installed.")
+    print("")
+    print("Please run Shellder GUI using the launcher script:")
+    print("  ./shellderGUI.sh")
+    print("")
+    print("Or install Flask manually:")
+    print("  pip install flask flask-cors")
+    sys.exit(1)
 
 # Get the Shellder directory
 SHELLDER_DIR = Path(__file__).parent
