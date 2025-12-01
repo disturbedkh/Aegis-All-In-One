@@ -2339,6 +2339,7 @@ else
     print_info "After running 'docker compose up -d', the user will be created from init/01.sql"
     print_warning "If database already exists, run 'Shellder/dbsetup.sh' to create the user."
     DB_CREDENTIALS_VERIFIED=false
+    DB_VERIFY_REASON="database container not running"
   fi
 fi
 
@@ -2365,11 +2366,14 @@ if [ "$DB_AVAILABLE" = "true" ]; then
         store_config_value "MYSQL_USER" "$DB_USER" ".env" "Database username (verified)" 0
         store_config_value "MYSQL_PASSWORD" "$DB_PASSWORD" ".env" "Database password (verified)" 1
         store_config_value "MYSQL_ROOT_PASSWORD" "$MYSQL_ROOT_PASSWORD" ".env" "Root password (verified)" 1
-        ((stored_count+=3))
+        ((stored_count+=3)) || true
         print_success "Database credentials stored (verified working)"
     else
-        print_warning "Database credentials NOT stored (could not verify)"
-        ((skipped_count+=3))
+        # Show specific reason why verification failed
+        local reason="${DB_VERIFY_REASON:-unknown reason}"
+        print_warning "Database credentials NOT stored ($reason)"
+        print_info "Credentials will be verified when you run 'docker compose up -d'"
+        ((skipped_count+=3)) || true
     fi
     
     # Store non-database configs (these don't require service validation)
