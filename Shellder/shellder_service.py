@@ -1219,15 +1219,21 @@ device_manager = None
 
 class DeviceMonitor:
     """
-    Real-time monitor that listens for activity between Dragonite, Rotom, and devices.
-    Uses Docker log streaming to detect events as they happen.
+    Real-time monitor for the device scanning workflow:
     
-    Monitors:
-    - Device connections/disconnections (Rotom)
-    - Task assignments and completions (Dragonite)
-    - Errors, timeouts, breaks (both)
-    - Container failures and restarts
-    - Cross-correlates events between containers
+    ┌──────────────┐      WebSocket      ┌──────────────┐      WebSocket      ┌──────────────┐
+    │ Phone/Aegis  │◄──────:7070────────►│    Rotom     │◄──────:7071────────►│  Dragonite   │
+    │   Device     │                     │   Manager    │                     │   Scanner    │
+    └──────────────┘                     └──────────────┘                     └──────────────┘
+    
+    Tracks the complete lifecycle:
+    1. Device connects to Rotom (port 7070)
+    2. Rotom assigns worker ID, notifies Dragonite (port 7071)
+    3. Dragonite assigns account and tasks
+    4. Device scans, data flows: Device → Rotom → Dragonite → Golbat
+    5. Disconnects/errors correlated across both containers
+    
+    Cross-references logs, database, and Docker to find disconnects.
     """
     
     def __init__(self, device_manager_ref, shellder_db_ref):
@@ -1236,23 +1242,37 @@ class DeviceMonitor:
         self.running = False
         self.lock = threading.Lock()
         
-        # Activity tracking
+        # Device state tracking (core purpose)
+        self.devices = {}  # {device_name: DeviceState dict}
+        self.workers = {}  # {worker_id: device_name} - Rotom worker mapping
+        
+        # Activity feed for GUI
         self.activity_feed = []  # Recent events (max 200)
-        self.device_states = {}  # Current state per device
-        self.container_states = {}  # Container health tracking
-        self.pending_tasks = {}  # Track task assignments
-        self.error_counts = defaultdict(int)  # Error counts per device
         
-        # Event correlation
-        self.correlation_window = 30  # seconds to correlate events
-        self.recent_events = []  # For correlation
+        # Legacy compatibility
+        self.device_states = self.devices  # Alias
         
-        # Container monitoring targets
-        self.monitored_containers = ['rotom', 'dragonite', 'golbat', 'database', 'koji']
+        # Cross-correlation
+        self.pending_tasks = {}  # {device: task info}
+        self.recent_disconnects = {}  # For correlating disconnect → error chains
+        self.correlation_window = 30  # seconds
+        
+        # Container health (secondary)
+        self.container_states = {}
+        self.error_counts = defaultdict(int)
+        self.recent_events = []
+        
+        # Only stream logs from Rotom and Dragonite (device workflow)
+        self.monitored_containers = ['rotom', 'dragonite']
+        
+        # All containers for health dashboard
+        self.health_containers = ['rotom', 'dragonite', 'golbat', 'database', 'koji', 'reactmap', 'xilriws']
+        
         self.log_threads = {}
         self.health_thread = None
+        self.db_poll_thread = None
         
-        # Regex patterns for real-time parsing
+        # Compile regex patterns
         self._compile_patterns()
     
     def _compile_patterns(self):
@@ -1381,9 +1401,10 @@ class DeviceMonitor:
             return
         
         self.running = True
-        print("[DeviceMonitor] Starting real-time activity monitor...")
+        print("[DeviceMonitor] Starting device activity monitor...")
+        print("[DeviceMonitor] Tracking: Phone ↔ Rotom ↔ Dragonite workflow")
         
-        # Start log streaming threads for each container
+        # Start log streaming threads for Rotom and Dragonite only
         for container in self.monitored_containers:
             thread = threading.Thread(
                 target=self._stream_container_logs,
@@ -1402,7 +1423,15 @@ class DeviceMonitor:
         )
         self.health_thread.start()
         
-        print(f"[DeviceMonitor] Monitoring containers: {', '.join(self.monitored_containers)}")
+        # Start database polling for device status
+        self.db_poll_thread = threading.Thread(
+            target=self._poll_database_devices,
+            daemon=True,
+            name="DeviceMonitor-DB"
+        )
+        self.db_poll_thread.start()
+        
+        print(f"[DeviceMonitor] Streaming logs from: {', '.join(self.monitored_containers)}")
     
     def stop(self):
         """Stop the monitor"""
@@ -1604,43 +1633,72 @@ class DeviceMonitor:
         return event
     
     def _handle_event(self, event):
-        """Handle a detected event"""
+        """Handle a detected event from Rotom or Dragonite logs"""
         event_type = event.get('type')
         device = event.get('device')
+        worker = event.get('worker')
+        container = event.get('container')
         severity = event.get('severity', 'info')
+        
+        # Track worker → device mapping (from Rotom)
+        if worker and device and container == 'rotom':
+            with self.lock:
+                self.workers[worker] = device
         
         # Update device state
         if device:
             with self.lock:
-                if device not in self.device_states:
-                    self.device_states[device] = {
+                if device not in self.devices:
+                    self.devices[device] = {
                         'name': device,
                         'status': 'unknown',
+                        'source': container,
+                        'worker': worker,
                         'last_event': None,
                         'events': [],
                         'errors': 0,
                         'connections': 0,
-                        'disconnections': 0
+                        'disconnections': 0,
+                        'tasks_assigned': 0,
+                        'tasks_completed': 0
                     }
                 
-                state = self.device_states[device]
+                state = self.devices[device]
                 state['last_event'] = event
                 state['events'].append(event)
-                state['events'] = state['events'][-20:]  # Keep last 20
+                state['events'] = state['events'][-30:]  # Keep last 30
                 
-                # Update counters
-                if 'connect' in event_type and 'disconnect' not in event_type:
+                # Update counters based on event type
+                if event_type == 'device_connect':
                     state['status'] = 'connected'
                     state['connections'] += 1
-                    state['last_connect'] = event['timestamp']
-                elif 'disconnect' in event_type:
+                    state['last_connect'] = event.get('timestamp')
+                    state['worker'] = worker
+                    state['source'] = 'rotom'
+                    # Clear any pending disconnect correlation
+                    self.recent_disconnects.pop(device, None)
+                    
+                elif event_type in ('device_disconnect', 'worker_disconnect'):
                     state['status'] = 'disconnected'
                     state['disconnections'] += 1
-                    state['last_disconnect'] = event['timestamp']
-                elif 'error' in event_type or severity in ('error', 'critical'):
+                    state['last_disconnect'] = event.get('timestamp')
+                    # Track for correlation with Dragonite
+                    self.recent_disconnects[device] = time.time()
+                    
+                elif event_type == 'task_assigned':
+                    state['tasks_assigned'] += 1
+                    state['last_task'] = event.get('timestamp')
+                    
+                elif event_type == 'task_complete':
+                    state['tasks_completed'] += 1
+                    
+                elif event_type in ('device_error', 'error') or severity in ('error', 'critical'):
                     state['errors'] += 1
+                    state['last_error'] = event.get('timestamp')
+                    # Check if this correlates with a recent disconnect
+                    self._check_disconnect_correlation(device, event)
         
-        # Record crash if error/disconnect
+        # Record crash if significant
         if severity in ('error', 'critical') or 'disconnect' in event_type:
             self._record_crash_event(event)
         
@@ -1652,6 +1710,25 @@ class DeviceMonitor:
         
         # Emit via WebSocket
         self._emit_event(event)
+    
+    def _check_disconnect_correlation(self, device, error_event):
+        """Check if an error correlates with a recent disconnect"""
+        disconnect_time = self.recent_disconnects.get(device)
+        if disconnect_time:
+            elapsed = time.time() - disconnect_time
+            if elapsed < self.correlation_window:
+                # Error occurred shortly after disconnect - they're related
+                error_event['correlated_disconnect'] = True
+                error_event['disconnect_seconds_ago'] = int(elapsed)
+                
+                # Emit a correlation event
+                self._emit_event({
+                    'type': 'disconnect_error_chain',
+                    'device': device,
+                    'severity': 'warning',
+                    'message': f'Device disconnect followed by error within {int(elapsed)}s - likely related',
+                    'original_error': error_event.get('message', error_event.get('raw', ''))[:100]
+                })
     
     def _add_to_feed(self, event):
         """Add event to activity feed"""
@@ -1712,7 +1789,7 @@ class DeviceMonitor:
                 time.sleep(30)
                 continue
             
-            for container_name in self.monitored_containers + ['database', 'xilriws', 'reactmap']:
+            for container_name in self.health_containers + ['xilriws']:
                 try:
                     container = docker_client.containers.get(container_name)
                     
@@ -1795,6 +1872,80 @@ class DeviceMonitor:
             
             time.sleep(10)
     
+    def _poll_database_devices(self):
+        """Poll the Dragonite database for device status - cross-reference with logs"""
+        while self.running:
+            try:
+                # Get device status from Dragonite database via StackDB
+                if hasattr(self, 'device_manager') and self.device_manager:
+                    stack_db = getattr(self.device_manager, 'stack_db', None)
+                    if stack_db:
+                        db_devices = stack_db.get_device_status()
+                        
+                        if db_devices:
+                            for db_dev in db_devices:
+                                device_name = db_dev.get('uuid', db_dev.get('device_id', 'unknown'))
+                                
+                                with self.lock:
+                                    if device_name not in self.devices:
+                                        self.devices[device_name] = {
+                                            'name': device_name,
+                                            'status': 'unknown',
+                                            'source': 'database',
+                                            'events': [],
+                                            'errors': 0,
+                                            'last_seen': None
+                                        }
+                                    
+                                    # Update from database
+                                    dev = self.devices[device_name]
+                                    dev['db_instance'] = db_dev.get('instance_name')
+                                    dev['db_host'] = db_dev.get('host')
+                                    dev['db_last_seen'] = db_dev.get('last_seen')
+                                    dev['db_account'] = db_dev.get('account_username')
+                                    dev['db_lat'] = db_dev.get('lat')
+                                    dev['db_lon'] = db_dev.get('lon')
+                                    dev['db_online'] = db_dev.get('online', False)
+                                    
+                                    # Cross-reference: If DB says offline but we have no disconnect event
+                                    if not dev['db_online'] and dev.get('status') == 'connected':
+                                        # Database knows something we don't - device went offline
+                                        self._emit_event({
+                                            'type': 'device_offline_detected',
+                                            'device': device_name,
+                                            'source': 'database',
+                                            'severity': 'warning',
+                                            'message': 'Database shows device offline - possible silent disconnect'
+                                        })
+                                        dev['status'] = 'offline'
+                                    
+                                    # Update last seen from DB
+                                    if db_dev.get('last_seen'):
+                                        dev['last_seen'] = db_dev.get('last_seen')
+                            
+                            # Check for devices in logs but not in database
+                            self._check_orphan_devices()
+            
+            except Exception as e:
+                print(f"[DeviceMonitor] Database poll error: {e}")
+            
+            time.sleep(30)  # Poll every 30 seconds
+    
+    def _check_orphan_devices(self):
+        """Check for devices seen in logs but not in database"""
+        with self.lock:
+            for device_name, dev in self.devices.items():
+                if dev.get('source') == 'rotom' and not dev.get('db_instance'):
+                    # Device connected to Rotom but not in Dragonite DB
+                    if not dev.get('orphan_warned'):
+                        dev['orphan_warned'] = True
+                        self._emit_event({
+                            'type': 'device_orphan',
+                            'device': device_name,
+                            'severity': 'warning',
+                            'message': 'Device connected to Rotom but not registered in Dragonite'
+                        })
+    
     def _calculate_cpu_percent(self, stats):
         """Calculate CPU percentage from Docker stats"""
         try:
@@ -1852,30 +2003,65 @@ class DeviceMonitor:
             return dict(self.container_states)
     
     def get_live_summary(self):
-        """Get a live summary of the monitoring state"""
+        """Get a live summary of the device workflow monitoring"""
         with self.lock:
+            # Device stats
             online_devices = sum(
-                1 for d in self.device_states.values()
+                1 for d in self.devices.values()
                 if d.get('status') == 'connected'
             )
             total_errors = sum(
-                d.get('errors', 0) for d in self.device_states.values()
+                d.get('errors', 0) for d in self.devices.values()
             )
+            total_tasks = sum(
+                d.get('tasks_assigned', 0) for d in self.devices.values()
+            )
+            completed_tasks = sum(
+                d.get('tasks_completed', 0) for d in self.devices.values()
+            )
+            
+            # Container health
             running_containers = sum(
                 1 for c in self.container_states.values()
                 if c.get('status') == 'running'
             )
             
+            # Rotom/Dragonite specific
+            rotom_ok = self.container_states.get('rotom', {}).get('status') == 'running'
+            dragonite_ok = self.container_states.get('dragonite', {}).get('status') == 'running'
+            
+            # Recent disconnects pending correlation
+            pending_disconnects = len(self.recent_disconnects)
+            
             return {
+                'workflow': {
+                    'rotom_status': 'running' if rotom_ok else 'down',
+                    'dragonite_status': 'running' if dragonite_ok else 'down',
+                    'pipeline_healthy': rotom_ok and dragonite_ok
+                },
                 'devices': {
-                    'total': len(self.device_states),
+                    'total': len(self.devices),
                     'online': online_devices,
-                    'offline': len(self.device_states) - online_devices
+                    'offline': len(self.devices) - online_devices,
+                    'with_errors': sum(1 for d in self.devices.values() if d.get('errors', 0) > 0)
+                },
+                'tasks': {
+                    'assigned': total_tasks,
+                    'completed': completed_tasks,
+                    'completion_rate': f"{(completed_tasks/total_tasks*100):.1f}%" if total_tasks > 0 else "N/A"
+                },
+                'workers': {
+                    'mapped': len(self.workers),
+                    'worker_list': list(self.workers.keys())[:10]  # First 10
                 },
                 'containers': {
                     'monitored': len(self.monitored_containers),
                     'running': running_containers,
                     'states': self.container_states.copy()
+                },
+                'correlation': {
+                    'pending_disconnects': pending_disconnects,
+                    'window_seconds': self.correlation_window
                 },
                 'activity': {
                     'total_events': len(self.activity_feed),
