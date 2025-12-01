@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Shellder - Aegis AIO Control Panel</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+</head>
+<body>
+    <div class="app">
+        <!-- Sidebar -->
+        <nav class="sidebar">
+            <div class="logo">
+                <div class="logo-icon">🐚</div>
+                <div class="logo-text">
+                    <span class="logo-name">Shellder</span>
+                    <span class="logo-version">v1.0</span>
+                </div>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-label">Overview</div>
+                <a href="#" class="nav-item active" data-page="dashboard">
+                    <span class="nav-icon">📊</span>
+                    <span>Dashboard</span>
+                </a>
+                <a href="#" class="nav-item" data-page="containers">
+                    <span class="nav-icon">🐳</span>
+                    <span>Containers</span>
+                </a>
+            </div>
+            
+            <div class="nav-section">
+                <div class="nav-label">Management</div>
+                <a href="#" class="nav-item" data-page="scripts">
+                    <span class="nav-icon">⚡</span>
+                    <span>Scripts</span>
+                </a>
+                <a href="#" class="nav-item" data-page="logs">
+                    <span class="nav-icon">📜</span>
+                    <span>Logs</span>
+                </a>
+                <a href="#" class="nav-item" data-page="updates">
+                    <span class="nav-icon">🔄</span>
+                    <span>Updates</span>
+                </a>
+            </div>
+            
+            <div class="sidebar-footer">
+                <div class="status-indicator">
+                    <span class="status-dot" id="connectionStatus"></span>
+                    <span id="connectionText">Connecting...</span>
+                </div>
+            </div>
+        </nav>
+        
+        <!-- Main Content -->
+        <main class="main-content">
+            <header class="header">
+                <h1 id="pageTitle">Dashboard</h1>
+                <div class="header-actions">
+                    <button class="btn btn-icon" onclick="refreshData()" title="Refresh">🔄</button>
+                    <span class="last-update" id="lastUpdate">--</span>
+                </div>
+            </header>
+            
+            <!-- Dashboard Page -->
+            <div id="page-dashboard" class="page active">
+                <div class="stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon running">🐳</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="containersRunning">-</div>
+                            <div class="stat-label">Running</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon stopped">⏹️</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="containersStopped">-</div>
+                            <div class="stat-label">Stopped</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon memory">💾</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="memoryUsed">-</div>
+                            <div class="stat-label">Memory Used</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon disk">💿</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="diskUsed">-</div>
+                            <div class="stat-label">Disk Used</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Quick Actions</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="action-grid">
+                                <button class="action-btn" onclick="dockerAction('up')">
+                                    <span class="action-icon">▶️</span>
+                                    <span>Start All</span>
+                                </button>
+                                <button class="action-btn" onclick="dockerAction('down')">
+                                    <span class="action-icon">⏹️</span>
+                                    <span>Stop All</span>
+                                </button>
+                                <button class="action-btn" onclick="dockerAction('restart')">
+                                    <span class="action-icon">🔄</span>
+                                    <span>Restart All</span>
+                                </button>
+                                <button class="action-btn" onclick="dockerAction('pull')">
+                                    <span class="action-icon">⬇️</span>
+                                    <span>Pull Images</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>System Info</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-list">
+                                <div class="info-item">
+                                    <span class="info-label">Uptime</span>
+                                    <span class="info-value" id="systemUptime">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Memory</span>
+                                    <span class="info-value" id="memoryInfo">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Disk</span>
+                                    <span class="info-value" id="diskInfo">-</span>
+                                </div>
+                                <div class="info-item">
+                                    <span class="info-label">Config</span>
+                                    <span class="info-value" id="envStatus">-</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Container Status</h2>
+                    </div>
+                    <div class="card-body">
+                        <div id="containerList" class="container-list">
+                            <div class="loading">Loading containers...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Containers Page -->
+            <div id="page-containers" class="page">
+                <div class="card full-height">
+                    <div class="card-header">
+                        <h2>Docker Containers</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="dockerAction('up')">Start All</button>
+                            <button class="btn btn-sm btn-danger" onclick="dockerAction('down')">Stop All</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="containerDetailList" class="container-detail-list">
+                            <div class="loading">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Scripts Page -->
+            <div id="page-scripts" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Shellder Scripts</h2>
+                        <p class="card-subtitle">Run scripts via terminal for full interactivity</p>
+                    </div>
+                    <div class="card-body">
+                        <div class="scripts-grid">
+                            <div class="script-card" onclick="showScriptInfo('setup.sh')">
+                                <div class="script-icon">🚀</div>
+                                <div class="script-name">Initial Setup</div>
+                                <div class="script-desc">First-time configuration</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('dbsetup.sh')">
+                                <div class="script-icon">🗄️</div>
+                                <div class="script-name">Database Manager</div>
+                                <div class="script-desc">MariaDB setup & maintenance</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('nginx-setup.sh')">
+                                <div class="script-icon">🔒</div>
+                                <div class="script-name">Security Setup</div>
+                                <div class="script-desc">Nginx & SSL configuration</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('check.sh')">
+                                <div class="script-icon">✅</div>
+                                <div class="script-name">System Check</div>
+                                <div class="script-desc">Verify configuration</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('logs.sh')">
+                                <div class="script-icon">📋</div>
+                                <div class="script-name">Log Manager</div>
+                                <div class="script-desc">View Docker logs</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('files.sh')">
+                                <div class="script-icon">📁</div>
+                                <div class="script-name">File Manager</div>
+                                <div class="script-desc">Git & file operations</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('poracle.sh')">
+                                <div class="script-icon">🔔</div>
+                                <div class="script-name">Poracle Setup</div>
+                                <div class="script-desc">Notification system</div>
+                            </div>
+                            <div class="script-card" onclick="showScriptInfo('fletchling.sh')">
+                                <div class="script-icon">🐦</div>
+                                <div class="script-name">Fletchling Setup</div>
+                                <div class="script-desc">Quest scanning</div>
+                            </div>
+                        </div>
+                        
+                        <div class="terminal-hint">
+                            <div class="hint-icon">💡</div>
+                            <div class="hint-text">
+                                <strong>To run scripts with full interactivity:</strong>
+                                <code>sudo bash shellder.sh</code>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Logs Page -->
+            <div id="page-logs" class="page">
+                <div class="card full-height">
+                    <div class="card-header">
+                        <h2>Shellder Logs</h2>
+                        <div class="card-actions">
+                            <select id="logLines" onchange="loadShellderLogs()">
+                                <option value="50">Last 50 lines</option>
+                                <option value="100" selected>Last 100 lines</option>
+                                <option value="200">Last 200 lines</option>
+                                <option value="500">Last 500 lines</option>
+                            </select>
+                            <button class="btn btn-sm" onclick="loadShellderLogs()">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <pre id="logContent" class="log-viewer">Loading logs...</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Updates Page -->
+            <div id="page-updates" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Updates</h2>
+                    </div>
+                    <div class="card-body">
+                        <div id="gitStatus" class="git-status">
+                            <div class="loading">Checking for updates...</div>
+                        </div>
+                        
+                        <div class="update-actions">
+                            <button class="btn btn-primary" onclick="gitPull()">
+                                <span>⬇️</span> Pull Updates
+                            </button>
+                        </div>
+                        
+                        <div id="updateOutput" class="update-output" style="display: none;">
+                            <pre></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+    
+    <!-- Modal -->
+    <div id="modal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="modalTitle">Title</h3>
+                <button class="modal-close" onclick="closeModal()">&times;</button>
+            </div>
+            <div class="modal-body" id="modalBody">
+                Content
+            </div>
+            <div class="modal-footer" id="modalFooter">
+            </div>
+        </div>
+    </div>
+    
+    <!-- Toast Container -->
+    <div id="toastContainer" class="toast-container"></div>
+    
+    <script src="/static/script.js"></script>
+</body>
+</html>
+

@@ -229,6 +229,30 @@ bash Shellder/log_helper.sh --clear
 | `Shellder/db_helper.sh` | Shellder's internal SQLite database (stats/config storage) |
 | `Shellder/log_helper.sh` | Shellder's operation log (for debugging Shellder scripts) |
 
+### Shellder GUI (Web Interface)
+
+Shellder includes a web-based GUI for managing your Aegis AIO installation from a browser.
+
+```bash
+# Start the GUI server
+./shellderGUI.sh
+
+# Access at: http://localhost:5000
+# Or from network: http://<your-ip>:5000
+
+# Other commands
+./shellderGUI.sh --stop     # Stop server
+./shellderGUI.sh --status   # Check status
+./shellderGUI.sh --restart  # Restart server
+```
+
+**Features:**
+- 📊 Dashboard with real-time container status
+- 🐳 Start/stop/restart containers
+- 📋 View container logs
+- 🔄 Pull updates from GitHub
+- 💾 System resource monitoring
+
 ### MariaDB Management System
 
 The Database Manager (`Shellder/dbsetup.sh`) provides two modes:
