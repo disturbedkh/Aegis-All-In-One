@@ -502,6 +502,46 @@
                     </div>
                 </div>
                 
+                <!-- Live Activity Feed -->
+                <div class="card activity-card full-width">
+                    <div class="card-header">
+                        <h2>⚡ Live Activity</h2>
+                        <div class="card-actions">
+                            <span class="monitor-status" id="monitorStatus">
+                                <span class="status-dot offline"></span>
+                                <span>Stopped</span>
+                            </span>
+                            <button class="btn btn-sm" id="monitorToggle" onclick="toggleMonitor()">
+                                ▶️ Start
+                            </button>
+                            <select id="activityFilter" onchange="filterActivity()">
+                                <option value="">All Events</option>
+                                <option value="error">Errors</option>
+                                <option value="warning">Warnings</option>
+                                <option value="success">Success</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="activity-layout">
+                            <!-- Container Health -->
+                            <div class="container-health" id="containerHealth">
+                                <div class="health-header">Container Status</div>
+                                <div class="health-grid" id="healthGrid">
+                                    <div class="loading">Loading...</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Activity Stream -->
+                            <div class="activity-stream" id="activityStream">
+                                <div class="stream-hint">
+                                    Click "Start" to begin real-time monitoring
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Log Context Viewer Modal -->
                 <div id="logContextModal" class="modal" style="display:none;">
                     <div class="modal-content large">

@@ -1214,6 +1214,560 @@ class DeviceManager:
 device_manager = None
 
 # =============================================================================
+# DEVICE MONITOR - Real-Time Activity Listener
+# =============================================================================
+
+class DeviceMonitor:
+    """
+    Real-time monitor that listens for activity between Dragonite, Rotom, and devices.
+    Uses Docker log streaming to detect events as they happen.
+    
+    Monitors:
+    - Device connections/disconnections (Rotom)
+    - Task assignments and completions (Dragonite)
+    - Errors, timeouts, breaks (both)
+    - Container failures and restarts
+    - Cross-correlates events between containers
+    """
+    
+    def __init__(self, device_manager_ref, shellder_db_ref):
+        self.device_manager = device_manager_ref
+        self.shellder_db = shellder_db_ref
+        self.running = False
+        self.lock = threading.Lock()
+        
+        # Activity tracking
+        self.activity_feed = []  # Recent events (max 200)
+        self.device_states = {}  # Current state per device
+        self.container_states = {}  # Container health tracking
+        self.pending_tasks = {}  # Track task assignments
+        self.error_counts = defaultdict(int)  # Error counts per device
+        
+        # Event correlation
+        self.correlation_window = 30  # seconds to correlate events
+        self.recent_events = []  # For correlation
+        
+        # Container monitoring targets
+        self.monitored_containers = ['rotom', 'dragonite', 'golbat']
+        self.log_threads = {}
+        self.health_thread = None
+        
+        # Regex patterns for real-time parsing
+        self._compile_patterns()
+    
+    def _compile_patterns(self):
+        """Compile regex patterns for log parsing"""
+        self.patterns = {
+            'rotom': {
+                'device_connect': re.compile(
+                    r'\[([^\]]+)\].*CONTROLLER:\s*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)'
+                ),
+                'device_disconnect': re.compile(
+                    r'\[([^\]]+)\].*(\S+)/\d+:\s*Disconnected.*disconnection activities'
+                ),
+                'worker_disconnect': re.compile(
+                    r'\[([^\]]+)\].*CONTROLLER:\s*Disconnected worker\s+(\S+)'
+                ),
+                'connection_rejected': re.compile(
+                    r'\[([^\]]+)\].*CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*no spare Workers'
+                ),
+                'device_id': re.compile(
+                    r'\[([^\]]+)\].*(\S+)/\d+:\s*Received id packet origin\s+(\S+)\s*-\s*version\s+(\d+)'
+                ),
+                'memory': re.compile(
+                    r'\[([^\]]+)\].*(\S+)/\d+:Memory\s*=\s*(\{.*\})'
+                ),
+                'error': re.compile(
+                    r'\[([^\]]+)\].*\[(ERROR|error)\].*rotom.*(.+)', re.I
+                ),
+                'timeout': re.compile(
+                    r'\[([^\]]+)\].*(timeout|timed out)', re.I
+                ),
+            },
+            'dragonite': {
+                'task_assigned': re.compile(
+                    r'\[([^\]]+)\].*\[(\S+)\]\s*Worker.*assigned.*task|scan', re.I
+                ),
+                'task_complete': re.compile(
+                    r'\[([^\]]+)\].*\[(\S+)\]\s*(completed|finished|done)', re.I
+                ),
+                'device_error': re.compile(
+                    r'\[([^\]]+)\].*\[(\S+)\].*(error|failed|timeout)', re.I
+                ),
+                'account_issue': re.compile(
+                    r'\[([^\]]+)\].*(banned|invalid|suspended|auth_banned)', re.I
+                ),
+                'api_check': re.compile(
+                    r'\[([^\]]+)\].*APICHECK:.*(\S+).*is (OK|not reachable|error)', re.I
+                ),
+                'db_error': re.compile(
+                    r'\[([^\]]+)\].*(database|mysql|connection refused.*3306)', re.I
+                ),
+                'fatal': re.compile(
+                    r'\[([^\]]+)\].*FATL.*(.+)'
+                ),
+            },
+            'golbat': {
+                'pokemon_received': re.compile(
+                    r'\[([^\]]+)\].*received.*pokemon', re.I
+                ),
+                'webhook_sent': re.compile(
+                    r'\[([^\]]+)\].*webhook.*(sent|success|failed)', re.I
+                ),
+                'error': re.compile(
+                    r'\[([^\]]+)\].*\[(ERROR|error)\].*(.+)', re.I
+                ),
+            }
+        }
+    
+    def start(self):
+        """Start the real-time monitor"""
+        if self.running:
+            return
+        
+        self.running = True
+        print("[DeviceMonitor] Starting real-time activity monitor...")
+        
+        # Start log streaming threads for each container
+        for container in self.monitored_containers:
+            thread = threading.Thread(
+                target=self._stream_container_logs,
+                args=(container,),
+                daemon=True,
+                name=f"DeviceMonitor-{container}"
+            )
+            self.log_threads[container] = thread
+            thread.start()
+        
+        # Start container health monitor
+        self.health_thread = threading.Thread(
+            target=self._monitor_container_health,
+            daemon=True,
+            name="DeviceMonitor-Health"
+        )
+        self.health_thread.start()
+        
+        print(f"[DeviceMonitor] Monitoring containers: {', '.join(self.monitored_containers)}")
+    
+    def stop(self):
+        """Stop the monitor"""
+        self.running = False
+        print("[DeviceMonitor] Stopped")
+    
+    def _stream_container_logs(self, container_name):
+        """Stream logs from a container in real-time"""
+        while self.running:
+            if not docker_client:
+                time.sleep(30)
+                continue
+            
+            try:
+                container = docker_client.containers.get(container_name)
+                
+                # Update container state
+                self._update_container_state(container_name, container)
+                
+                if container.status != 'running':
+                    self._emit_event({
+                        'type': 'container_down',
+                        'container': container_name,
+                        'status': container.status,
+                        'severity': 'warning'
+                    })
+                    time.sleep(10)
+                    continue
+                
+                # Stream logs with follow=True for real-time
+                log_stream = container.logs(
+                    stream=True,
+                    follow=True,
+                    tail=0,  # Only new logs
+                    timestamps=True
+                )
+                
+                for log_line in log_stream:
+                    if not self.running:
+                        break
+                    
+                    try:
+                        line = log_line.decode('utf-8', errors='ignore').strip()
+                        if line:
+                            self._process_log_line(container_name, line)
+                    except Exception as e:
+                        print(f"[DeviceMonitor] Error processing log line: {e}")
+                
+            except Exception as e:
+                error_msg = str(e)
+                if 'No such container' not in error_msg:
+                    print(f"[DeviceMonitor] Error streaming {container_name}: {e}")
+                    self._emit_event({
+                        'type': 'container_error',
+                        'container': container_name,
+                        'error': error_msg,
+                        'severity': 'error'
+                    })
+                time.sleep(5)
+    
+    def _process_log_line(self, container, line):
+        """Process a single log line and detect events"""
+        patterns = self.patterns.get(container, {})
+        
+        for event_type, pattern in patterns.items():
+            match = pattern.search(line)
+            if match:
+                event = self._create_event(container, event_type, match, line)
+                if event:
+                    self._handle_event(event)
+                    return  # Only process first match
+    
+    def _create_event(self, container, event_type, match, raw_line):
+        """Create an event object from a regex match"""
+        groups = match.groups()
+        timestamp = groups[0] if groups else datetime.now().isoformat()
+        
+        event = {
+            'id': f"{container}-{event_type}-{int(time.time()*1000)}",
+            'type': event_type,
+            'container': container,
+            'timestamp': timestamp,
+            'raw': raw_line[:500],  # Limit size
+            'created_at': datetime.now().isoformat()
+        }
+        
+        # Extract device/worker info based on event type
+        if container == 'rotom':
+            if event_type == 'device_connect':
+                event['device'] = groups[1]
+                event['worker'] = groups[2]
+                event['severity'] = 'success'
+            elif event_type in ('device_disconnect', 'worker_disconnect'):
+                event['device'] = groups[1]
+                event['severity'] = 'warning'
+            elif event_type == 'connection_rejected':
+                event['ip'] = groups[1]
+                event['severity'] = 'warning'
+            elif event_type == 'device_id':
+                event['device'] = groups[1]
+                event['origin'] = groups[2]
+                event['version'] = groups[3]
+                event['severity'] = 'info'
+            elif event_type == 'memory':
+                event['device'] = groups[1]
+                try:
+                    event['memory'] = json.loads(groups[2])
+                except:
+                    pass
+                event['severity'] = 'info'
+            elif event_type in ('error', 'timeout'):
+                event['message'] = groups[-1] if len(groups) > 1 else raw_line
+                event['severity'] = 'error'
+        
+        elif container == 'dragonite':
+            if event_type in ('task_assigned', 'task_complete', 'device_error'):
+                event['device'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info' if 'complete' in event_type else 'warning'
+            elif event_type == 'account_issue':
+                event['message'] = groups[1]
+                event['severity'] = 'error'
+            elif event_type == 'api_check':
+                event['service'] = groups[1]
+                event['status'] = groups[2]
+                event['severity'] = 'success' if 'OK' in groups[2] else 'error'
+            elif event_type in ('db_error', 'fatal'):
+                event['message'] = groups[1]
+                event['severity'] = 'critical'
+        
+        elif container == 'golbat':
+            event['severity'] = 'error' if 'error' in event_type else 'info'
+        
+        return event
+    
+    def _handle_event(self, event):
+        """Handle a detected event"""
+        event_type = event.get('type')
+        device = event.get('device')
+        severity = event.get('severity', 'info')
+        
+        # Update device state
+        if device:
+            with self.lock:
+                if device not in self.device_states:
+                    self.device_states[device] = {
+                        'name': device,
+                        'status': 'unknown',
+                        'last_event': None,
+                        'events': [],
+                        'errors': 0,
+                        'connections': 0,
+                        'disconnections': 0
+                    }
+                
+                state = self.device_states[device]
+                state['last_event'] = event
+                state['events'].append(event)
+                state['events'] = state['events'][-20:]  # Keep last 20
+                
+                # Update counters
+                if 'connect' in event_type and 'disconnect' not in event_type:
+                    state['status'] = 'connected'
+                    state['connections'] += 1
+                    state['last_connect'] = event['timestamp']
+                elif 'disconnect' in event_type:
+                    state['status'] = 'disconnected'
+                    state['disconnections'] += 1
+                    state['last_disconnect'] = event['timestamp']
+                elif 'error' in event_type or severity in ('error', 'critical'):
+                    state['errors'] += 1
+        
+        # Record crash if error/disconnect
+        if severity in ('error', 'critical') or 'disconnect' in event_type:
+            self._record_crash_event(event)
+        
+        # Add to activity feed
+        self._add_to_feed(event)
+        
+        # Correlate with other recent events
+        self._correlate_event(event)
+        
+        # Emit via WebSocket
+        self._emit_event(event)
+    
+    def _add_to_feed(self, event):
+        """Add event to activity feed"""
+        with self.lock:
+            self.activity_feed.insert(0, event)
+            self.activity_feed = self.activity_feed[:200]  # Keep last 200
+    
+    def _correlate_event(self, event):
+        """Correlate event with recent events from other containers"""
+        device = event.get('device')
+        if not device:
+            return
+        
+        now = time.time()
+        
+        # Clean old events
+        self.recent_events = [
+            e for e in self.recent_events
+            if now - e.get('_time', 0) < self.correlation_window
+        ]
+        
+        # Add current event
+        event['_time'] = now
+        self.recent_events.append(event)
+        
+        # Look for correlations
+        related = [
+            e for e in self.recent_events
+            if e.get('device') == device and e['id'] != event['id']
+        ]
+        
+        if related:
+            event['related_events'] = [e['id'] for e in related]
+    
+    def _record_crash_event(self, event):
+        """Record crash/error to database"""
+        if not self.device_manager:
+            return
+        
+        device = event.get('device', 'unknown')
+        crash_type = event.get('type', 'unknown')
+        message = event.get('raw', event.get('message', ''))[:500]
+        
+        self.device_manager.record_crash(
+            device_name=device,
+            crash_type=crash_type,
+            error_message=message,
+            log_source=event.get('container', 'unknown'),
+            log_context=event.get('raw', '')
+        )
+    
+    def _monitor_container_health(self):
+        """Monitor container health and detect restarts/failures"""
+        last_states = {}
+        
+        while self.running:
+            if not docker_client:
+                time.sleep(30)
+                continue
+            
+            for container_name in self.monitored_containers + ['database', 'xilriws', 'reactmap']:
+                try:
+                    container = docker_client.containers.get(container_name)
+                    
+                    current_state = {
+                        'status': container.status,
+                        'restart_count': container.attrs.get('RestartCount', 0),
+                        'started_at': container.attrs['State'].get('StartedAt'),
+                        'health': container.attrs['State'].get('Health', {}).get('Status')
+                    }
+                    
+                    # Check for state changes
+                    prev_state = last_states.get(container_name, {})
+                    
+                    # Detect restart
+                    if current_state['restart_count'] > prev_state.get('restart_count', 0):
+                        self._emit_event({
+                            'type': 'container_restart',
+                            'container': container_name,
+                            'restart_count': current_state['restart_count'],
+                            'severity': 'warning'
+                        })
+                    
+                    # Detect status change
+                    if current_state['status'] != prev_state.get('status'):
+                        severity = 'success' if current_state['status'] == 'running' else 'error'
+                        self._emit_event({
+                            'type': 'container_status_change',
+                            'container': container_name,
+                            'old_status': prev_state.get('status', 'unknown'),
+                            'new_status': current_state['status'],
+                            'severity': severity
+                        })
+                    
+                    # Detect unhealthy
+                    if current_state.get('health') == 'unhealthy':
+                        self._emit_event({
+                            'type': 'container_unhealthy',
+                            'container': container_name,
+                            'severity': 'error'
+                        })
+                    
+                    # Update container stats
+                    try:
+                        stats = container.stats(stream=False)
+                        cpu_percent = self._calculate_cpu_percent(stats)
+                        mem_usage = stats.get('memory_stats', {}).get('usage', 0)
+                        mem_limit = stats.get('memory_stats', {}).get('limit', 1)
+                        mem_percent = (mem_usage / mem_limit) * 100 if mem_limit else 0
+                        
+                        current_state['cpu_percent'] = round(cpu_percent, 1)
+                        current_state['memory_mb'] = round(mem_usage / (1024 * 1024), 1)
+                        current_state['memory_percent'] = round(mem_percent, 1)
+                        
+                        # Alert on high resource usage
+                        if mem_percent > 90:
+                            self._emit_event({
+                                'type': 'high_memory',
+                                'container': container_name,
+                                'memory_percent': current_state['memory_percent'],
+                                'severity': 'warning'
+                            })
+                    except:
+                        pass
+                    
+                    last_states[container_name] = current_state
+                    
+                    with self.lock:
+                        self.container_states[container_name] = current_state
+                    
+                except docker.errors.NotFound:
+                    if container_name in last_states:
+                        self._emit_event({
+                            'type': 'container_removed',
+                            'container': container_name,
+                            'severity': 'error'
+                        })
+                        del last_states[container_name]
+                except Exception as e:
+                    print(f"[DeviceMonitor] Error checking {container_name}: {e}")
+            
+            time.sleep(10)
+    
+    def _calculate_cpu_percent(self, stats):
+        """Calculate CPU percentage from Docker stats"""
+        try:
+            cpu_delta = stats['cpu_stats']['cpu_usage']['total_usage'] - \
+                       stats['precpu_stats']['cpu_usage']['total_usage']
+            system_delta = stats['cpu_stats']['system_cpu_usage'] - \
+                          stats['precpu_stats']['system_cpu_usage']
+            
+            if system_delta > 0 and cpu_delta > 0:
+                cpu_count = len(stats['cpu_stats']['cpu_usage'].get('percpu_usage', [1]))
+                return (cpu_delta / system_delta) * cpu_count * 100
+        except:
+            pass
+        return 0.0
+    
+    def _update_container_state(self, name, container):
+        """Update container state tracking"""
+        with self.lock:
+            self.container_states[name] = {
+                'status': container.status,
+                'id': container.short_id,
+                'updated': datetime.now().isoformat()
+            }
+    
+    def _emit_event(self, event):
+        """Emit event via WebSocket"""
+        event['created_at'] = datetime.now().isoformat()
+        
+        if socketio and SOCKETIO_AVAILABLE:
+            try:
+                socketio.emit('device_activity', event)
+            except:
+                pass
+    
+    def get_activity_feed(self, limit=50, device=None, severity=None):
+        """Get recent activity feed with optional filters"""
+        with self.lock:
+            feed = self.activity_feed.copy()
+        
+        if device:
+            feed = [e for e in feed if e.get('device') == device]
+        if severity:
+            feed = [e for e in feed if e.get('severity') == severity]
+        
+        return feed[:limit]
+    
+    def get_device_states(self):
+        """Get current state of all devices"""
+        with self.lock:
+            return dict(self.device_states)
+    
+    def get_container_states(self):
+        """Get current state of all monitored containers"""
+        with self.lock:
+            return dict(self.container_states)
+    
+    def get_live_summary(self):
+        """Get a live summary of the monitoring state"""
+        with self.lock:
+            online_devices = sum(
+                1 for d in self.device_states.values()
+                if d.get('status') == 'connected'
+            )
+            total_errors = sum(
+                d.get('errors', 0) for d in self.device_states.values()
+            )
+            running_containers = sum(
+                1 for c in self.container_states.values()
+                if c.get('status') == 'running'
+            )
+            
+            return {
+                'devices': {
+                    'total': len(self.device_states),
+                    'online': online_devices,
+                    'offline': len(self.device_states) - online_devices
+                },
+                'containers': {
+                    'monitored': len(self.monitored_containers),
+                    'running': running_containers,
+                    'states': self.container_states.copy()
+                },
+                'activity': {
+                    'total_events': len(self.activity_feed),
+                    'total_errors': total_errors,
+                    'recent': self.activity_feed[:10]
+                },
+                'timestamp': datetime.now().isoformat()
+            }
+
+# Device monitor instance (initialized after other components)
+device_monitor = None
+
+# =============================================================================
 # SQLITE DATABASE ACCESS (Shellder's own database for persistence)
 # =============================================================================
 
@@ -2135,6 +2689,9 @@ shellder_db.ensure_service_tables()
 
 # Initialize device manager for cross-referencing
 device_manager = DeviceManager(SHELLDER_DB, AEGIS_ROOT)
+
+# Initialize device monitor for real-time activity listening
+device_monitor = DeviceMonitor(device_manager, shellder_db)
 
 # =============================================================================
 # STATS COLLECTOR (Real-time)
@@ -3927,6 +4484,79 @@ def api_device_search_logs():
     })
 
 # =============================================================================
+# DEVICE MONITOR ENDPOINTS (Real-Time Activity Streaming)
+# =============================================================================
+
+@app.route('/api/monitor/start', methods=['POST'])
+def api_monitor_start():
+    """Start the real-time device monitor"""
+    if device_monitor:
+        device_monitor.start()
+        return jsonify({'status': 'started'})
+    return jsonify({'error': 'Monitor not available'}), 503
+
+@app.route('/api/monitor/stop', methods=['POST'])
+def api_monitor_stop():
+    """Stop the real-time device monitor"""
+    if device_monitor:
+        device_monitor.stop()
+        return jsonify({'status': 'stopped'})
+    return jsonify({'error': 'Monitor not available'}), 503
+
+@app.route('/api/monitor/status')
+def api_monitor_status():
+    """Get monitor status and live summary"""
+    if device_monitor:
+        return jsonify({
+            'running': device_monitor.running,
+            'summary': device_monitor.get_live_summary()
+        })
+    return jsonify({'error': 'Monitor not available'}), 503
+
+@app.route('/api/monitor/activity')
+def api_monitor_activity():
+    """Get recent activity feed"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    limit = request.args.get('limit', 50, type=int)
+    device = request.args.get('device', None)
+    severity = request.args.get('severity', None)
+    
+    return jsonify(device_monitor.get_activity_feed(limit, device, severity))
+
+@app.route('/api/monitor/devices')
+def api_monitor_devices():
+    """Get current device states from monitor"""
+    if device_monitor:
+        return jsonify(device_monitor.get_device_states())
+    return jsonify({'error': 'Monitor not available'}), 503
+
+@app.route('/api/monitor/containers')
+def api_monitor_containers():
+    """Get container health states"""
+    if device_monitor:
+        return jsonify(device_monitor.get_container_states())
+    return jsonify({'error': 'Monitor not available'}), 503
+
+@app.route('/api/monitor/device/<device_name>')
+def api_monitor_device(device_name):
+    """Get activity for a specific device"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    states = device_monitor.get_device_states()
+    device_state = states.get(device_name, {})
+    
+    # Get activity feed for this device
+    activity = device_monitor.get_activity_feed(50, device=device_name)
+    
+    return jsonify({
+        'state': device_state,
+        'activity': activity
+    })
+
+# =============================================================================
 # SYSTEM ENDPOINTS
 # =============================================================================
 
@@ -4173,6 +4803,11 @@ def main():
     
     # Start stats collector
     stats_collector.start()
+    
+    # Start device monitor for real-time activity
+    if device_monitor:
+        device_monitor.start()
+        print("Device monitor started for real-time activity tracking")
     
     # Run Flask with SocketIO
     if SOCKETIO_AVAILABLE:

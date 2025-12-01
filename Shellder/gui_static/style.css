@@ -2141,8 +2141,236 @@ select:focus {
 .text-warning { color: var(--warning) !important; }
 
 /* =============================================================================
+   LIVE ACTIVITY MONITOR
+   ============================================================================= */
+
+.activity-card {
+    margin-top: 20px;
+}
+
+.activity-card.full-width {
+    grid-column: 1 / -1;
+}
+
+.monitor-status {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.85em;
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border-radius: 20px;
+}
+
+.activity-layout {
+    display: grid;
+    grid-template-columns: 250px 1fr;
+    gap: 20px;
+    min-height: 300px;
+}
+
+/* Container Health Panel */
+.container-health {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+}
+
+.health-header {
+    font-size: 0.85em;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.health-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.health-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--success);
+}
+
+.health-item.unhealthy {
+    border-left-color: var(--danger);
+    opacity: 0.8;
+}
+
+.health-name {
+    flex: 1;
+    font-size: 0.9em;
+}
+
+.health-status {
+    font-size: 0.8em;
+}
+
+.health-mem {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.health-mem.high {
+    color: var(--warning);
+}
+
+.health-restarts {
+    font-size: 0.75em;
+    color: var(--warning);
+    font-family: var(--font-mono);
+}
+
+/* Activity Stream */
+.activity-stream {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    overflow-y: auto;
+    max-height: 400px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.stream-hint {
+    text-align: center;
+    color: var(--text-muted);
+    padding: 40px;
+    font-style: italic;
+}
+
+.activity-event {
+    padding: 10px 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border-left: 3px solid var(--accent-primary);
+    animation: slideIn 0.3s ease;
+}
+
+.activity-event.new {
+    animation: highlightNew 0.5s ease;
+}
+
+@keyframes slideIn {
+    from {
+        opacity: 0;
+        transform: translateX(-10px);
+    }
+    to {
+        opacity: 1;
+        transform: translateX(0);
+    }
+}
+
+@keyframes highlightNew {
+    0% { background: var(--accent-glow); }
+    100% { background: var(--bg-secondary); }
+}
+
+.activity-event.success {
+    border-left-color: var(--success);
+}
+
+.activity-event.warning {
+    border-left-color: var(--warning);
+}
+
+.activity-event.error {
+    border-left-color: var(--danger);
+}
+
+.activity-event.critical {
+    border-left-color: var(--danger);
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.activity-event.info {
+    border-left-color: var(--accent-secondary);
+}
+
+.event-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.9em;
+}
+
+.event-icon {
+    font-size: 1em;
+}
+
+.event-type {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.event-container {
+    font-size: 0.8em;
+    padding: 2px 6px;
+    background: var(--bg-hover);
+    border-radius: 4px;
+    color: var(--accent-secondary);
+}
+
+.event-time {
+    margin-left: auto;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+}
+
+.event-device {
+    margin-top: 4px;
+    font-size: 0.85em;
+    color: var(--text-secondary);
+}
+
+.event-message {
+    margin-top: 6px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+}
+
+/* =============================================================================
    RESPONSIVE
    ============================================================================= */
+
+@media (max-width: 1200px) {
+    .devices-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .device-detail-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+    
+    .activity-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .container-health {
+        order: 2;
+    }
+}
 
 @media (max-width: 1200px) {
     .devices-layout {

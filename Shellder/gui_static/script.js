@@ -1927,6 +1927,235 @@ function truncate(str, len) {
 }
 
 // =============================================================================
+// LIVE ACTIVITY MONITOR
+// =============================================================================
+
+let monitorActive = false;
+
+async function toggleMonitor() {
+    const btn = document.getElementById('monitorToggle');
+    const status = document.getElementById('monitorStatus');
+    
+    if (monitorActive) {
+        // Stop monitor
+        await fetchAPI('/api/monitor/stop', { method: 'POST' });
+        monitorActive = false;
+        btn.innerHTML = '▶️ Start';
+        status.innerHTML = '<span class="status-dot offline"></span><span>Stopped</span>';
+    } else {
+        // Start monitor
+        await fetchAPI('/api/monitor/start', { method: 'POST' });
+        monitorActive = true;
+        btn.innerHTML = '⏹️ Stop';
+        status.innerHTML = '<span class="status-dot online"></span><span>Live</span>';
+        
+        // Start receiving updates
+        startActivityStream();
+    }
+}
+
+function startActivityStream() {
+    // Subscribe to device_activity events via WebSocket
+    if (socket) {
+        socket.on('device_activity', (event) => {
+            if (currentPage === 'devices') {
+                addActivityEvent(event);
+                updateContainerHealth(event);
+            }
+        });
+    }
+    
+    // Also poll for activity feed
+    loadActivityFeed();
+    loadContainerHealth();
+}
+
+async function loadActivityFeed() {
+    if (!monitorActive) return;
+    
+    try {
+        const events = await fetchAPI('/api/monitor/activity?limit=30');
+        renderActivityFeed(events);
+    } catch (e) {
+        console.error('Error loading activity:', e);
+    }
+}
+
+function renderActivityFeed(events) {
+    const el = document.getElementById('activityStream');
+    if (!el || !events || events.length === 0) {
+        if (el && monitorActive) {
+            el.innerHTML = '<div class="stream-hint">Waiting for events...</div>';
+        }
+        return;
+    }
+    
+    el.innerHTML = events.map(e => `
+        <div class="activity-event ${e.severity || 'info'}">
+            <div class="event-header">
+                <span class="event-icon">${getEventIcon(e)}</span>
+                <span class="event-type">${e.type}</span>
+                <span class="event-container">${e.container}</span>
+                <span class="event-time">${formatEventTime(e.created_at)}</span>
+            </div>
+            ${e.device ? `<div class="event-device">📱 ${e.device}</div>` : ''}
+            ${e.raw ? `<div class="event-message">${truncate(e.raw, 120)}</div>` : ''}
+        </div>
+    `).join('');
+}
+
+function addActivityEvent(event) {
+    const el = document.getElementById('activityStream');
+    if (!el) return;
+    
+    // Remove hint if present
+    const hint = el.querySelector('.stream-hint');
+    if (hint) hint.remove();
+    
+    // Create event element
+    const eventEl = document.createElement('div');
+    eventEl.className = `activity-event ${event.severity || 'info'} new`;
+    eventEl.innerHTML = `
+        <div class="event-header">
+            <span class="event-icon">${getEventIcon(event)}</span>
+            <span class="event-type">${event.type}</span>
+            <span class="event-container">${event.container}</span>
+            <span class="event-time">${formatEventTime(event.created_at)}</span>
+        </div>
+        ${event.device ? `<div class="event-device">📱 ${event.device}</div>` : ''}
+        ${event.raw ? `<div class="event-message">${truncate(event.raw, 120)}</div>` : ''}
+    `;
+    
+    // Add at top
+    el.insertBefore(eventEl, el.firstChild);
+    
+    // Remove animation class after animation
+    setTimeout(() => eventEl.classList.remove('new'), 500);
+    
+    // Limit to 50 events
+    while (el.children.length > 50) {
+        el.removeChild(el.lastChild);
+    }
+    
+    // Update counters if this is an error/disconnect
+    if (event.type.includes('disconnect') || event.severity === 'error') {
+        loadDeviceSummary();
+    }
+}
+
+function getEventIcon(event) {
+    const icons = {
+        'device_connect': '🟢',
+        'device_disconnect': '🔴',
+        'worker_disconnect': '👷',
+        'connection_rejected': '🚫',
+        'device_id': '📋',
+        'memory': '💾',
+        'error': '❌',
+        'timeout': '⏰',
+        'task_assigned': '📝',
+        'task_complete': '✅',
+        'device_error': '⚠️',
+        'account_issue': '🔒',
+        'api_check': '🔌',
+        'db_error': '🗄️',
+        'fatal': '💀',
+        'container_restart': '🔄',
+        'container_status_change': '🐳',
+        'container_unhealthy': '🏥',
+        'high_memory': '📊',
+        'container_down': '⬇️',
+        'container_error': '🔥'
+    };
+    return icons[event.type] || '📌';
+}
+
+function formatEventTime(timestamp) {
+    if (!timestamp) return '';
+    try {
+        const d = new Date(timestamp);
+        return d.toLocaleTimeString();
+    } catch {
+        return '';
+    }
+}
+
+async function loadContainerHealth() {
+    try {
+        const containers = await fetchAPI('/api/monitor/containers');
+        renderContainerHealth(containers);
+    } catch (e) {
+        console.error('Error loading container health:', e);
+    }
+}
+
+function renderContainerHealth(containers) {
+    const el = document.getElementById('healthGrid');
+    if (!el) return;
+    
+    if (!containers || Object.keys(containers).length === 0) {
+        el.innerHTML = '<div class="no-data">No container data</div>';
+        return;
+    }
+    
+    el.innerHTML = Object.entries(containers).map(([name, state]) => `
+        <div class="health-item ${state.status === 'running' ? 'healthy' : 'unhealthy'}">
+            <span class="health-name">${name}</span>
+            <span class="health-status">${state.status === 'running' ? '🟢' : '🔴'}</span>
+            ${state.memory_percent ? `
+                <span class="health-mem ${state.memory_percent > 80 ? 'high' : ''}">${state.memory_percent.toFixed(0)}%</span>
+            ` : ''}
+            ${state.restart_count > 0 ? `
+                <span class="health-restarts">↻${state.restart_count}</span>
+            ` : ''}
+        </div>
+    `).join('');
+}
+
+function updateContainerHealth(event) {
+    if (event.type.startsWith('container_')) {
+        loadContainerHealth();
+    }
+}
+
+function filterActivity() {
+    const severity = document.getElementById('activityFilter').value;
+    const events = document.querySelectorAll('.activity-event');
+    
+    events.forEach(el => {
+        if (!severity) {
+            el.style.display = '';
+        } else {
+            el.style.display = el.classList.contains(severity) ? '' : 'none';
+        }
+    });
+}
+
+// Check monitor status on page load
+async function checkMonitorStatus() {
+    try {
+        const status = await fetchAPI('/api/monitor/status');
+        if (status.running) {
+            monitorActive = true;
+            document.getElementById('monitorToggle').innerHTML = '⏹️ Stop';
+            document.getElementById('monitorStatus').innerHTML = 
+                '<span class="status-dot online"></span><span>Live</span>';
+            startActivityStream();
+        }
+    } catch (e) {
+        console.log('Monitor not available');
+    }
+}
+
+// Override loadDevicesPage to include monitor check
+const originalLoadDevicesPage = loadDevicesPage;
+loadDevicesPage = async function() {
+    await originalLoadDevicesPage();
+    await checkMonitorStatus();
+    await loadContainerHealth();
+};
+
+// =============================================================================
 // STACK DATABASE FUNCTIONS (Cross-Reference with MariaDB)
 // =============================================================================
 
