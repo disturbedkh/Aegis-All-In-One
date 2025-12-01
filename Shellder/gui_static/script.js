@@ -745,3 +745,485 @@ function formatBytes(bytes) {
     }
     return `${bytes.toFixed(1)} ${units[i]}`;
 }
+
+// =============================================================================
+// XILRIWS PAGE FUNCTIONS
+// =============================================================================
+
+let xilriwsLiveStream = null;
+let xilriwsAutoScroll = true;
+
+function updateXilriwsPage(data) {
+    if (!data) return;
+    
+    // Update stats
+    const rate = data.success_rate || 0;
+    document.getElementById('xilSuccessRate').textContent = rate.toFixed(1) + '%';
+    document.getElementById('xilSuccessRate').className = 'stat-value ' + 
+        (rate > 80 ? 'text-success' : rate > 50 ? 'text-warning' : 'text-danger');
+    
+    document.getElementById('xilSuccessful').textContent = data.successful || 0;
+    document.getElementById('xilFailed').textContent = data.failed || 0;
+    document.getElementById('xilTotal').textContent = data.total_requests || 0;
+    
+    // Update error breakdown
+    document.getElementById('xilAuthBanned').textContent = data.auth_banned || 0;
+    document.getElementById('xilCode15').textContent = data.code_15 || 0;
+    document.getElementById('xilRateLimited').textContent = data.rate_limited || 0;
+    document.getElementById('xilInvalidCreds').textContent = data.invalid_credentials || 0;
+    document.getElementById('xilTunnelErrors').textContent = data.tunneling_errors || 0;
+    document.getElementById('xilTimeouts').textContent = data.timeouts || 0;
+    document.getElementById('xilConnRefused').textContent = data.connection_refused || 0;
+}
+
+async function loadProxyInfo() {
+    const container = document.getElementById('proxyInfo');
+    try {
+        const data = await fetchAPI('/api/xilriws/proxies');
+        
+        if (!data.exists) {
+            container.innerHTML = '<div class="text-warning">No proxy file found</div>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <div class="info-item">
+                <span class="info-label">Proxies Configured</span>
+                <span class="info-value">${data.count}</span>
+            </div>
+            <div class="info-item">
+                <span class="info-label">File</span>
+                <span class="info-value code">${data.file}</span>
+            </div>
+            <div class="proxy-sample">
+                <div class="sample-label">Sample (first ${data.sample.length}):</div>
+                ${data.sample.map(p => `<div class="proxy-line">${escapeHtml(p.replace(/:[^:]+@/, ':***@'))}</div>`).join('')}
+            </div>
+        `;
+    } catch (error) {
+        container.innerHTML = '<div class="text-danger">Failed to load proxy info</div>';
+    }
+}
+
+async function loadXilriwsLogs() {
+    const logEl = document.getElementById('xilriwsLogContent');
+    try {
+        const data = await fetchAPI('/api/container/xilriws/logs?lines=200');
+        logEl.textContent = data.logs || 'No logs available';
+        if (xilriwsAutoScroll) {
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    } catch (error) {
+        logEl.textContent = 'Failed to load Xilriws logs';
+    }
+}
+
+function toggleXilriwsLive() {
+    xilriwsAutoScroll = document.getElementById('xilLiveToggle').checked;
+}
+
+function startXilriwsLiveStream() {
+    if (xilriwsLiveStream) {
+        xilriwsLiveStream.close();
+    }
+    
+    const logEl = document.getElementById('xilriwsLogContent');
+    logEl.textContent = 'Connecting to live stream...';
+    
+    xilriwsLiveStream = new EventSource('/api/xilriws/live');
+    
+    xilriwsLiveStream.onmessage = (event) => {
+        logEl.textContent += event.data;
+        if (xilriwsAutoScroll) {
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    };
+    
+    xilriwsLiveStream.onerror = () => {
+        logEl.textContent += '\n[Stream disconnected, attempting to reconnect...]';
+    };
+}
+
+function stopXilriwsLiveStream() {
+    if (xilriwsLiveStream) {
+        xilriwsLiveStream.close();
+        xilriwsLiveStream = null;
+    }
+}
+
+// =============================================================================
+// STATISTICS PAGE FUNCTIONS
+// =============================================================================
+
+let statsChart = null;
+
+async function loadHistoricalStats() {
+    const days = document.getElementById('statsTimeRange')?.value || 7;
+    
+    // Load log summaries for chart
+    try {
+        const summaries = await fetchAPI(`/api/db/log-summaries?days=${days}`);
+        updateStatsChart(summaries);
+    } catch (error) {
+        console.error('Failed to load log summaries:', error);
+    }
+    
+    // Load proxy stats
+    loadProxyStatsTable();
+    
+    // Load events
+    loadSystemEvents();
+    
+    // Load container history
+    loadContainerHistory();
+}
+
+function updateStatsChart(data) {
+    const canvas = document.getElementById('statsChart');
+    if (!canvas) return;
+    
+    const ctx = canvas.getContext('2d');
+    
+    // Simple chart without Chart.js dependency
+    // Draw a basic bar chart
+    const width = canvas.width = canvas.parentElement.clientWidth;
+    const height = canvas.height = 200;
+    
+    ctx.clearRect(0, 0, width, height);
+    
+    if (!data || data.length === 0) {
+        ctx.fillStyle = '#64748b';
+        ctx.font = '14px Outfit';
+        ctx.textAlign = 'center';
+        ctx.fillText('No historical data available', width / 2, height / 2);
+        return;
+    }
+    
+    const maxErrors = Math.max(...data.map(d => d.error_count || 0), 1);
+    const maxLines = Math.max(...data.map(d => d.line_count || 0), 1);
+    
+    const barWidth = (width - 60) / data.length - 4;
+    const chartHeight = height - 40;
+    
+    data.forEach((d, i) => {
+        const x = 30 + i * (barWidth + 4);
+        
+        // Lines bar (blue)
+        const linesHeight = (d.line_count / maxLines) * chartHeight * 0.8;
+        ctx.fillStyle = '#3b82f6';
+        ctx.fillRect(x, height - 20 - linesHeight, barWidth / 2 - 1, linesHeight);
+        
+        // Errors bar (red)
+        const errorsHeight = (d.error_count / maxErrors) * chartHeight * 0.8;
+        ctx.fillStyle = '#ef4444';
+        ctx.fillRect(x + barWidth / 2, height - 20 - errorsHeight, barWidth / 2 - 1, errorsHeight);
+        
+        // Date label
+        ctx.fillStyle = '#64748b';
+        ctx.font = '10px JetBrains Mono';
+        ctx.textAlign = 'center';
+        const dateLabel = d.log_date ? d.log_date.substring(5) : '';
+        ctx.fillText(dateLabel, x + barWidth / 2, height - 5);
+    });
+    
+    // Legend
+    ctx.fillStyle = '#3b82f6';
+    ctx.fillRect(width - 100, 10, 12, 12);
+    ctx.fillStyle = '#f1f5f9';
+    ctx.font = '11px Outfit';
+    ctx.textAlign = 'left';
+    ctx.fillText('Lines', width - 82, 20);
+    
+    ctx.fillStyle = '#ef4444';
+    ctx.fillRect(width - 100, 28, 12, 12);
+    ctx.fillText('Errors', width - 82, 38);
+}
+
+async function loadProxyStatsTable() {
+    const tbody = document.getElementById('proxyStatsBody');
+    if (!tbody) return;
+    
+    try {
+        const stats = await fetchAPI('/api/db/proxy-stats?limit=20');
+        
+        if (!stats || stats.length === 0) {
+            tbody.innerHTML = '<tr><td colspan="5" class="text-muted">No proxy stats recorded</td></tr>';
+            return;
+        }
+        
+        tbody.innerHTML = stats.map(s => {
+            const rate = s.total > 0 ? ((s.success / s.total) * 100).toFixed(1) : 0;
+            const rateClass = rate > 80 ? 'text-success' : rate > 50 ? 'text-warning' : 'text-danger';
+            return `
+                <tr>
+                    <td class="code">${escapeHtml(s.proxy?.substring(0, 30) || 'Unknown')}...</td>
+                    <td>${s.total || 0}</td>
+                    <td class="text-success">${s.success || 0}</td>
+                    <td class="text-danger">${s.failed || 0}</td>
+                    <td class="${rateClass}">${rate}%</td>
+                </tr>
+            `;
+        }).join('');
+    } catch (error) {
+        tbody.innerHTML = '<tr><td colspan="5" class="text-danger">Failed to load</td></tr>';
+    }
+}
+
+async function loadSystemEvents() {
+    const container = document.getElementById('systemEvents');
+    if (!container) return;
+    
+    try {
+        const events = await fetchAPI('/api/db/events?limit=20');
+        
+        if (!events || events.length === 0) {
+            container.innerHTML = '<div class="text-muted">No events recorded</div>';
+            return;
+        }
+        
+        container.innerHTML = events.map(e => `
+            <div class="event-item ${e.event_type?.toLowerCase() || ''}">
+                <div class="event-time">${e.timestamp ? new Date(e.timestamp).toLocaleString() : ''}</div>
+                <div class="event-type">${escapeHtml(e.event_type || '')}</div>
+                <div class="event-desc">${escapeHtml(e.description || '')}</div>
+            </div>
+        `).join('');
+    } catch (error) {
+        container.innerHTML = '<div class="text-danger">Failed to load events</div>';
+    }
+}
+
+async function loadContainerHistory() {
+    const container = document.getElementById('containerHistory');
+    if (!container) return;
+    
+    try {
+        const stats = await fetchAPI('/api/db/container-stats');
+        
+        if (!stats || stats.length === 0) {
+            container.innerHTML = '<div class="text-muted">No container history recorded</div>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <table class="stats-table">
+                <thead>
+                    <tr>
+                        <th>Container</th>
+                        <th>Starts</th>
+                        <th>Restarts</th>
+                        <th>Crashes</th>
+                        <th>Uptime</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${stats.map(s => {
+                        const uptime = s.uptime_seconds ? formatDuration(s.uptime_seconds) : '-';
+                        return `
+                            <tr>
+                                <td class="code">${escapeHtml(s.name || '')}</td>
+                                <td>${s.starts || 0}</td>
+                                <td class="text-warning">${s.restarts || 0}</td>
+                                <td class="text-danger">${s.crashes || 0}</td>
+                                <td>${uptime}</td>
+                                <td class="${s.status === 'running' ? 'text-success' : 'text-danger'}">${s.status || '-'}</td>
+                            </tr>
+                        `;
+                    }).join('')}
+                </tbody>
+            </table>
+        `;
+    } catch (error) {
+        container.innerHTML = '<div class="text-danger">Failed to load container history</div>';
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds) return '-';
+    const days = Math.floor(seconds / 86400);
+    const hours = Math.floor((seconds % 86400) / 3600);
+    const mins = Math.floor((seconds % 3600) / 60);
+    
+    if (days > 0) return `${days}d ${hours}h`;
+    if (hours > 0) return `${hours}h ${mins}m`;
+    return `${mins}m`;
+}
+
+// =============================================================================
+// FILE BROWSER FUNCTIONS
+// =============================================================================
+
+let currentFilePath = '';
+
+async function navigateToPath(path) {
+    currentFilePath = path;
+    document.getElementById('currentPath').textContent = '/' + path || '/';
+    
+    const container = document.getElementById('fileList');
+    container.innerHTML = '<div class="loading">Loading...</div>';
+    
+    try {
+        const data = await fetchAPI(`/api/files?path=${encodeURIComponent(path)}`);
+        
+        if (data.error) {
+            container.innerHTML = `<div class="text-danger">${escapeHtml(data.error)}</div>`;
+            return;
+        }
+        
+        if (!data.files || data.files.length === 0) {
+            container.innerHTML = '<div class="text-muted">Empty directory</div>';
+            return;
+        }
+        
+        container.innerHTML = data.files.map(f => {
+            const icon = f.type === 'directory' ? '📁' : getFileIcon(f.name);
+            const sizeStr = f.type === 'file' ? formatBytes(f.size) : '';
+            const clickAction = f.type === 'directory' 
+                ? `navigateToPath('${path ? path + '/' : ''}${f.name}')`
+                : `viewFile('${path ? path + '/' : ''}${f.name}')`;
+            
+            return `
+                <div class="file-item ${f.type}" onclick="${clickAction}">
+                    <span class="file-icon">${icon}</span>
+                    <span class="file-name">${escapeHtml(f.name)}</span>
+                    <span class="file-size">${sizeStr}</span>
+                </div>
+            `;
+        }).join('');
+    } catch (error) {
+        container.innerHTML = '<div class="text-danger">Failed to load files</div>';
+    }
+}
+
+function navigateUp() {
+    const parts = currentFilePath.split('/').filter(p => p);
+    parts.pop();
+    navigateToPath(parts.join('/'));
+}
+
+function getFileIcon(filename) {
+    const ext = filename.split('.').pop().toLowerCase();
+    const icons = {
+        'sh': '📜', 'bash': '📜',
+        'py': '🐍', 'python': '🐍',
+        'js': '📒', 'ts': '📘',
+        'json': '📋', 'yaml': '📋', 'yml': '📋', 'toml': '📋',
+        'md': '📝', 'txt': '📄',
+        'sql': '🗃️', 'db': '🗃️',
+        'env': '🔐', 'cnf': '⚙️', 'conf': '⚙️', 'cfg': '⚙️',
+        'log': '📊',
+        'html': '🌐', 'css': '🎨',
+        'png': '🖼️', 'jpg': '🖼️', 'jpeg': '🖼️', 'gif': '🖼️',
+        'zip': '📦', 'tar': '📦', 'gz': '📦'
+    };
+    return icons[ext] || '📄';
+}
+
+async function viewFile(path) {
+    const viewer = document.getElementById('fileViewer');
+    const nameEl = document.getElementById('fileViewerName');
+    const contentEl = document.getElementById('fileViewerContent');
+    
+    nameEl.textContent = path;
+    contentEl.textContent = 'Loading...';
+    viewer.style.display = 'block';
+    
+    try {
+        const data = await fetchAPI(`/api/file?path=${encodeURIComponent(path)}`);
+        
+        if (data.error) {
+            contentEl.textContent = `Error: ${data.error}`;
+            return;
+        }
+        
+        contentEl.textContent = data.content || '(empty file)';
+    } catch (error) {
+        contentEl.textContent = 'Failed to load file content';
+    }
+}
+
+function closeFileViewer() {
+    document.getElementById('fileViewer').style.display = 'none';
+}
+
+// =============================================================================
+// CONTAINER LOG STREAMING
+// =============================================================================
+
+let containerLogStream = null;
+let currentLogContainer = null;
+
+function streamContainerLogs(containerName) {
+    if (containerLogStream) {
+        containerLogStream.close();
+    }
+    
+    currentLogContainer = containerName;
+    
+    openModal(`${containerName} Logs (Live)`, `
+        <div class="log-controls">
+            <label class="toggle-label">
+                <input type="checkbox" id="logAutoScroll" checked>
+                <span>Auto-scroll</span>
+            </label>
+            <button class="btn btn-sm" onclick="stopContainerLogStream()">Stop</button>
+        </div>
+        <pre id="modalLogContent" class="log-viewer live-log">Connecting...</pre>
+    `);
+    
+    const logEl = document.getElementById('modalLogContent');
+    
+    containerLogStream = new EventSource(`/api/container/${containerName}/logs/stream`);
+    
+    containerLogStream.onmessage = (event) => {
+        logEl.textContent += event.data;
+        if (document.getElementById('logAutoScroll')?.checked) {
+            logEl.scrollTop = logEl.scrollHeight;
+        }
+    };
+    
+    containerLogStream.onerror = () => {
+        logEl.textContent += '\n[Stream disconnected]';
+        stopContainerLogStream();
+    };
+}
+
+function stopContainerLogStream() {
+    if (containerLogStream) {
+        containerLogStream.close();
+        containerLogStream = null;
+    }
+}
+
+// =============================================================================
+// PAGE INITIALIZATION HOOKS
+// =============================================================================
+
+// Override the existing showPage to add page-specific initialization
+const originalShowPage = showPage;
+showPage = function(page) {
+    // Stop any streams when leaving a page
+    stopXilriwsLiveStream();
+    stopContainerLogStream();
+    
+    // Call original function
+    originalShowPage(page);
+    
+    // Page-specific initialization
+    switch(page) {
+        case 'xilriws':
+            loadXilriwsStats();
+            loadProxyInfo();
+            loadXilriwsLogs();
+            // Also fetch current stats
+            fetchAPI('/api/xilriws/stats').then(data => updateXilriwsPage(data));
+            break;
+        case 'stats':
+            loadHistoricalStats();
+            break;
+        case 'files':
+            navigateToPath('');
+            break;
+    }
+};

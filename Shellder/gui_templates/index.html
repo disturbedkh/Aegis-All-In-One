@@ -34,7 +34,23 @@
             </div>
             
             <div class="nav-section">
+                <div class="nav-label">Monitoring</div>
+                <a href="#" class="nav-item" data-page="xilriws">
+                    <span class="nav-icon">🔐</span>
+                    <span>Xilriws</span>
+                </a>
+                <a href="#" class="nav-item" data-page="stats">
+                    <span class="nav-icon">📈</span>
+                    <span>Statistics</span>
+                </a>
+            </div>
+            
+            <div class="nav-section">
                 <div class="nav-label">Management</div>
+                <a href="#" class="nav-item" data-page="files">
+                    <span class="nav-icon">📁</span>
+                    <span>Files</span>
+                </a>
                 <a href="#" class="nav-item" data-page="scripts">
                     <span class="nav-icon">⚡</span>
                     <span>Scripts</span>
@@ -306,6 +322,208 @@
                     </div>
                 </div>
             </div>
+            
+            <!-- Xilriws Page -->
+            <div id="page-xilriws" class="page">
+                <div class="stats-grid xilriws-stats-grid">
+                    <div class="stat-card large">
+                        <div class="stat-icon success">✓</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilSuccessRate">--%</div>
+                            <div class="stat-label">Success Rate</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success">🟢</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilSuccessful">-</div>
+                            <div class="stat-label">Successful</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon danger">🔴</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilFailed">-</div>
+                            <div class="stat-label">Failed</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📊</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilTotal">-</div>
+                            <div class="stat-label">Total Requests</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Error Breakdown</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="xilErrorBreakdown" class="error-breakdown">
+                                <div class="error-row">
+                                    <span class="error-type">Auth Banned</span>
+                                    <span class="error-count" id="xilAuthBanned">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Code 15</span>
+                                    <span class="error-count" id="xilCode15">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Rate Limited</span>
+                                    <span class="error-count" id="xilRateLimited">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Invalid Credentials</span>
+                                    <span class="error-count" id="xilInvalidCreds">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Tunnel Errors</span>
+                                    <span class="error-count" id="xilTunnelErrors">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Timeouts</span>
+                                    <span class="error-count" id="xilTimeouts">0</span>
+                                </div>
+                                <div class="error-row">
+                                    <span class="error-type">Connection Refused</span>
+                                    <span class="error-count" id="xilConnRefused">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Proxy Info</h2>
+                            <button class="btn btn-sm" onclick="loadProxyInfo()">Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="proxyInfo" class="proxy-info">
+                                <div class="loading">Loading proxy info...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card full-height">
+                    <div class="card-header">
+                        <h2>Live Xilriws Logs</h2>
+                        <div class="card-actions">
+                            <label class="toggle-label">
+                                <input type="checkbox" id="xilLiveToggle" onchange="toggleXilriwsLive()">
+                                <span>Auto-scroll</span>
+                            </label>
+                            <button class="btn btn-sm" onclick="loadXilriwsLogs()">Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <pre id="xilriwsLogContent" class="log-viewer live-log">Connecting to Xilriws logs...</pre>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Statistics Page -->
+            <div id="page-stats" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Historical Statistics</h2>
+                        <div class="card-actions">
+                            <select id="statsTimeRange" onchange="loadHistoricalStats()">
+                                <option value="1">Last 24 hours</option>
+                                <option value="7" selected>Last 7 days</option>
+                                <option value="30">Last 30 days</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="stats-chart-container">
+                            <canvas id="statsChart"></canvas>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>All-Time Proxy Stats</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="allTimeProxyStats" class="stats-table-container">
+                                <table class="stats-table">
+                                    <thead>
+                                        <tr>
+                                            <th>Proxy</th>
+                                            <th>Total</th>
+                                            <th>Success</th>
+                                            <th>Failed</th>
+                                            <th>Rate</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="proxyStatsBody">
+                                        <tr><td colspan="5" class="loading">Loading...</td></tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Recent System Events</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="systemEvents" class="event-list">
+                                <div class="loading">Loading events...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Container Uptime History</h2>
+                    </div>
+                    <div class="card-body">
+                        <div id="containerHistory" class="container-history">
+                            <div class="loading">Loading container history...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Files Page -->
+            <div id="page-files" class="page">
+                <div class="card full-height">
+                    <div class="card-header">
+                        <h2>File Browser</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="navigateToPath('')">🏠 Root</button>
+                            <button class="btn btn-sm" onclick="navigateUp()">⬆️ Up</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="file-path-bar">
+                            <span class="path-label">Path:</span>
+                            <span id="currentPath" class="current-path">/</span>
+                        </div>
+                        <div id="fileList" class="file-list">
+                            <div class="loading">Loading files...</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- File Viewer Modal Content -->
+                <div id="fileViewer" class="file-viewer" style="display: none;">
+                    <div class="file-viewer-header">
+                        <span id="fileViewerName">filename.txt</span>
+                        <button class="btn btn-sm" onclick="closeFileViewer()">✕ Close</button>
+                    </div>
+                    <pre id="fileViewerContent" class="file-content"></pre>
+                </div>
+            </div>
         </main>
     </div>
     
@@ -327,6 +545,8 @@
     <!-- Toast Container -->
     <div id="toastContainer" class="toast-container"></div>
     
+    <!-- Socket.IO for WebSocket support -->
+    <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
     <script src="/static/script.js"></script>
 </body>
 </html>
