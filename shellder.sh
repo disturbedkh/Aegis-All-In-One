@@ -1115,10 +1115,16 @@ git_pull() {
         echo ""
     fi
 
+    # Save current HEAD before pulling to detect actual changes
+    local old_head=$(git rev-parse HEAD 2>/dev/null)
+    
     echo -e "${CYAN}Pulling latest updates from GitHub...${NC}"
     echo ""
     git pull origin $branch 2>&1
     local pull_result=$?
+    
+    # Get new HEAD after pull
+    local new_head=$(git rev-parse HEAD 2>/dev/null)
     
     # CRITICAL: Restore file ownership after git pull (prevents root-locked files)
     restore_repo_ownership
@@ -1161,17 +1167,22 @@ git_pull() {
         echo -e "${GREEN}${BOLD}Update complete!${NC}"
         echo ""
         
-        # Check if shellder.sh itself was updated
-        if git diff HEAD~1 --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
-            echo -e "${YELLOW}━━━ Script files were updated ━━━${NC}"
-            echo ""
-            echo -e "The control panel scripts have been updated."
-            echo -e "Restarting to apply changes..."
-            echo ""
-            sleep 2
-            
-            # Re-execute this script to load new code
-            exec bash "$0"
+        # Check if shellder.sh itself was updated (only if HEAD actually changed)
+        if [ "$old_head" != "$new_head" ]; then
+            # HEAD changed - check if script files were in the update
+            if git diff "$old_head" "$new_head" --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
+                echo -e "${YELLOW}━━━ Script files were updated ━━━${NC}"
+                echo ""
+                echo -e "The control panel scripts have been updated."
+                echo -e "Restarting to apply changes..."
+                echo ""
+                sleep 2
+                
+                # Re-execute this script to load new code
+                exec bash "$0"
+            else
+                echo "Tip: Run 'Update & Rebuild' (option u) to apply container updates"
+            fi
         else
             echo "Tip: Run 'Update & Rebuild' (option u) to apply container updates"
         fi
@@ -1234,6 +1245,9 @@ update_and_rebuild() {
     echo ""
     echo -e "${CYAN}Step 1/4: Pulling latest changes...${NC}"
     
+    # Save current HEAD before pulling
+    local old_head=$(git rev-parse HEAD 2>/dev/null)
+    
     # Check for local changes and auto-stash
     if ! git diff-index --quiet HEAD -- 2>/dev/null; then
         had_changes=true
@@ -1243,11 +1257,15 @@ update_and_rebuild() {
     fi
     
     git pull origin $branch 2>&1
+    local pull_result=$?
+    
+    # Get new HEAD after pull
+    local new_head=$(git rev-parse HEAD 2>/dev/null)
     
     # CRITICAL: Restore file ownership after git pull
     restore_repo_ownership
     
-    if [ $? -ne 0 ]; then
+    if [ $pull_result -ne 0 ]; then
         echo -e "${RED}Pull failed. Aborting.${NC}"
         # Restore stash
         if [ "$had_changes" = true ]; then
@@ -1295,11 +1313,13 @@ update_and_rebuild() {
     
     echo ""
     
-    # Check if shellder.sh itself was updated and restart if needed
-    if git diff HEAD~1 --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
-        echo -e "${YELLOW}Script files were updated. Restarting control panel...${NC}"
-        sleep 2
-        exec bash "$0"
+    # Check if shellder.sh itself was updated and restart if needed (only if HEAD changed)
+    if [ "$old_head" != "$new_head" ]; then
+        if git diff "$old_head" "$new_head" --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
+            echo -e "${YELLOW}Script files were updated. Restarting control panel...${NC}"
+            sleep 2
+            exec bash "$0"
+        fi
     fi
     
     press_enter
