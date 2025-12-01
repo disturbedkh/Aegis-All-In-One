@@ -151,9 +151,16 @@ On launch, Shellder checks your `.env` against stored values and alerts you to a
 
 The validation ensures **only working, verified values** are stored—if a database password doesn't connect, it won't be saved to the database.
 
-### Shellder Logging System
+### Shellder Operation Log (for debugging Shellder itself)
 
-Shellder includes comprehensive logging (`Shellder/shellder.log`) that captures:
+> **⚠️ This is different from `logs.sh` (the Docker Container Log Viewer)!**
+>
+> | Tool | Purpose | What It Shows |
+> |------|---------|---------------|
+> | `logs.sh` | **Docker Container Logs** | Dragonite, Golbat, ReactMap output |
+> | `log_helper.sh` | **Shellder Operation Log** | Shellder script errors & crashes |
+
+The Shellder Operation Log (`Shellder/shellder.log`) captures Shellder's own activity:
 
 - **Session starts/ends** with timestamps and duration
 - **User actions** (menu selections, Docker operations)
@@ -203,10 +210,11 @@ bash Shellder/log_helper.sh --clear
 | `Shellder/setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
 | `Shellder/dbsetup.sh` | Database setup and maintenance | Initial setup or maintenance |
 | `Shellder/check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
-| `Shellder/logs.sh` | Docker log viewer, analyzer, and maintenance | Monitoring, debugging |
+| `Shellder/logs.sh` | **Docker container log viewer** (Dragonite, Golbat, etc.) | Monitoring services |
 | `Shellder/nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
 | `Shellder/poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
 | `Shellder/fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
+| `Shellder/log_helper.sh` | **Shellder operation log** (for debugging Shellder itself) | When Shellder crashes |
 
 ### Quick Start with Shellder
 

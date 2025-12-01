@@ -1,17 +1,29 @@
 #!/bin/bash
 
 # =============================================================================
-# Shellder 2.0 - Docker Log Manager & Analyzer for Aegis AIO
+# Shellder - Docker Container Log Viewer & Analyzer
 # =============================================================================
+#
+# ┌─────────────────────────────────────────────────────────────────────────┐
+# │  This script views DOCKER CONTAINER logs (your services' output)       │
+# │                                                                         │
+# │  Services: Dragonite, Golbat, ReactMap, Rotom, Xilriws, Database, etc. │
+# │                                                                         │
+# │  NOTE: This is different from log_helper.sh which logs Shellder's      │
+# │        own internal operations (for debugging Shellder scripts).       │
+# └─────────────────────────────────────────────────────────────────────────┘
+#
 # This script provides:
-#   - Real-time service status dashboard
-#   - Log size monitoring and analysis
-#   - Error categorization and counting
+#   - Real-time Docker container status dashboard
+#   - Container log size monitoring and analysis
+#   - Error categorization and counting from service logs
 #   - Detailed service-level error breakdown
 #   - Error viewing with log navigation
-#   - Event searching (device disconnects, etc.)
-#   - Log maintenance (clear, rotate)
+#   - Event searching (device disconnects, proxy errors, etc.)
+#   - Container log maintenance (clear, rotate)
 #   - Docker configuration management
+#   - Xilriws proxy monitoring
+#
 # =============================================================================
 
 # Colors

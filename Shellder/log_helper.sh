@@ -1,24 +1,35 @@
 #!/bin/bash
 
 # =============================================================================
-# Shellder Logging System
+# Shellder Operation Log (NOT the same as logs.sh!)
 # =============================================================================
-# This file provides comprehensive logging for all Shellder scripts.
-# Source this file to enable logging: source "$(dirname "$0")/log_helper.sh"
 #
-# LOG FORMAT (Human-Readable):
 # ┌─────────────────────────────────────────────────────────────────────────┐
-# │ [2024-12-01 14:30:45] [INFO] [setup.sh] Message here                    │
-# │                                                                          │
-# │ For errors, includes:                                                    │
-# │   • What happened (plain English)                                        │
-# │   • Technical details (for advanced users)                               │
-# │   • Suggestions to fix                                                   │
+# │  IMPORTANT: This is NOT for viewing Docker container logs!             │
+# │                                                                         │
+# │  • To view Docker container logs (Dragonite, Golbat, etc.):            │
+# │    → Use logs.sh (menu option 5 in Shellder)                           │
+# │                                                                         │
+# │  • This file (log_helper.sh) logs SHELLDER'S OWN operations:           │
+# │    → Script errors, crashes, user actions within Shellder              │
+# │    → Useful for debugging when Shellder scripts don't work             │
 # └─────────────────────────────────────────────────────────────────────────┘
 #
-# TO SHARE WITH AI ASSISTANT:
+# WHAT THIS LOGS:
+#   • Shellder script starts/stops (setup.sh, check.sh, etc.)
+#   • Errors that occur IN the Shellder scripts themselves
+#   • User menu selections and actions
+#   • Crashes with technical details for debugging
+#
+# WHAT THIS DOES NOT LOG:
+#   • Docker container output (use logs.sh for that)
+#   • Pokemon data, scans, or game-related logs
+#   • Service-specific errors (Dragonite, Golbat, ReactMap, etc.)
+#
+# TO DEBUG SHELLDER ISSUES:
 #   Run: bash Shellder/log_helper.sh --export
-#   This creates a formatted file ready to paste into chat
+#   This creates a file you can share with support or AI assistants
+#
 # =============================================================================
 
 # Log file location
@@ -408,15 +419,29 @@ export_for_ai() {
     
     {
         echo "============================================================"
-        echo "SHELLDER DEBUG EXPORT"
+        echo "SHELLDER OPERATION LOG EXPORT"
+        echo "============================================================"
+        echo ""
+        echo "WHAT IS THIS?"
+        echo "  This is Shellder's INTERNAL operation log - it shows what"
+        echo "  the Shellder scripts themselves are doing (not Docker containers)."
+        echo ""
+        echo "  This log is useful for debugging when:"
+        echo "    • A Shellder script crashes or won't start"
+        echo "    • Setup fails unexpectedly"
+        echo "    • Menu options don't work correctly"
+        echo ""
+        echo "  NOTE: For Docker container logs (Dragonite, Golbat, etc.),"
+        echo "        use: sudo bash Shellder/logs.sh"
+        echo ""
         echo "============================================================"
         echo ""
         echo "Generated: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-        echo "Export Type: Recent Activity (last $lines lines)"
+        echo "Export Type: Recent Shellder Activity (last $lines lines)"
         echo ""
         echo "HOW TO USE THIS FILE:"
         echo "  Paste the contents below into your chat with the AI assistant"
-        echo "  to help diagnose issues with your Shellder/Aegis AIO setup."
+        echo "  to help diagnose issues with the Shellder scripts."
         echo ""
         echo "============================================================"
         echo "SYSTEM INFORMATION"
@@ -468,18 +493,32 @@ export_errors_for_ai() {
     
     {
         echo "============================================================"
-        echo "SHELLDER ERROR EXPORT"
+        echo "SHELLDER SCRIPT ERROR EXPORT"
+        echo "============================================================"
+        echo ""
+        echo "WHAT IS THIS?"
+        echo "  These are errors from the SHELLDER SCRIPTS themselves"
+        echo "  (setup.sh, check.sh, dbsetup.sh, etc.) - NOT Docker containers."
+        echo ""
+        echo "  This helps debug when:"
+        echo "    • A Shellder menu option fails"
+        echo "    • Setup script crashes"
+        echo "    • Script won't complete"
+        echo ""
+        echo "  NOTE: For Docker container errors (Dragonite, Golbat, etc.),"
+        echo "        use: sudo bash Shellder/logs.sh → then select a service"
+        echo ""
         echo "============================================================"
         echo ""
         echo "Generated: $(date '+%Y-%m-%d %H:%M:%S %Z')"
-        echo "Export Type: Errors and Warnings Only"
+        echo "Export Type: Shellder Script Errors Only"
         echo ""
         echo "HOW TO USE THIS FILE:"
         echo "  Paste the contents below into your chat with the AI assistant"
-        echo "  to get help fixing these errors."
+        echo "  to get help fixing these Shellder script errors."
         echo ""
         echo "============================================================"
-        echo "ERROR ENTRIES"
+        echo "SHELLDER SCRIPT ERROR ENTRIES"
         echo "============================================================"
         echo ""
         
@@ -541,23 +580,36 @@ clear_log() {
 
 show_log_help() {
     echo ""
-    echo "Shellder Logging System"
-    echo "======================="
+    echo "╔══════════════════════════════════════════════════════════════════════════╗"
+    echo "║           SHELLDER OPERATION LOG (for debugging Shellder itself)         ║"
+    echo "╠══════════════════════════════════════════════════════════════════════════╣"
+    echo "║                                                                          ║"
+    echo "║  NOTE: This is NOT for Docker container logs!                            ║"
+    echo "║                                                                          ║"
+    echo "║  • For Docker logs (Dragonite, Golbat, ReactMap, etc.):                 ║"
+    echo "║    → Run: sudo bash ./shellder.sh → Option 5 (Log Manager)              ║"
+    echo "║    → Or:  sudo bash Shellder/logs.sh                                    ║"
+    echo "║                                                                          ║"
+    echo "║  • This tool shows Shellder's internal operation log:                   ║"
+    echo "║    → Useful when Shellder scripts crash or behave unexpectedly          ║"
+    echo "║    → Contains technical details for debugging                           ║"
+    echo "║                                                                          ║"
+    echo "╚══════════════════════════════════════════════════════════════════════════╝"
     echo ""
     echo "Usage: bash Shellder/log_helper.sh [option]"
     echo ""
     echo "Options:"
-    echo "  --view [N]        View last N log entries (default: 50)"
-    echo "  --errors          View only error entries"
-    echo "  --export          Export recent logs for AI assistance"
-    echo "  --export-error    Export only errors for AI assistance"
-    echo "  --size            Show log file size"
-    echo "  --count-errors    Count error entries in log"
-    echo "  --clear           Clear the log file"
-    echo "  --path            Show log file path"
+    echo "  --view [N]        View last N Shellder operation log entries (default: 50)"
+    echo "  --errors          View only Shellder script errors"
+    echo "  --export          Export Shellder logs for AI debugging assistance"
+    echo "  --export-error    Export only Shellder errors for AI assistance"
+    echo "  --size            Show Shellder log file size"
+    echo "  --count-errors    Count errors in Shellder operation log"
+    echo "  --clear           Clear the Shellder operation log"
+    echo "  --path            Show Shellder log file path"
     echo "  --help            This help message"
     echo ""
-    echo "Log File: $SHELLDER_LOG_FILE"
+    echo "Shellder Operation Log: $SHELLDER_LOG_FILE"
     echo ""
 }
 
