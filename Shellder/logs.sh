@@ -120,7 +120,7 @@ EXCLUSION_PATTERNS=(
     "cache loaded"
     "initialized"
     "new version available"
-    # ReactMap specific info prefixes
+    # ReactMap specific info prefixes (all bracket tags are info-level)
     "\[API\]"
     "\[STATS\]"
     "\[UPDATE\]"
@@ -151,6 +151,31 @@ EXCLUSION_PATTERNS=(
     "\[QUEST\]"
     "\[S2CELL\]"
     "\[PORTAL\]"
+    # ReactMap API request logging (format: [CATEGORY] | Type | Count | Time | User | Filters)
+    "\[GYMS\]"
+    "\[POKESTOPS\]"
+    "\[AVAILABLE\]"
+    "\[MOTDCHECK\]"
+    "\[FABBUTTONS\]"
+    "\[POKEMONSHINYSTATS\]"
+    "\[TUTORIAL\]"
+    # ReactMap build/startup
+    "\[BUILD\]"
+    "\[LOCALES\]"
+    "vite v[0-9]"
+    "modules transformed"
+    "rendering chunks"
+    "computing gzip size"
+    "built in [0-9]"
+    "React Map Compiled"
+    "has fully started"
+    "yarn run"
+    # ReactMap DB operations (periodic refreshes)
+    "Querying available for"
+    "Setting available for"
+    "Updating filter context"
+    "Setting historical rarity"
+    "Fetching Latest"
     # Node.js startup
     "^\\\$ node"
     # Info-level log prefixes (these lines are informational, not errors)
