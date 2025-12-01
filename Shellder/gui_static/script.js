@@ -2072,7 +2072,14 @@ function getEventIcon(event) {
         'startup': '🚀',
         'warning': '⚠️',
         'innodb': '💿',
-        'socket_listen': '📡'
+        'socket_listen': '📡',
+        // Koji events
+        'scanner_type': '🔍',
+        'slow_db_acquire': '🐢',
+        'migration': '📦',
+        'http_request': '🌐',
+        'stream_error': '🤖',
+        'geofence': '📍'
     };
     return icons[event.type] || '📌';
 }

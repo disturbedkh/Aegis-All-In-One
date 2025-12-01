@@ -184,9 +184,26 @@ EXCLUSION_PATTERNS=(
     "Starting.*Public"
     "APICHECK.*is OK"
     "Loaded [0-9]+ proxies"
-    # Koji patterns
+    # Koji patterns (Rust/Actix)
     "Listening on"
     "Connected to"
+    "INFO.*actix_server"
+    "INFO.*actix_web::middleware::logger"
+    "starting.*workers"
+    "Actix runtime found"
+    "starting service.*actix-web"
+    "Determined Scanner Type"
+    "Applying all pending migrations"
+    "No pending migrations"
+    "Migrations successful"
+    "sea_orm_migration::migrator"
+    "GEOFENCES_FC_ALL.*Returning"
+    # Koji stream errors from bots/scanners (harmless HTTP parse errors)
+    "actix_http::h1::dispatcher.*stream error.*parse error"
+    "invalid Header provided"
+    "invalid HTTP version"
+    # SQLx pool warnings (slow but not errors)
+    "sqlx::pool::acquire.*acquired connection"
     # VictoriaMetrics/vmagent info patterns (tab-separated format)
     "	info	"
     "	debug	"

@@ -1248,7 +1248,7 @@ class DeviceMonitor:
         self.recent_events = []  # For correlation
         
         # Container monitoring targets
-        self.monitored_containers = ['rotom', 'dragonite', 'golbat', 'database']
+        self.monitored_containers = ['rotom', 'dragonite', 'golbat', 'database', 'koji']
         self.log_threads = {}
         self.health_thread = None
         
@@ -1316,6 +1316,33 @@ class DeviceMonitor:
                 ),
                 'error': re.compile(
                     r'\[([^\]]+)\].*\[(ERROR|error)\].*(.+)', re.I
+                ),
+            },
+            'koji': {
+                # Koji/Rust log format: [2025-11-28T03:54:15Z LEVEL module] message
+                'startup': re.compile(
+                    r'\[([^\]]+)\]\s+INFO\s+actix_server::server\].*starting service.*listening on:\s*([^\s]+)'
+                ),
+                'scanner_type': re.compile(
+                    r'\[([^\]]+)\]\s+INFO\s+model::utils\].*Determined Scanner Type:\s*(\w+)'
+                ),
+                'slow_db_acquire': re.compile(
+                    r'\[([^\]]+)\]\s+WARN\s+sqlx::pool::acquire\].*acquired_after_secs=([0-9.]+)'
+                ),
+                'migration': re.compile(
+                    r'\[([^\]]+)\]\s+INFO\s+sea_orm_migration::migrator\]\s*(.+)'
+                ),
+                'http_request': re.compile(
+                    r'\[([^\]]+)\]\s+INFO\s+actix_web::middleware::logger\]\s*(\d+)\s*\|\s*(\w+)\s+([^\s]+)'
+                ),
+                'stream_error': re.compile(
+                    r'\[([^\]]+)\]\s+ERROR\s+actix_http::h1::dispatcher\].*stream error.*parse error:\s*(.+)'
+                ),
+                'geofence': re.compile(
+                    r'\[([^\]]+)\]\s+INFO\s+api::public::v1::geofence\].*Returning\s+(\d+)\s+instances'
+                ),
+                'error': re.compile(
+                    r'\[([^\]]+)\]\s+ERROR\s+(?!actix_http::h1::dispatcher).*\]\s*(.+)'
                 ),
             },
             'database': {
@@ -1507,6 +1534,41 @@ class DeviceMonitor:
         
         elif container == 'golbat':
             event['severity'] = 'error' if 'error' in event_type else 'info'
+        
+        elif container == 'koji':
+            if event_type == 'startup':
+                event['listen_address'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'success'
+            elif event_type == 'scanner_type':
+                event['scanner_type'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+            elif event_type == 'slow_db_acquire':
+                event['acquire_seconds'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'warning'
+            elif event_type == 'migration':
+                event['message'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+            elif event_type == 'http_request':
+                event['status_code'] = groups[1] if len(groups) > 1 else None
+                event['method'] = groups[2] if len(groups) > 2 else None
+                event['path'] = groups[3] if len(groups) > 3 else None
+                # Only log non-200 or interesting paths
+                status = int(event.get('status_code', 200) or 200)
+                if status >= 400:
+                    event['severity'] = 'warning'
+                else:
+                    return None  # Skip normal 200 requests
+            elif event_type == 'stream_error':
+                # These are usually from bots/scanners - mark as info not error
+                event['parse_error'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'  # Not a real error
+                event['note'] = 'Bot/scanner probe (harmless)'
+            elif event_type == 'geofence':
+                event['instance_count'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+            elif event_type == 'error':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
+                event['severity'] = 'error'
         
         elif container == 'database':
             if event_type == 'ready':
