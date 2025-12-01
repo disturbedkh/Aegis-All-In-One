@@ -64,15 +64,15 @@ fi
 declare -A ERROR_PATTERNS
 ERROR_PATTERNS=(
     ["account"]="account|login|auth|credential|banned|invalid.*account|auth_banned|suspended"
-    ["database"]="database|mysql|mariadb|sql|connection refused.*3306|deadlock|timeout.*db|SQLSTATE"
-    ["connection"]="connection|disconnect|refused|timeout|ECONNREFUSED|ETIMEDOUT|socket|websocket"
+    ["database"]="database|mysql|mariadb|sql|connection refused.*3306|deadlock|timeout.*db|SQLSTATE|Aborted connection.*to db"
+    ["connection"]="disconnect|refused|timeout|ECONNREFUSED|ETIMEDOUT|socket|websocket|Aborted connection"
     ["memory"]="out of memory|OOM|memory.*exceeded|heap|allocation failed"
-    ["permission"]="permission|denied|forbidden|unauthorized|access denied"
+    ["permission"]="permission|denied|forbidden|unauthorized|access denied|readonly database|attempt to write"
     ["config"]="config|configuration|missing.*key|invalid.*value|parse error"
     ["network"]="network|DNS|resolve|unreachable|no route"
     ["api"]="api|endpoint|request failed|status code|HTTP.*[45][0-9][0-9]"
     ["device"]="device|worker|phone|pokemon.*go|pgPokemon|mitm"
-    ["critical"]="fatal|panic|critical|emergency|FATAL|PANIC"
+    ["critical"]="fatal|panic|critical|emergency|FATAL|PANIC|Error: ✗"
 )
 
 # Exclusion patterns - these are NOT errors even if they match error keywords
@@ -444,6 +444,14 @@ count_errors_by_pattern() {
     local pattern=$2
     local count=0
     
+    # For specific error patterns, don't apply exclusions
+    # These are real errors that should always be counted
+    if echo "$pattern" | grep -qE "Aborted connection|readonly database|attempt to write|Error: ✗"; then
+        count=$(docker logs "$container" 2>&1 | grep -iE "$pattern" 2>/dev/null | wc -l || echo "0")
+        echo "$count"
+        return
+    fi
+    
     # Build exclusion grep pattern
     local exclusion_pattern=""
     for excl in "${EXCLUSION_PATTERNS[@]}"; do
@@ -454,8 +462,22 @@ count_errors_by_pattern() {
         fi
     done
     
-    # Count lines matching pattern but NOT matching exclusions
-    count=$(docker logs "$container" 2>&1 | grep -iE "$pattern" 2>/dev/null | grep -ivE "$exclusion_pattern" 2>/dev/null | wc -l || echo "0")
+    # Count lines matching pattern
+    # First get the matches, then filter exclusions, but KEEP lines with actual error indicators
+    local temp_file=$(mktemp)
+    docker logs "$container" 2>&1 | grep -iE "$pattern" 2>/dev/null > "$temp_file" || true
+    
+    while IFS= read -r line; do
+        # Always count lines with explicit error indicators
+        if echo "$line" | grep -qiE 'error="|err="|failed="|exception="|panic="|fatal="|^Error:|Error: ✗|ERRO |FATL |readonly database|Aborted connection|\[Warning\].*Aborted'; then
+            ((count++))
+        # Otherwise check if excluded
+        elif ! echo "$line" | grep -qiE "$exclusion_pattern"; then
+            ((count++))
+        fi
+    done < "$temp_file"
+    
+    rm -f "$temp_file"
     echo "$count"
 }
 
