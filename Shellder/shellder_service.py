@@ -1279,24 +1279,43 @@ class DeviceMonitor:
         """Compile regex patterns for log parsing"""
         self.patterns = {
             'rotom': {
+                # Real log format: [2025-12-01T09:09:26.082Z] [INFO] [rotom] CONTROLLER: Found OrangePi5 connects to workerId OrangePi5-1
                 'device_connect': re.compile(
                     r'\[([^\]]+)\].*CONTROLLER:\s*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)'
                 ),
+                # Worker allocation: CONTROLLER: New connection from ::ffff:172.18.0.11 - will allocate OrangePi5-1
+                'worker_allocate': re.compile(
+                    r'\[([^\]]+)\].*CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*will allocate\s+(\S+)'
+                ),
+                # Device disconnect: OrangePi5-1/1041: Disconnected; performing disconnection activities
                 'device_disconnect': re.compile(
-                    r'\[([^\]]+)\].*(\S+)/\d+:\s*Disconnected.*disconnection activities'
+                    r'\[([^\]]+)\].*(\S+)/(\d+):\s*Disconnected.*disconnection activities'
                 ),
+                # Controller disconnect: CONTROLLER: Disconnected worker New York_01/Gti6h7/1013 device
                 'worker_disconnect': re.compile(
-                    r'\[([^\]]+)\].*CONTROLLER:\s*Disconnected worker\s+(\S+)'
+                    r'\[([^\]]+)\].*CONTROLLER:\s*Disconnected worker\s+(\S+)/(\S+)/(\d+)\s+device'
                 ),
+                # No spare workers: CONTROLLER: New connection from X - no spare Workers
                 'connection_rejected': re.compile(
                     r'\[([^\]]+)\].*CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*no spare Workers'
                 ),
+                # New device connection: Device: New connection from ::ffff:162.231.202.34 url /
+                'new_connection': re.compile(
+                    r'\[([^\]]+)\].*Device:\s*New connection from\s+(\S+)\s+url'
+                ),
+                # ID packet: OrangePi5-1/1042: Received id packet origin PokemodAegis-OrangePi5 - version 25112701
                 'device_id': re.compile(
-                    r'\[([^\]]+)\].*(\S+)/\d+:\s*Received id packet origin\s+(\S+)\s*-\s*version\s+(\d+)'
+                    r'\[([^\]]+)\].*(\S+)/(\d+):\s*Received id packet origin\s+(\S+)\s*-\s*version\s+(\d+)'
                 ),
+                # Memory report: OrangePi5/572:Memory = {"memFree":13038528,"memMitm":651628,"memStart":510180}
                 'memory': re.compile(
-                    r'\[([^\]]+)\].*(\S+)/\d+:Memory\s*=\s*(\{.*\})'
+                    r'\[([^\]]+)\].*(\S+)/(\d+):Memory\s*=\s*(\{[^}]+\})'
                 ),
+                # Unallocated connections: OrangePi5-1: unallocated connections = OrangePi5-1
+                'unallocated': re.compile(
+                    r'\[([^\]]+)\].*(\S+):\s*unallocated connections\s*=\s*(.*)'
+                ),
+                # Errors
                 'error': re.compile(
                     r'\[([^\]]+)\].*\[(ERROR|error)\].*rotom.*(.+)', re.I
                 ),
@@ -1520,28 +1539,75 @@ class DeviceMonitor:
         
         # Extract device/worker info based on event type
         if container == 'rotom':
+            # Device connected to worker: Found OrangePi5 connects to workerId OrangePi5-1
             if event_type == 'device_connect':
-                event['device'] = groups[1]
-                event['worker'] = groups[2]
+                event['device'] = groups[1] if len(groups) > 1 else None
+                event['worker'] = groups[2] if len(groups) > 2 else None
                 event['severity'] = 'success'
-            elif event_type in ('device_disconnect', 'worker_disconnect'):
-                event['device'] = groups[1]
-                event['severity'] = 'warning'
-            elif event_type == 'connection_rejected':
-                event['ip'] = groups[1]
-                event['severity'] = 'warning'
-            elif event_type == 'device_id':
-                event['device'] = groups[1]
-                event['origin'] = groups[2]
-                event['version'] = groups[3]
+            
+            # Worker allocation: New connection from ::ffff:172.18.0.11 - will allocate OrangePi5-1
+            elif event_type == 'worker_allocate':
+                event['source_ip'] = groups[1] if len(groups) > 1 else None
+                event['worker'] = groups[2] if len(groups) > 2 else None
                 event['severity'] = 'info'
+            
+            # Device disconnect: OrangePi5-1/1041: Disconnected
+            elif event_type == 'device_disconnect':
+                event['device'] = groups[1] if len(groups) > 1 else None
+                event['connection_id'] = groups[2] if len(groups) > 2 else None
+                event['severity'] = 'warning'
+            
+            # Worker disconnect: Disconnected worker New York_01/Gti6h7/1013 device
+            elif event_type == 'worker_disconnect':
+                event['instance'] = groups[1] if len(groups) > 1 else None  # New York_01
+                event['session'] = groups[2] if len(groups) > 2 else None   # Gti6h7
+                event['connection_id'] = groups[3] if len(groups) > 3 else None  # 1013
+                event['severity'] = 'warning'
+            
+            # Connection rejected - no spare workers
+            elif event_type == 'connection_rejected':
+                event['ip'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'warning'
+            
+            # New connection from device IP
+            elif event_type == 'new_connection':
+                event['device_ip'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+            
+            # ID packet: Received id packet origin PokemodAegis-OrangePi5 - version 25112701
+            elif event_type == 'device_id':
+                event['device'] = groups[1] if len(groups) > 1 else None
+                event['connection_id'] = groups[2] if len(groups) > 2 else None
+                event['origin'] = groups[3] if len(groups) > 3 else None
+                event['version'] = groups[4] if len(groups) > 4 else None
+                event['severity'] = 'info'
+            
+            # Memory report: OrangePi5/572:Memory = {"memFree":13038528,"memMitm":651628,"memStart":510180}
             elif event_type == 'memory':
-                event['device'] = groups[1]
+                device_name = groups[1] if len(groups) > 1 else None
+                event['device'] = device_name
+                event['connection_id'] = groups[2] if len(groups) > 2 else None
                 try:
-                    event['memory'] = json.loads(groups[2])
+                    mem_data = json.loads(groups[3]) if len(groups) > 3 else {}
+                    event['memory'] = mem_data
+                    event['mem_free_mb'] = round(mem_data.get('memFree', 0) / 1024, 1)
+                    event['mem_mitm_mb'] = round(mem_data.get('memMitm', 0) / 1024, 1)
+                    
+                    # Track memory in device state (silently)
+                    if device_name:
+                        self._update_device_memory(device_name, mem_data)
                 except:
                     pass
                 event['severity'] = 'info'
+                return None  # Don't emit memory events (too noisy), just track
+            
+            # Unallocated connections
+            elif event_type == 'unallocated':
+                event['device'] = groups[1] if len(groups) > 1 else None
+                event['unallocated'] = groups[2].strip() if len(groups) > 2 else ''
+                event['severity'] = 'info'
+                return None  # Don't emit, just track
+            
             elif event_type in ('error', 'timeout'):
                 event['message'] = groups[-1] if len(groups) > 1 else raw_line
                 event['severity'] = 'error'
@@ -1712,6 +1778,49 @@ class DeviceMonitor:
         
         # Emit via WebSocket
         self._emit_event(event)
+    
+    def _update_device_memory(self, device_name, mem_data):
+        """Update device memory stats without emitting an event"""
+        with self.lock:
+            if device_name not in self.devices:
+                self.devices[device_name] = {
+                    'name': device_name,
+                    'status': 'connected',
+                    'source': 'rotom',
+                    'events': [],
+                    'errors': 0
+                }
+            
+            dev = self.devices[device_name]
+            dev['last_memory_report'] = datetime.now().isoformat()
+            dev['memory'] = {
+                'free_kb': mem_data.get('memFree', 0),
+                'free_mb': round(mem_data.get('memFree', 0) / 1024, 1),
+                'mitm_kb': mem_data.get('memMitm', 0),
+                'mitm_mb': round(mem_data.get('memMitm', 0) / 1024, 1),
+                'start_kb': mem_data.get('memStart', 0)
+            }
+            
+            # Track memory history (last 10 readings)
+            if 'memory_history' not in dev:
+                dev['memory_history'] = []
+            dev['memory_history'].append({
+                'time': datetime.now().isoformat(),
+                'free_mb': dev['memory']['free_mb'],
+                'mitm_mb': dev['memory']['mitm_mb']
+            })
+            dev['memory_history'] = dev['memory_history'][-10:]
+            
+            # Check for low memory warning
+            free_mb = dev['memory']['free_mb']
+            if free_mb < 500:  # Less than 500MB free
+                self._emit_event({
+                    'type': 'low_memory_warning',
+                    'device': device_name,
+                    'free_mb': free_mb,
+                    'severity': 'warning',
+                    'message': f'Device {device_name} low on memory: {free_mb}MB free'
+                })
     
     def _check_disconnect_correlation(self, device, error_event):
         """Check if an error correlates with a recent disconnect"""
@@ -2196,6 +2305,12 @@ class DeviceMonitor:
         """
         Get recent device traffic from Rotom logs.
         Parses and returns structured device communication events.
+        
+        Real log format examples:
+        - [2025-12-01T09:09:26.082Z] [INFO] [rotom] CONTROLLER: Found OrangePi5 connects to workerId OrangePi5-1
+        - [2025-12-01T09:09:25.759Z] [INFO] [rotom] OrangePi5-1/1041: Disconnected; performing disconnection activities
+        - [2025-12-01T09:35:57.485Z] [INFO] [rotom] OrangePi5-1/1044: Received id packet origin PokemodAegis-OrangePi5 - version 25112701
+        - [2025-12-01T09:00:23.507Z] [INFO] [rotom] OrangePi5/572:Memory = {"memFree":13042488,"memMitm":639244,"memStart":510180}
         """
         traffic = []
         
@@ -2209,15 +2324,24 @@ class DeviceMonitor:
             
             logs = container.logs(tail=lines, timestamps=True).decode('utf-8', errors='ignore')
             
-            # Parse device-related log entries
+            # Parse device-related log entries (matching real Rotom format)
             device_patterns = {
-                'connect': re.compile(r'\[([^\]]+)\].*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)'),
-                'disconnect': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Disconnected'),
-                'id_packet': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Received id packet origin\s+(\S+)'),
-                'memory': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:Memory\s*=\s*(\{[^}]+\})'),
-                'data_received': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*Received\s+(\d+)\s+bytes'),
-                'heartbeat': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*(heartbeat|ping|pong)', re.I),
-                'error': re.compile(r'\[([^\]]+)\].*(\S+)/\d+:\s*.*(error|failed|timeout)', re.I),
+                # Device connected to worker
+                'connect': re.compile(r'\[([^\]]+)\].*CONTROLLER:\s*Found\s+(\S+)\s+connects\s+to\s+workerId\s+(\S+)'),
+                # Worker allocation
+                'allocate': re.compile(r'\[([^\]]+)\].*CONTROLLER:\s*New connection from\s+(\S+)\s*-\s*will allocate\s+(\S+)'),
+                # Worker disconnect from controller
+                'worker_disconnect': re.compile(r'\[([^\]]+)\].*CONTROLLER:\s*Disconnected worker\s+(\S+)/(\S+)/(\d+)'),
+                # Device disconnect
+                'disconnect': re.compile(r'\[([^\]]+)\].*(\S+)/(\d+):\s*Disconnected.*disconnection activities'),
+                # New connection from device IP
+                'new_connection': re.compile(r'\[([^\]]+)\].*Device:\s*New connection from\s+(\S+)'),
+                # ID packet with version
+                'id_packet': re.compile(r'\[([^\]]+)\].*(\S+)/(\d+):\s*Received id packet origin\s+(\S+)\s*-\s*version\s+(\d+)'),
+                # Memory report
+                'memory': re.compile(r'\[([^\]]+)\].*(\S+)/(\d+):Memory\s*=\s*(\{[^}]+\})'),
+                # Unallocated connections
+                'unallocated': re.compile(r'\[([^\]]+)\].*(\S+):\s*unallocated connections\s*=\s*(.*)'),
             }
             
             for line in logs.split('\n'):
@@ -2228,21 +2352,44 @@ class DeviceMonitor:
                         entry = {
                             'type': event_type,
                             'timestamp': groups[0] if groups else None,
-                            'device': groups[1] if len(groups) > 1 else None,
                             'raw': line[:300]
                         }
                         
-                        if event_type == 'connect' and len(groups) > 2:
-                            entry['worker'] = groups[2]
-                        elif event_type == 'id_packet' and len(groups) > 2:
-                            entry['origin'] = groups[2]
-                        elif event_type == 'memory' and len(groups) > 2:
+                        if event_type == 'connect':
+                            entry['device'] = groups[1] if len(groups) > 1 else None
+                            entry['worker'] = groups[2] if len(groups) > 2 else None
+                        elif event_type == 'allocate':
+                            entry['source_ip'] = groups[1] if len(groups) > 1 else None
+                            entry['worker'] = groups[2] if len(groups) > 2 else None
+                        elif event_type == 'worker_disconnect':
+                            entry['instance'] = groups[1] if len(groups) > 1 else None
+                            entry['session'] = groups[2] if len(groups) > 2 else None
+                            entry['connection_id'] = groups[3] if len(groups) > 3 else None
+                        elif event_type == 'disconnect':
+                            entry['device'] = groups[1] if len(groups) > 1 else None
+                            entry['connection_id'] = groups[2] if len(groups) > 2 else None
+                        elif event_type == 'new_connection':
+                            entry['device_ip'] = groups[1] if len(groups) > 1 else None
+                        elif event_type == 'id_packet':
+                            entry['device'] = groups[1] if len(groups) > 1 else None
+                            entry['connection_id'] = groups[2] if len(groups) > 2 else None
+                            entry['origin'] = groups[3] if len(groups) > 3 else None
+                            entry['version'] = groups[4] if len(groups) > 4 else None
+                        elif event_type == 'memory':
+                            entry['device'] = groups[1] if len(groups) > 1 else None
+                            entry['connection_id'] = groups[2] if len(groups) > 2 else None
                             try:
-                                entry['memory'] = json.loads(groups[2])
+                                mem_data = json.loads(groups[3]) if len(groups) > 3 else {}
+                                entry['memory'] = {
+                                    'free_mb': round(mem_data.get('memFree', 0) / 1024, 1),
+                                    'mitm_mb': round(mem_data.get('memMitm', 0) / 1024, 1),
+                                    'start_kb': mem_data.get('memStart', 0)
+                                }
                             except:
-                                entry['memory_raw'] = groups[2]
-                        elif event_type == 'data_received' and len(groups) > 2:
-                            entry['bytes'] = int(groups[2])
+                                pass
+                        elif event_type == 'unallocated':
+                            entry['device'] = groups[1] if len(groups) > 1 else None
+                            entry['unallocated'] = groups[2].strip() if len(groups) > 2 else ''
                         
                         traffic.append(entry)
                         break  # Only match first pattern per line
@@ -5245,6 +5392,35 @@ def api_monitor_workflow():
             'unique_devices': port_connections.get('unique_devices', 0)
         },
         'activity': summary.get('activity', {}),
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/monitor/memory')
+def api_monitor_memory():
+    """Get device memory statistics from Rotom reports"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    devices_with_memory = []
+    
+    with device_monitor.lock:
+        for name, dev in device_monitor.devices.items():
+            if 'memory' in dev:
+                devices_with_memory.append({
+                    'device': name,
+                    'status': dev.get('status', 'unknown'),
+                    'memory': dev.get('memory', {}),
+                    'last_report': dev.get('last_memory_report'),
+                    'history': dev.get('memory_history', [])
+                })
+    
+    # Sort by free memory (lowest first - most concerning)
+    devices_with_memory.sort(key=lambda x: x['memory'].get('free_mb', 99999))
+    
+    return jsonify({
+        'devices': devices_with_memory,
+        'total_devices': len(devices_with_memory),
+        'low_memory_devices': len([d for d in devices_with_memory if d['memory'].get('free_mb', 99999) < 500]),
         'timestamp': datetime.now().isoformat()
     })
 
