@@ -2219,6 +2219,10 @@ fi
 # =============================================================================
 # Step 9: Create databases
 # =============================================================================
+# Initialize verification status (will be set based on actual verification)
+DB_CREDENTIALS_VERIFIED=false
+DB_VERIFY_REASON="not yet verified"
+
 if [ "$SKIP_DB_SETUP" != "true" ]; then
   echo ""
   echo "[9/9] Creating databases..."
@@ -2246,8 +2250,11 @@ if [ "$SKIP_DB_SETUP" != "true" ]; then
   if [ $? -eq 0 ]; then
     print_success "Databases created: ${DBS[*]}"
     print_success "DB user '$DB_USER' created with full privileges."
+    DB_CREDENTIALS_VERIFIED=true
   else
     print_warning "Could not create databases. Docker's MariaDB will handle this on first run."
+    DB_CREDENTIALS_VERIFIED=false
+    DB_VERIFY_REASON="native MySQL command failed"
   fi
 else
   echo ""
