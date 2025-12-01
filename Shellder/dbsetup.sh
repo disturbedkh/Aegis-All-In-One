@@ -16,19 +16,33 @@
 #
 # This script has two modes:
 #
-#   SETUP MODE:
+#   SETUP MODE (First-time installation):
 #     - MariaDB installation (if needed)
 #     - System resource detection and MariaDB tuning
 #     - Database creation (dragonite, golbat, reactmap, koji, poracle)
 #     - User creation with proper permissions
 #
-#   MAINTENANCE MODE:
-#     - Status dashboard (MariaDB, databases, accounts, data counts)
-#     - Account cleanup (banned, invalid, auth-banned)
-#     - Data cleanup (stale pokestops, gyms, spawnpoints)
-#     - Nest management (unknown nests)
-#     - General database maintenance (optimize, analyze, repair)
-#     - Shellder Statistics Database (internal SQLite for Shellder tracking)
+#   MAINTENANCE MODE (Full MariaDB Management System):
+#     Server & Monitoring:
+#       - Server status dashboard (version, uptime, memory, queries)
+#       - Active connections / process list with kill capability
+#       - Performance tuning & recommendations
+#     
+#     Database Management:
+#       - Database browser with query console
+#       - Table browsing, structure, indexes
+#       - Custom SQL query execution
+#       - User & permission management
+#       - Backup & restore (single or all databases)
+#     
+#     Aegis Data Maintenance:
+#       - Account cleanup (banned, invalid, auth-banned)
+#       - Map data cleanup (stale pokestops, gyms, spawnpoints)
+#       - Nest management
+#       - Table optimization (analyze, repair, optimize)
+#     
+#     Shellder Internal:
+#       - Shellder's own SQLite database for stats/config tracking
 #
 # =============================================================================
 
@@ -1997,31 +2011,749 @@ shellder_db_menu() {
     done
 }
 
-# Main Maintenance Menu
+# =============================================================================
+# ENHANCED MARIADB MANAGEMENT FUNCTIONS
+# =============================================================================
+
+# Show server status
+show_server_status() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              MARIADB SERVER STATUS"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${WHITE}${BOLD}Server Information${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    
+    local version=$(run_query "" "SELECT VERSION()" | tail -1)
+    local uptime=$(run_query "" "SHOW STATUS LIKE 'Uptime'" | awk '{print $2}')
+    local uptime_days=$((uptime / 86400))
+    local uptime_hours=$(( (uptime % 86400) / 3600 ))
+    
+    echo -e "    Version:        ${CYAN}$version${NC}"
+    echo -e "    Uptime:         ${CYAN}${uptime_days}d ${uptime_hours}h${NC}"
+    
+    local threads=$(run_query "" "SHOW STATUS LIKE 'Threads_connected'" | awk '{print $2}')
+    local max_conn=$(run_query "" "SHOW VARIABLES LIKE 'max_connections'" | awk '{print $2}')
+    echo -e "    Connections:    ${CYAN}$threads / $max_conn${NC}"
+    echo ""
+    
+    echo -e "  ${WHITE}${BOLD}Memory Usage${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    local buffer_pool=$(run_query "" "SHOW VARIABLES LIKE 'innodb_buffer_pool_size'" | awk '{print $2}')
+    local buffer_pool_mb=$((buffer_pool / 1024 / 1024))
+    echo -e "    InnoDB Buffer Pool:  ${CYAN}${buffer_pool_mb}MB${NC}"
+    
+    local key_buffer=$(run_query "" "SHOW VARIABLES LIKE 'key_buffer_size'" | awk '{print $2}')
+    local key_buffer_mb=$((key_buffer / 1024 / 1024))
+    echo -e "    Key Buffer:          ${CYAN}${key_buffer_mb}MB${NC}"
+    echo ""
+    
+    echo -e "  ${WHITE}${BOLD}Query Statistics${NC}"
+    echo -e "  ${DIM}────────────────────────────────────────${NC}"
+    local questions=$(run_query "" "SHOW STATUS LIKE 'Questions'" | awk '{print $2}')
+    local slow_queries=$(run_query "" "SHOW STATUS LIKE 'Slow_queries'" | awk '{print $2}')
+    local qps=$((questions / (uptime + 1)))
+    echo -e "    Total Queries:   ${CYAN}$questions${NC}"
+    echo -e "    Queries/sec:     ${CYAN}$qps${NC}"
+    echo -e "    Slow Queries:    ${YELLOW}$slow_queries${NC}"
+    echo ""
+    
+    press_enter
+}
+
+# Show active connections/processes
+show_process_list() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              ACTIVE CONNECTIONS"
+    draw_box_bottom
+    echo ""
+    
+    run_query "" "SELECT ID, USER, HOST, DB, COMMAND, TIME, STATE FROM information_schema.PROCESSLIST ORDER BY TIME DESC"
+    echo ""
+    
+    echo "  Options:"
+    echo "    k) Kill a connection by ID"
+    echo "    0) Back"
+    echo ""
+    read -p "  Select: " choice
+    
+    case "$choice" in
+        k|K)
+            read -p "  Enter process ID to kill: " pid
+            if [ -n "$pid" ]; then
+                run_query "" "KILL $pid" 2>/dev/null
+                print_success "Process $pid killed"
+            fi
+            press_enter
+            ;;
+    esac
+}
+
+# Database browser
+database_browser() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              DATABASE BROWSER"
+        draw_box_bottom
+        echo ""
+        
+        echo -e "  ${WHITE}Available Databases:${NC}"
+        echo ""
+        local i=1
+        local dbs=()
+        while IFS= read -r db; do
+            [ -n "$db" ] && [ "$db" != "Database" ] && {
+                dbs+=("$db")
+                local size=$(run_query "" "SELECT ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db'" | tail -1)
+                echo "    $i) $db ${DIM}(${size:-0}MB)${NC}"
+                ((i++))
+            }
+        done < <(run_query "" "SHOW DATABASES")
+        
+        echo ""
+        echo "    0) Back"
+        echo ""
+        read -p "  Select database: " choice
+        
+        [ "$choice" = "0" ] && return
+        
+        if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#dbs[@]} ]; then
+            browse_database "${dbs[$((choice-1))]}"
+        fi
+    done
+}
+
+# Browse tables in a database
+browse_database() {
+    local db="$1"
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              DATABASE: $db"
+        draw_box_bottom
+        echo ""
+        
+        echo -e "  ${WHITE}Tables:${NC}"
+        echo ""
+        local i=1
+        local tables=()
+        while IFS= read -r table; do
+            [ -n "$table" ] && [ "$table" != "Tables_in_$db" ] && {
+                tables+=("$table")
+                local rows=$(run_query "$db" "SELECT COUNT(*) FROM \`$table\`" 2>/dev/null | tail -1)
+                echo "    $i) $table ${DIM}($rows rows)${NC}"
+                ((i++))
+            }
+        done < <(run_query "$db" "SHOW TABLES")
+        
+        echo ""
+        echo "    q) Run custom query"
+        echo "    0) Back"
+        echo ""
+        read -p "  Select table: " choice
+        
+        case "$choice" in
+            0) return ;;
+            q|Q) run_custom_query "$db" ;;
+            *)
+                if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#tables[@]} ]; then
+                    browse_table "$db" "${tables[$((choice-1))]}"
+                fi
+                ;;
+        esac
+    done
+}
+
+# Browse a specific table
+browse_table() {
+    local db="$1"
+    local table="$2"
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              TABLE: $db.$table"
+        draw_box_bottom
+        echo ""
+        
+        # Show table info
+        local rows=$(run_query "$db" "SELECT COUNT(*) FROM \`$table\`" | tail -1)
+        local size=$(run_query "" "SELECT ROUND((data_length + index_length) / 1024 / 1024, 2) FROM information_schema.tables WHERE table_schema = '$db' AND table_name = '$table'" | tail -1)
+        
+        echo -e "  Rows: ${CYAN}$rows${NC}    Size: ${CYAN}${size}MB${NC}"
+        echo ""
+        
+        echo "  Options:"
+        echo "    1) View structure (columns)"
+        echo "    2) View indexes"
+        echo "    3) View sample data (first 20 rows)"
+        echo "    4) Count rows"
+        echo "    5) Run custom query on this table"
+        echo "    6) Truncate table (DANGEROUS)"
+        echo "    7) Optimize table"
+        echo "    0) Back"
+        echo ""
+        read -p "  Select: " choice
+        
+        case "$choice" in
+            1)
+                echo ""
+                run_query "$db" "DESCRIBE \`$table\`"
+                press_enter
+                ;;
+            2)
+                echo ""
+                run_query "$db" "SHOW INDEX FROM \`$table\`"
+                press_enter
+                ;;
+            3)
+                echo ""
+                run_query "$db" "SELECT * FROM \`$table\` LIMIT 20"
+                press_enter
+                ;;
+            4)
+                echo ""
+                local count=$(run_query "$db" "SELECT COUNT(*) FROM \`$table\`" | tail -1)
+                echo -e "  Row count: ${CYAN}$count${NC}"
+                press_enter
+                ;;
+            5)
+                run_custom_query "$db" "$table"
+                ;;
+            6)
+                echo ""
+                echo -e "  ${RED}WARNING: This will delete ALL data in $table!${NC}"
+                read -p "  Type 'TRUNCATE' to confirm: " confirm
+                if [ "$confirm" = "TRUNCATE" ]; then
+                    run_query "$db" "TRUNCATE TABLE \`$table\`"
+                    print_success "Table truncated"
+                fi
+                press_enter
+                ;;
+            7)
+                echo ""
+                print_info "Optimizing $table..."
+                run_query "$db" "OPTIMIZE TABLE \`$table\`"
+                print_success "Table optimized"
+                press_enter
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+# Run custom SQL query
+run_custom_query() {
+    local db="$1"
+    local table="$2"
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              SQL QUERY CONSOLE"
+    draw_box_bottom
+    echo ""
+    
+    if [ -n "$db" ]; then
+        echo -e "  Database: ${CYAN}$db${NC}"
+    fi
+    if [ -n "$table" ]; then
+        echo -e "  Table: ${CYAN}$table${NC}"
+    fi
+    echo ""
+    echo -e "  ${DIM}Enter SQL query (end with semicolon, or 'q' to quit):${NC}"
+    echo ""
+    
+    while true; do
+        read -p "  SQL> " query
+        
+        [ "$query" = "q" ] || [ "$query" = "Q" ] && return
+        [ -z "$query" ] && continue
+        
+        echo ""
+        if [ -n "$db" ]; then
+            run_query "$db" "$query"
+        else
+            run_query "" "$query"
+        fi
+        echo ""
+    done
+}
+
+# Performance tuning menu
+performance_tuning_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              PERFORMANCE TUNING"
+        draw_box_bottom
+        echo ""
+        
+        echo "  Options:"
+        echo "    1) View current server variables"
+        echo "    2) Buffer pool analysis"
+        echo "    3) Query cache status"
+        echo "    4) Slow query analysis"
+        echo "    5) Connection pool status"
+        echo "    6) InnoDB status"
+        echo "    7) Recommended settings for this server"
+        echo "    0) Back"
+        echo ""
+        read -p "  Select: " choice
+        
+        case "$choice" in
+            1)
+                clear
+                echo ""
+                echo "  Key Server Variables:"
+                echo ""
+                run_query "" "SHOW VARIABLES WHERE Variable_name IN ('max_connections', 'innodb_buffer_pool_size', 'innodb_log_file_size', 'innodb_flush_log_at_trx_commit', 'query_cache_size', 'query_cache_type', 'key_buffer_size', 'tmp_table_size', 'max_heap_table_size', 'thread_cache_size', 'table_open_cache')"
+                press_enter
+                ;;
+            2)
+                clear
+                echo ""
+                echo "  InnoDB Buffer Pool Status:"
+                echo ""
+                run_query "" "SHOW STATUS WHERE Variable_name LIKE 'Innodb_buffer_pool%'"
+                echo ""
+                local reads=$(run_query "" "SHOW STATUS LIKE 'Innodb_buffer_pool_reads'" | awk '{print $2}')
+                local requests=$(run_query "" "SHOW STATUS LIKE 'Innodb_buffer_pool_read_requests'" | awk '{print $2}')
+                if [ "$requests" -gt 0 ]; then
+                    local hit_rate=$(echo "scale=2; (1 - $reads / $requests) * 100" | bc 2>/dev/null || echo "N/A")
+                    echo -e "  Buffer Pool Hit Rate: ${CYAN}${hit_rate}%${NC}"
+                fi
+                press_enter
+                ;;
+            3)
+                clear
+                echo ""
+                echo "  Query Cache Status:"
+                echo ""
+                run_query "" "SHOW STATUS LIKE 'Qcache%'"
+                press_enter
+                ;;
+            4)
+                clear
+                echo ""
+                echo "  Slow Query Status:"
+                echo ""
+                run_query "" "SHOW VARIABLES LIKE 'slow_query%'"
+                run_query "" "SHOW VARIABLES LIKE 'long_query_time'"
+                echo ""
+                local slow=$(run_query "" "SHOW STATUS LIKE 'Slow_queries'" | awk '{print $2}')
+                echo -e "  Total Slow Queries: ${YELLOW}$slow${NC}"
+                press_enter
+                ;;
+            5)
+                clear
+                echo ""
+                echo "  Connection Status:"
+                echo ""
+                run_query "" "SHOW STATUS LIKE 'Threads%'"
+                run_query "" "SHOW STATUS LIKE 'Connections'"
+                run_query "" "SHOW STATUS LIKE 'Max_used_connections'"
+                press_enter
+                ;;
+            6)
+                clear
+                echo ""
+                echo "  InnoDB Engine Status:"
+                echo ""
+                run_query "" "SHOW ENGINE INNODB STATUS" 2>/dev/null | head -100
+                echo ""
+                echo -e "  ${DIM}(Showing first 100 lines)${NC}"
+                press_enter
+                ;;
+            7)
+                show_tuning_recommendations
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+# Show tuning recommendations
+show_tuning_recommendations() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              TUNING RECOMMENDATIONS"
+    draw_box_bottom
+    echo ""
+    
+    # Get system info
+    local total_ram=$(free -b 2>/dev/null | awk '/Mem:/ {print $2}')
+    local total_ram_gb=$((total_ram / 1024 / 1024 / 1024))
+    
+    echo -e "  ${WHITE}System:${NC} ${total_ram_gb}GB RAM detected"
+    echo ""
+    
+    # Calculate recommendations
+    local recommended_buffer=$((total_ram * 70 / 100))
+    local recommended_buffer_gb=$((recommended_buffer / 1024 / 1024 / 1024))
+    
+    echo -e "  ${WHITE}Recommended Settings:${NC}"
+    echo ""
+    echo "  # For ${total_ram_gb}GB RAM server:"
+    echo ""
+    echo "  [mysqld]"
+    echo "  innodb_buffer_pool_size = ${recommended_buffer_gb}G"
+    echo "  innodb_log_file_size = 512M"
+    echo "  innodb_flush_log_at_trx_commit = 2"
+    echo "  max_connections = 500"
+    echo "  thread_cache_size = 50"
+    echo "  table_open_cache = 4000"
+    echo "  tmp_table_size = 256M"
+    echo "  max_heap_table_size = 256M"
+    echo ""
+    
+    echo -e "  ${DIM}These settings are in: mysql_data/mariadb.cnf${NC}"
+    
+    press_enter
+}
+
+# Backup management
+backup_management_menu() {
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "              DATABASE BACKUP MANAGEMENT"
+        draw_box_bottom
+        echo ""
+        
+        echo "  Options:"
+        echo "    1) Backup single database"
+        echo "    2) Backup all Aegis databases"
+        echo "    3) View existing backups"
+        echo "    4) Restore from backup"
+        echo "    5) Delete old backups"
+        echo "    0) Back"
+        echo ""
+        read -p "  Select: " choice
+        
+        case "$choice" in
+            1)
+                echo ""
+                echo "  Available databases:"
+                local i=1
+                for db in "${DBS[@]}"; do
+                    if db_exists "$db"; then
+                        echo "    $i) $db"
+                    else
+                        echo "    $i) $db ${DIM}(not exists)${NC}"
+                    fi
+                    ((i++))
+                done
+                echo ""
+                read -p "  Select database [1-${#DBS[@]}]: " db_choice
+                
+                if [[ "$db_choice" =~ ^[0-9]+$ ]] && [ "$db_choice" -ge 1 ] && [ "$db_choice" -le ${#DBS[@]} ]; then
+                    local db="${DBS[$((db_choice-1))]}"
+                    backup_single_database "$db"
+                fi
+                ;;
+            2)
+                backup_all_databases
+                ;;
+            3)
+                show_existing_backups
+                ;;
+            4)
+                restore_from_backup
+                ;;
+            5)
+                delete_old_backups
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+# Backup single database
+backup_single_database() {
+    local db="$1"
+    local backup_dir="backups/database"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    local backup_file="$backup_dir/${db}_${timestamp}.sql"
+    
+    mkdir -p "$backup_dir"
+    
+    echo ""
+    print_info "Backing up $db..."
+    
+    if command -v mysqldump &>/dev/null; then
+        mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+    elif command -v mariadb-dump &>/dev/null; then
+        mariadb-dump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+    else
+        # Try via Docker
+        docker exec database mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+    fi
+    
+    if [ -f "$backup_file" ] && [ -s "$backup_file" ]; then
+        local size=$(du -h "$backup_file" | cut -f1)
+        print_success "Backup created: $backup_file ($size)"
+        
+        # Fix ownership
+        [ -n "$REAL_USER" ] && chown -R "$REAL_USER:$REAL_GROUP" "$backup_dir" 2>/dev/null
+    else
+        print_error "Backup failed"
+        rm -f "$backup_file"
+    fi
+    
+    press_enter
+}
+
+# Backup all databases
+backup_all_databases() {
+    local backup_dir="backups/database"
+    local timestamp=$(date +%Y%m%d_%H%M%S)
+    
+    mkdir -p "$backup_dir"
+    
+    echo ""
+    for db in "${DBS[@]}"; do
+        if db_exists "$db"; then
+            print_info "Backing up $db..."
+            local backup_file="$backup_dir/${db}_${timestamp}.sql"
+            
+            if command -v mysqldump &>/dev/null; then
+                mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+            elif command -v mariadb-dump &>/dev/null; then
+                mariadb-dump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+            else
+                docker exec database mysqldump -u root -p"$MYSQL_ROOT_PASSWORD" "$db" > "$backup_file" 2>/dev/null
+            fi
+            
+            if [ -f "$backup_file" ] && [ -s "$backup_file" ]; then
+                print_success "$db backed up"
+            else
+                print_error "$db backup failed"
+                rm -f "$backup_file"
+            fi
+        fi
+    done
+    
+    [ -n "$REAL_USER" ] && chown -R "$REAL_USER:$REAL_GROUP" "$backup_dir" 2>/dev/null
+    
+    press_enter
+}
+
+# Show existing backups
+show_existing_backups() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              EXISTING BACKUPS"
+    draw_box_bottom
+    echo ""
+    
+    local backup_dir="backups/database"
+    
+    if [ ! -d "$backup_dir" ]; then
+        echo -e "  ${YELLOW}No backups found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo -e "  ${WHITE}Database Backups:${NC}"
+    echo ""
+    
+    ls -lh "$backup_dir"/*.sql 2>/dev/null | while read -r line; do
+        echo "    $line"
+    done
+    
+    if [ -z "$(ls "$backup_dir"/*.sql 2>/dev/null)" ]; then
+        echo -e "  ${YELLOW}No SQL backups found${NC}"
+    fi
+    
+    press_enter
+}
+
+# Restore from backup
+restore_from_backup() {
+    local backup_dir="backups/database"
+    
+    if [ ! -d "$backup_dir" ]; then
+        print_error "No backup directory found"
+        press_enter
+        return
+    fi
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              RESTORE FROM BACKUP"
+    draw_box_bottom
+    echo ""
+    
+    echo -e "  ${WHITE}Available backups:${NC}"
+    echo ""
+    
+    local i=1
+    local files=()
+    for file in "$backup_dir"/*.sql; do
+        [ -f "$file" ] || continue
+        files+=("$file")
+        local name=$(basename "$file")
+        local size=$(du -h "$file" | cut -f1)
+        echo "    $i) $name ($size)"
+        ((i++))
+    done
+    
+    if [ ${#files[@]} -eq 0 ]; then
+        echo -e "  ${YELLOW}No backups found${NC}"
+        press_enter
+        return
+    fi
+    
+    echo ""
+    echo "    0) Cancel"
+    echo ""
+    read -p "  Select backup to restore: " choice
+    
+    [ "$choice" = "0" ] && return
+    
+    if [[ "$choice" =~ ^[0-9]+$ ]] && [ "$choice" -ge 1 ] && [ "$choice" -le ${#files[@]} ]; then
+        local file="${files[$((choice-1))]}"
+        local name=$(basename "$file")
+        local db=$(echo "$name" | sed 's/_[0-9]*_[0-9]*.sql$//')
+        
+        echo ""
+        echo -e "  ${YELLOW}WARNING: This will overwrite data in database '$db'${NC}"
+        read -p "  Continue? (y/n) [n]: " confirm
+        
+        if [ "$confirm" = "y" ]; then
+            print_info "Restoring $db from $name..."
+            
+            if command -v mysql &>/dev/null; then
+                mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$db" < "$file" 2>/dev/null
+            else
+                docker exec -i database mysql -u root -p"$MYSQL_ROOT_PASSWORD" "$db" < "$file" 2>/dev/null
+            fi
+            
+            print_success "Database restored"
+        fi
+    fi
+    
+    press_enter
+}
+
+# Delete old backups
+delete_old_backups() {
+    local backup_dir="backups/database"
+    
+    echo ""
+    read -p "  Delete backups older than how many days? [7]: " days
+    days="${days:-7}"
+    
+    print_info "Finding backups older than $days days..."
+    
+    local count=$(find "$backup_dir" -name "*.sql" -mtime +$days 2>/dev/null | wc -l)
+    
+    if [ "$count" -eq 0 ]; then
+        echo -e "  ${GREEN}No old backups found${NC}"
+    else
+        echo "  Found $count backup(s) to delete"
+        read -p "  Delete them? (y/n) [n]: " confirm
+        
+        if [ "$confirm" = "y" ]; then
+            find "$backup_dir" -name "*.sql" -mtime +$days -delete 2>/dev/null
+            print_success "Deleted $count old backup(s)"
+        fi
+    fi
+    
+    press_enter
+}
+
+# Replication status (for future use)
+show_replication_status() {
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "              REPLICATION STATUS"
+    draw_box_bottom
+    echo ""
+    
+    local slave_status=$(run_query "" "SHOW SLAVE STATUS\G" 2>/dev/null)
+    
+    if [ -z "$slave_status" ] || [[ "$slave_status" == *"Empty"* ]]; then
+        echo -e "  ${DIM}Replication is not configured${NC}"
+    else
+        echo "$slave_status"
+    fi
+    
+    press_enter
+}
+
+# Main Maintenance Menu - Enhanced
 run_maintenance_mode() {
     # Check connection first
     setup_mysql_cmd
     if ! test_db_connection; then
         print_error "Cannot connect to MariaDB. Check root password in .env"
-        exit 1
+        press_enter
+        return
     fi
 
     while true; do
-        show_status_dashboard
-
-        echo "  ${WHITE}${BOLD}MariaDB Maintenance Options${NC}"
-        echo "  ${DIM}────────────────────────────────────────${NC}"
-        echo "    1) Account Cleanup"
-        echo "    2) Map Data Cleanup"
-        echo "    3) Nest Management"
-        echo "    4) General Database Maintenance"
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "         MARIADB DATABASE MANAGEMENT SYSTEM"
+        draw_box_line ""
+        draw_box_line "              Aegis AIO by The Pokemod Group"
+        draw_box_bottom
+        echo ""
+        
+        # Quick status line
+        local threads=$(run_query "" "SHOW STATUS LIKE 'Threads_connected'" 2>/dev/null | awk '{print $2}')
+        local uptime=$(run_query "" "SHOW STATUS LIKE 'Uptime'" 2>/dev/null | awk '{print $2}')
+        local uptime_days=$((${uptime:-0} / 86400))
+        echo -e "  ${DIM}Status: ${GREEN}●${NC} ${DIM}Connected | ${threads:-0} active connections | Uptime: ${uptime_days}d${NC}"
+        echo ""
+        
+        echo -e "  ${WHITE}${BOLD}Server & Monitoring${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    1) Server Status Dashboard"
+        echo "    2) Active Connections (Process List)"
+        echo "    3) Performance Tuning"
+        echo ""
+        
+        echo -e "  ${WHITE}${BOLD}Database Management${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    4) Database Browser (Query Console)"
         echo "    5) Database & User Management"
+        echo "    6) Backup & Restore"
         echo ""
-        echo "  ${WHITE}${BOLD}Shellder Internal (SQLite)${NC}"
-        echo "  ${DIM}────────────────────────────────────────${NC}"
-        echo "    6) Shellder Stats & Config DB (not MariaDB)"
+        
+        echo -e "  ${WHITE}${BOLD}Aegis Data Maintenance${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    7) Account Cleanup (banned, invalid)"
+        echo "    8) Map Data Cleanup (stale data)"
+        echo "    9) Nest Management"
+        echo "    t) Table Optimization"
         echo ""
-        echo "    7) Refresh Status"
+        
+        echo -e "  ${WHITE}${BOLD}Shellder Internal (SQLite - Not MariaDB)${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    s) Shellder Stats & Config Database"
+        echo ""
+        
+        echo "    r) Refresh"
         if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"
         else
@@ -2031,13 +2763,18 @@ run_maintenance_mode() {
         read -p "  Select option: " choice
 
         case $choice in
-            1) account_cleanup_menu ;;
-            2) map_data_cleanup_menu ;;
-            3) nest_management_menu ;;
-            4) general_maintenance_menu ;;
+            1) show_server_status ;;
+            2) show_process_list ;;
+            3) performance_tuning_menu ;;
+            4) database_browser ;;
             5) db_user_management_menu ;;
-            6) shellder_db_menu ;;
-            7) continue ;;
+            6) backup_management_menu ;;
+            7) account_cleanup_menu ;;
+            8) map_data_cleanup_menu ;;
+            9) nest_management_menu ;;
+            t|T) general_maintenance_menu ;;
+            s|S) shellder_db_menu ;;
+            r|R) continue ;;
             0) 
                 echo ""
                 if [ "$SHELLDER_LAUNCHER" = "1" ]; then
@@ -2075,26 +2812,26 @@ main() {
         clear
         echo ""
         draw_box_top
-        draw_box_line "      AEGIS DATABASE SETUP & MAINTENANCE"
+        draw_box_line "           MARIADB DATABASE MANAGER"
         draw_box_line ""
         draw_box_line "              By The Pokemod Group"
-        draw_box_line "              https://pokemod.dev/"
         draw_box_bottom
         echo ""
-        echo "  Select Mode:"
+        echo -e "  ${WHITE}${BOLD}Select Mode:${NC}"
         echo ""
-        echo "    1) Setup Mode"
-        echo "       - Install/configure MariaDB"
-        echo "       - Create databases and users"
-        echo "       - Performance tuning"
+        echo -e "  ${CYAN}1) Setup Mode${NC} ${DIM}(First-time installation)${NC}"
+        echo "       • Install/configure MariaDB server"
+        echo "       • Create Aegis databases (dragonite, golbat, etc.)"
+        echo "       • Create database user with permissions"
+        echo "       • Auto-tune for your server's resources"
         echo ""
-        echo "    2) Maintenance Mode"
-        echo "       - Status dashboard"
-        echo "       - Account cleanup"
-        echo "       - Data maintenance"
-        echo "       - Database optimization"
-        echo "       - Create missing DBs/users"
-        echo "       - Fix permissions"
+        echo -e "  ${CYAN}2) Maintenance Mode${NC} ${DIM}(Full MariaDB Management)${NC}"
+        echo "       • Server status & performance monitoring"
+        echo "       • Database browser & SQL query console"
+        echo "       • Backup & restore databases"
+        echo "       • Account & map data cleanup"
+        echo "       • Table optimization & repair"
+        echo "       • User & permission management"
         echo ""
         if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"

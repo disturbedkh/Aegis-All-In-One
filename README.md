@@ -215,7 +215,7 @@ bash Shellder/log_helper.sh --clear
 |--------|---------|-------------|
 | `shellder.sh` | **Main control panel** - unified interface to everything | Anytime |
 | `Shellder/setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
-| `Shellder/dbsetup.sh` | **MariaDB database** setup/maintenance (game data) | Database management |
+| `Shellder/dbsetup.sh` | **MariaDB Management System** (setup + full maintenance) | Database management |
 | `Shellder/check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
 | `Shellder/logs.sh` | **Docker container log viewer** (Dragonite, Golbat, etc.) | Monitoring services |
 | `Shellder/nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
@@ -228,6 +228,33 @@ bash Shellder/log_helper.sh --clear
 |--------|---------|
 | `Shellder/db_helper.sh` | Shellder's internal SQLite database (stats/config storage) |
 | `Shellder/log_helper.sh` | Shellder's operation log (for debugging Shellder scripts) |
+
+### MariaDB Management System
+
+The Database Manager (`Shellder/dbsetup.sh`) provides two modes:
+
+**Setup Mode** (First-time installation):
+- Install and configure MariaDB server
+- Auto-detect system resources and tune settings
+- Create Aegis databases (dragonite, golbat, reactmap, koji, poracle)
+- Create database user with proper permissions
+
+**Maintenance Mode** (Full MariaDB Management):
+
+| Category | Features |
+|----------|----------|
+| **Server Monitoring** | Status dashboard, uptime, memory usage, query stats |
+| **Connections** | View active connections, kill processes |
+| **Performance** | Buffer pool analysis, slow query stats, tuning recommendations |
+| **Database Browser** | Browse databases/tables, view structure, run custom SQL |
+| **Backup/Restore** | Backup single or all databases, restore from backup |
+| **Data Cleanup** | Account cleanup, map data cleanup, nest management |
+| **Optimization** | Analyze, optimize, repair tables |
+
+```bash
+# Access via Shellder menu (option 2) or directly:
+sudo bash Shellder/dbsetup.sh
+```
 
 ### File System Manager
 
