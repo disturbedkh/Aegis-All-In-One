@@ -1056,7 +1056,21 @@ git_pull() {
         echo -e "${DIM}────────────────────────────────────────────────────────────────────────${NC}"
         echo -e "${GREEN}${BOLD}Update complete!${NC}"
         echo ""
-        echo "Tip: Run 'Update & Rebuild' (option u) to apply container updates"
+        
+        # Check if shellder.sh itself was updated
+        if git diff HEAD~1 --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
+            echo -e "${YELLOW}━━━ Script files were updated ━━━${NC}"
+            echo ""
+            echo -e "The control panel scripts have been updated."
+            echo -e "Restarting to apply changes..."
+            echo ""
+            sleep 2
+            
+            # Re-execute this script to load new code
+            exec bash "$0"
+        else
+            echo "Tip: Run 'Update & Rebuild' (option u) to apply container updates"
+        fi
     else
         echo ""
         echo -e "${RED}Pull failed!${NC}"
@@ -1174,6 +1188,15 @@ update_and_rebuild() {
     # Show status
     echo "Container status:"
     docker compose ps
+    
+    echo ""
+    
+    # Check if shellder.sh itself was updated and restart if needed
+    if git diff HEAD~1 --name-only 2>/dev/null | grep -q "shellder.sh\|Shellder/"; then
+        echo -e "${YELLOW}Script files were updated. Restarting control panel...${NC}"
+        sleep 2
+        exec bash "$0"
+    fi
     
     press_enter
 }
