@@ -64,7 +64,7 @@ fi
 # Set up trap to restore ownership on exit
 cleanup_on_exit() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-        chown "$REAL_USER:$REAL_GROUP" *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" Shellder/*.sh *.yaml *.yml *.md 2>/dev/null || true
     fi
 }
 trap cleanup_on_exit EXIT
@@ -855,7 +855,7 @@ run_full_check() {
         print_fail "Configuration has $ERRORS error(s) that need to be fixed!"
         echo ""
         echo "  Common fixes:"
-        echo "    1. Run setup.sh to generate proper .env file"
+        echo "    1. Run Shellder/setup.sh to generate proper .env file"
         echo "    2. Copy *-default.* files to active config names"
         echo "    3. Update passwords in config files to match .env"
         echo "    4. Run: docker compose up -d --force-recreate"
@@ -902,7 +902,7 @@ check_files_detailed() {
 
 check_env_detailed() {
     if [ ! -f ".env" ]; then
-        print_fail ".env file not found! Run setup.sh first."
+        print_fail ".env file not found! Run Shellder/setup.sh first."
         return
     fi
 

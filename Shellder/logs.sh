@@ -205,7 +205,7 @@ fi
 # Set up trap to restore ownership on exit
 cleanup_on_exit() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-        chown "$REAL_USER:$REAL_GROUP" *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" Shellder/*.sh *.yaml *.yml *.md 2>/dev/null || true
         chown -R "$REAL_USER:$REAL_GROUP" unown 2>/dev/null || true
     fi
 }

@@ -48,7 +48,7 @@ echo ""
 
 # Check if running as root
 if [ "$EUID" -ne 0 ]; then
-  print_error "Please run this script as root (e.g., sudo bash setup.sh)"
+  print_error "Please run this script as root (e.g., sudo bash Shellder/setup.sh)"
   exit 1
 fi
 
@@ -110,7 +110,7 @@ restore_all_ownership() {
         # Explicitly fix ownership on specific config files that are commonly modified
         local files_to_fix=(
             ".env"
-            "setup.sh"
+            "Shellder/setup.sh"
             "shellder.sh"
             "README.md"
             "docker-compose.yaml"
@@ -167,12 +167,14 @@ restore_all_ownership() {
             fi
         done
         
-        # Fix ownership on all shell scripts in current directory
-        for script in *.sh; do
+        # Fix ownership on all shell scripts in Shellder directory
+        for script in Shellder/*.sh; do
             if [ -f "$script" ]; then
                 chown "$REAL_USER:$REAL_GROUP" "$script" 2>/dev/null || true
             fi
         done
+        # Also fix shellder.sh in root
+        chown "$REAL_USER:$REAL_GROUP" shellder.sh 2>/dev/null || true
         
         # Fix ownership on all root-level config files
         for config in *.toml *.yaml *.yml *.json *.md *.txt; do
@@ -190,8 +192,8 @@ cleanup_on_exit() {
     # Only run cleanup if we have a valid user
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
         # Quick ownership fix on common files
-        chown "$REAL_USER:$REAL_GROUP" .env setup.sh shellder.sh README.md docker-compose.yaml 2>/dev/null || true
-        chown "$REAL_USER:$REAL_GROUP" *.sh *.md *.yaml *.yml *.toml *.json *.txt 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" .env shellder.sh README.md docker-compose.yaml 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" Shellder/*.sh *.md *.yaml *.yml *.toml *.json *.txt 2>/dev/null || true
         chown -R "$REAL_USER:$REAL_GROUP" unown reactmap Poracle 2>/dev/null || true
     fi
 }
@@ -2222,7 +2224,7 @@ else
             if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
               print_success "Password updated for user '$DB_USER'."
             else
-              print_error "Failed to update password. Run 'dbsetup.sh' to fix manually."
+              print_error "Failed to update password. Run 'Shellder/dbsetup.sh' to fix manually."
             fi
             ;;
           2)
@@ -2230,7 +2232,7 @@ else
             print_warning "Update .env, reactmap/local.json, and unown/*.toml files manually."
             ;;
           *)
-            print_info "Skipped. Run 'dbsetup.sh' later to fix database user."
+            print_info "Skipped. Run 'Shellder/dbsetup.sh' later to fix database user."
             ;;
         esac
       fi
@@ -2249,7 +2251,7 @@ else
       if docker exec database $MYSQL_CMD -u root -p"$MYSQL_ROOT_PASSWORD" -e "$SQL" 2>/dev/null; then
         print_success "DB user '$DB_USER' created with full privileges."
       else
-        print_error "Could not create user. Run 'dbsetup.sh' after setup completes."
+        print_error "Could not create user. Run 'Shellder/dbsetup.sh' after setup completes."
       fi
     fi
     
@@ -2263,7 +2265,7 @@ else
   else
     print_info "Database container not running."
     print_info "After running 'docker compose up -d', the user will be created from init/01.sql"
-    print_warning "If database already exists, run 'dbsetup.sh' to create the user."
+    print_warning "If database already exists, run 'Shellder/dbsetup.sh' to create the user."
   fi
 fi
 

@@ -55,7 +55,7 @@ fi
 # Set up trap to restore ownership on exit
 cleanup_on_exit() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-        chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml Shellder/*.sh *.yaml *.yml *.md 2>/dev/null || true
     fi
 }
 trap cleanup_on_exit EXIT
@@ -2009,7 +2009,7 @@ return_to_main() {
 # Check if running as root
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        print_error "Please run this script as root (e.g., sudo bash nginx-setup.sh)"
+        print_error "Please run this script as root (e.g., sudo bash Shellder/nginx-setup.sh)"
         exit 1
     fi
 }

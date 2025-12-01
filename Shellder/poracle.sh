@@ -60,7 +60,7 @@ fi
 # Set up trap to restore ownership on exit
 cleanup_on_exit() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
-        chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" docker-compose.yaml Shellder/*.sh *.yaml *.yml *.md 2>/dev/null || true
         chown -R "$REAL_USER:$REAL_GROUP" Poracle unown 2>/dev/null || true
     fi
 }
@@ -157,7 +157,7 @@ print_success "Found docker-compose.yaml"
 # Check if .env exists
 if [ ! -f ".env" ]; then
     print_error ".env file not found. Have you run the initial setup script?"
-    print_info "Run: sudo bash setup.sh"
+    print_info "Run: sudo bash Shellder/setup.sh"
     exit 1
 fi
 

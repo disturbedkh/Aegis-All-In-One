@@ -144,7 +144,7 @@ check_mariadb() {
 # Check if a script exists
 check_script() {
     local script=$1
-    if [ -f "$SCRIPT_DIR/$script" ]; then
+    if [ -f "$SCRIPT_DIR/Shellder/$script" ]; then
         echo "found"
     else
         echo "missing"
@@ -374,7 +374,7 @@ show_status_dashboard() {
     local missing_count=0
     
     for script in "${scripts[@]}"; do
-        if [ -f "$SCRIPT_DIR/$script" ]; then
+        if [ -f "$SCRIPT_DIR/Shellder/$script" ]; then
             ((script_count++))
         else
             ((missing_count++))
@@ -2260,7 +2260,7 @@ run_script() {
     local script=$1
     local name=$2
     
-    if [ -f "$SCRIPT_DIR/$script" ]; then
+    if [ -f "$SCRIPT_DIR/Shellder/$script" ]; then
         clear
         echo ""
         echo -e "${CYAN}Launching $name...${NC}"
@@ -2271,12 +2271,12 @@ run_script() {
         # - Indicate it was launched from shellder.sh (SHELLDER_LAUNCHER)
         # - Pass the original user info (REAL_USER, REAL_GROUP) to prevent root-locked files
         # Note: We don't use sudo here because shellder.sh is already running as root
-        SHELLDER_LAUNCHER=1 REAL_USER="$REAL_USER" REAL_GROUP="$REAL_GROUP" bash "$SCRIPT_DIR/$script"
+        SHELLDER_LAUNCHER=1 REAL_USER="$REAL_USER" REAL_GROUP="$REAL_GROUP" bash "$SCRIPT_DIR/Shellder/$script"
         
         # Script completed - no need for extra prompt since scripts handle their own exit
     else
         echo ""
-        echo -e "${RED}Script not found: $script${NC}"
+        echo -e "${RED}Script not found: Shellder/$script${NC}"
         press_enter
     fi
 }

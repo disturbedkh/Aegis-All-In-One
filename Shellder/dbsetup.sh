@@ -89,7 +89,7 @@ fi
 
 check_root() {
     if [ "$EUID" -ne 0 ]; then
-        print_error "Please run this script as root (e.g., sudo bash dbsetup.sh)"
+        print_error "Please run this script as root (e.g., sudo bash Shellder/dbsetup.sh)"
         exit 1
     fi
 }
@@ -99,7 +99,7 @@ restore_ownership() {
     if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
         chown "$REAL_USER:$REAL_GROUP" mysql_data/mariadb.cnf 2>/dev/null || true
         chown "$REAL_USER:$REAL_GROUP" .env 2>/dev/null || true
-        chown "$REAL_USER:$REAL_GROUP" *.sh *.yaml *.yml *.md 2>/dev/null || true
+        chown "$REAL_USER:$REAL_GROUP" Shellder/*.sh *.yaml *.yml *.md 2>/dev/null || true
         chown -R "$REAL_USER:$REAL_GROUP" mysql_data 2>/dev/null || true
     fi
 }

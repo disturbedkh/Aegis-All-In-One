@@ -114,13 +114,13 @@ Shellder serves as the **unified command center** for your entire Pokémon mappi
 | Script | Purpose | When to Run |
 |--------|---------|-------------|
 | `shellder.sh` | **Main control panel** - unified interface to everything | Anytime |
-| `setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
-| `dbsetup.sh` | Database setup and maintenance | Initial setup or maintenance |
-| `check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
-| `logs.sh` | Docker log viewer, analyzer, and maintenance | Monitoring, debugging |
-| `nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
-| `poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
-| `fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
+| `Shellder/setup.sh` | Initial setup wizard - Docker, configs, passwords, databases | First time setup |
+| `Shellder/dbsetup.sh` | Database setup and maintenance | Initial setup or maintenance |
+| `Shellder/check.sh` | Status dashboard & configuration validation | Troubleshooting, health checks |
+| `Shellder/logs.sh` | Docker log viewer, analyzer, and maintenance | Monitoring, debugging |
+| `Shellder/nginx-setup.sh` | Nginx, SSL, firewall, and authentication | External access setup |
+| `Shellder/poracle.sh` | Discord/Telegram notification bot setup | When you want alerts |
+| `Shellder/fletchling.sh` | Pokémon nest detection setup | After creating Koji project |
 
 ### Quick Start with Shellder
 
@@ -226,12 +226,12 @@ This limits logs to 300MB total (3 files × 100MB each) with automatic rotation 
 
 ---
 
-### `setup.sh` - Initial Setup
+### `Shellder/setup.sh` - Initial Setup
 
 The main setup script that prepares your entire environment.
 
 ```bash
-sudo bash ./setup.sh
+sudo bash ./Shellder/setup.sh
 ```
 
 **What it does:**
@@ -249,12 +249,12 @@ sudo bash ./setup.sh
 
 ---
 
-### `nginx-setup.sh` - Security Setup & Management
+### `Shellder/nginx-setup.sh` - Security Setup & Management
 
 **Dual-mode script** for initial security setup AND ongoing maintenance.
 
 ```bash
-sudo bash ./nginx-setup.sh
+sudo bash ./Shellder/nginx-setup.sh
 ```
 
 **Two Modes:**
@@ -324,21 +324,21 @@ Manage existing security configuration with colorful status dashboard:
 
 **Command Line Options:**
 ```bash
-./nginx-setup.sh              # Interactive mode selection
-./nginx-setup.sh -s           # Setup mode directly
-./nginx-setup.sh -m           # Maintenance mode directly
-./nginx-setup.sh --status     # Show status dashboard only
-./nginx-setup.sh --help       # Help
+./Shellder/nginx-setup.sh              # Interactive mode selection
+./Shellder/nginx-setup.sh -s           # Setup mode directly
+./Shellder/nginx-setup.sh -m           # Maintenance mode directly
+./Shellder/nginx-setup.sh --status     # Show status dashboard only
+./Shellder/nginx-setup.sh --help       # Help
 ```
 
 ---
 
-### `dbsetup.sh` - Database Setup & Maintenance
+### `Shellder/dbsetup.sh` - Database Setup & Maintenance
 
 Dual-mode script for initial database setup and ongoing maintenance.
 
 ```bash
-sudo bash ./dbsetup.sh
+sudo bash ./Shellder/dbsetup.sh
 ```
 
 **Two Modes:**
@@ -403,12 +403,12 @@ Interactive dashboard with:
 
 ---
 
-### `check.sh` - Configuration & Status Checker
+### `Shellder/check.sh` - Configuration & Status Checker
 
 Interactive status dashboard and configuration validator.
 
 ```bash
-sudo bash ./check.sh
+sudo bash ./Shellder/check.sh
 ```
 
 **Interactive Menu Options:**
@@ -421,10 +421,10 @@ sudo bash ./check.sh
 
 **Command Line Options:**
 ```bash
-./check.sh -d    # Status dashboard only
-./check.sh -f    # Full configuration check
-./check.sh -q    # Quick check (non-interactive, for scripts)
-./check.sh -h    # Help
+./Shellder/check.sh -d    # Status dashboard only
+./Shellder/check.sh -f    # Full configuration check
+./Shellder/check.sh -q    # Quick check (non-interactive, for scripts)
+./Shellder/check.sh -h    # Help
 ```
 
 **Status Dashboard Shows:**
@@ -448,12 +448,12 @@ sudo bash ./check.sh
 
 ---
 
-### `poracle.sh` - Alert Bot Setup
+### `Shellder/poracle.sh` - Alert Bot Setup
 
 Sets up Poracle for Discord/Telegram notifications.
 
 ```bash
-sudo bash ./poracle.sh
+sudo bash ./Shellder/poracle.sh
 ```
 
 **What it does:**
@@ -465,12 +465,12 @@ sudo bash ./poracle.sh
 
 ---
 
-### `fletchling.sh` - Nest Detection Setup
+### `Shellder/fletchling.sh` - Nest Detection Setup
 
 Configures Fletchling for Pokemon nest detection and display.
 
 ```bash
-sudo bash ./fletchling.sh
+sudo bash ./Shellder/fletchling.sh
 ```
 
 **What it does:**
@@ -483,12 +483,12 @@ sudo bash ./fletchling.sh
 
 ---
 
-### `docker-osm-importer.sh` - OpenStreetMap Import
+### `Shellder/docker-osm-importer.sh` - OpenStreetMap Import
 
 Imports OpenStreetMap data for park boundaries and features.
 
 ```bash
-sudo bash ./docker-osm-importer.sh
+sudo bash ./Shellder/docker-osm-importer.sh
 ```
 
 **What it does:**
@@ -498,12 +498,12 @@ sudo bash ./docker-osm-importer.sh
 
 ---
 
-### `logs.sh` - Docker Log Manager & Analyzer
+### `Shellder/logs.sh` - Docker Log Manager & Analyzer
 
 Comprehensive log analysis, monitoring, and maintenance tool with special Xilriws management.
 
 ```bash
-sudo bash ./logs.sh
+sudo bash ./Shellder/logs.sh
 ```
 
 **Main Dashboard Shows:**
@@ -620,12 +620,12 @@ All log viewers display clear instructions:
 
 **Command Line Options:**
 ```bash
-./logs.sh              # Interactive menu
-./logs.sh -h           # Quick health check
-./logs.sh -x           # Xilriws status & proxy management
-./logs.sh --xilriws-monitor  # Xilriws live monitor mode
-./logs.sh --clear-all  # Clear all logs
-./logs.sh --help       # Help
+./Shellder/logs.sh              # Interactive menu
+./Shellder/logs.sh -h           # Quick health check
+./Shellder/logs.sh -x           # Xilriws status & proxy management
+./Shellder/logs.sh --xilriws-monitor  # Xilriws live monitor mode
+./Shellder/logs.sh --clear-all  # Clear all logs
+./Shellder/logs.sh --help       # Help
 ```
 
 ---
@@ -653,13 +653,13 @@ The control panel provides a unified interface to:
 
 ```bash
 # Run setup (creates configs, databases, passwords)
-sudo bash ./setup.sh
+sudo bash ./Shellder/setup.sh
 
 # Start all services
 docker compose up -d
 
 # (Optional) Secure for external access
-sudo bash ./nginx-setup.sh
+sudo bash ./Shellder/nginx-setup.sh
 ```
 
 Then visit http://localhost:6001 for ReactMap.
@@ -678,7 +678,7 @@ cd Aegis-All-In-One
 ### Step 2: Run the Setup Script
 
 ```bash
-sudo bash ./setup.sh
+sudo bash ./Shellder/setup.sh
 ```
 
 The setup script will:
@@ -814,7 +814,7 @@ Pokemon GO API proxy service that:
 Send Pokemon spawn, raid, and quest notifications to Discord or Telegram.
 
 ```bash
-sudo bash ./poracle.sh
+sudo bash ./Shellder/poracle.sh
 ```
 
 The script guides you through:
@@ -831,7 +831,7 @@ Display Pokemon nests on ReactMap.
 **Prerequisites**: Create a project with geofences in Koji first.
 
 ```bash
-sudo bash ./fletchling.sh
+sudo bash ./Shellder/fletchling.sh
 ```
 
 The script will:
@@ -868,7 +868,7 @@ sudo bash ./shellder.sh
 # Select option 5) Log Manager, then press 'x'
 
 # Or directly
-sudo bash ./logs.sh -x
+sudo bash ./Shellder/logs.sh -x
 ```
 
 ### Xilriws Status Dashboard
@@ -941,7 +941,7 @@ The live monitoring mode provides continuous oversight:
 
 ```bash
 # Start directly from command line
-sudo bash ./logs.sh --xilriws-monitor
+sudo bash ./Shellder/logs.sh --xilriws-monitor
 ```
 
 **Features:**
@@ -1001,13 +1001,13 @@ http://username:password@192.168.1.1:8080
 
 ```bash
 # Xilriws status menu
-sudo bash ./logs.sh -x
+sudo bash ./Shellder/logs.sh -x
 
 # Start live monitoring
-sudo bash ./logs.sh --xilriws-monitor
+sudo bash ./Shellder/logs.sh --xilriws-monitor
 
 # Quick health check (all services)
-sudo bash ./logs.sh -h
+sudo bash ./Shellder/logs.sh -h
 ```
 
 ---
@@ -1026,7 +1026,7 @@ If you plan to:
 ### Run the Security Script
 
 ```bash
-sudo bash ./nginx-setup.sh
+sudo bash ./Shellder/nginx-setup.sh
 ```
 
 ### Security Features
@@ -1095,7 +1095,7 @@ The security script guides you through 11 steps:
 After initial setup, use **Maintenance Mode** to manage your security configuration:
 
 ```bash
-sudo bash ./nginx-setup.sh -m
+sudo bash ./Shellder/nginx-setup.sh -m
 ```
 
 This provides a colorful dashboard showing:
@@ -1112,20 +1112,20 @@ This provides a colorful dashboard showing:
 Run the configuration checker to ensure everything is properly configured:
 
 ```bash
-sudo bash ./check.sh
+sudo bash ./Shellder/check.sh
 ```
 
 This provides an interactive menu with:
 - **Status Dashboard** - Quick health overview of Docker, MariaDB, containers
 - **Full Configuration Check** - Detailed validation with pass/warn/fail counts
-- **Quick Check** - Use `./check.sh -q` for non-interactive validation
+- **Quick Check** - Use `./Shellder/check.sh -q` for non-interactive validation
 
 ### Database Management
 
 The setup script automatically tunes MariaDB based on your hardware during initial setup. For ongoing database maintenance:
 
 ```bash
-sudo bash ./dbsetup.sh
+sudo bash ./Shellder/dbsetup.sh
 ```
 
 **Choose Maintenance Mode to:**
@@ -1386,7 +1386,7 @@ After installation, complete these steps to start mapping:
 ### Before Asking for Help
 
 1. Check container logs: `docker logs <container>`
-2. Run the config checker: `sudo bash ./check.sh`
+2. Run the config checker: `sudo bash ./Shellder/check.sh`
 3. Search Discord for similar issues
 4. Provide logs and error messages when asking
 
