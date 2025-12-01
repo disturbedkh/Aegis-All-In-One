@@ -106,8 +106,31 @@ Shellder serves as the **unified command center** for your entire Pokémon mappi
 | **Database Administration** | MariaDB tuning, user management, cleanup, and maintenance operations |
 | **Health Monitoring** | Real-time status dashboard, configuration validation, and troubleshooting tools |
 | **Log Analysis** | View, search, and manage Docker logs across all services |
+| **Statistics Database** | Persistent SQLite database for all-time stats (survives log clearing) |
 | **Update Management** | Git pulls, Docker image updates, and stack rebuilds with config preservation |
 | **Optional Features** | Easy setup for Poracle (alerts) and Fletchling (nest detection) |
+
+### Shellder Statistics Database
+
+Shellder includes a built-in SQLite database (`Shellder/shellder.db`) that stores persistent statistics across all scripts. This means you can:
+
+- **View all-time proxy statistics** even after Xilriws logs are cleared
+- **Track historical error counts** by service and error type
+- **Monitor container health trends** over time
+- **See log summaries** for the past 30 days
+
+**Access via:**
+- `logs.sh` → "All-Time Statistics" menu option
+- `dbsetup.sh` → "Shellder Statistics Database" in maintenance mode
+
+**Recorded Statistics:**
+| Category | Data Tracked |
+|----------|--------------|
+| **Proxy Stats** | Total requests, success/fail counts, response times, per-proxy performance |
+| **Error Stats** | Error type, occurrence count, first/last seen, by service |
+| **Container Stats** | Start/restart/crash counts, total uptime, status history |
+| **Log Summaries** | Daily line counts, error/warning counts per service |
+| **System Events** | Important events logged with timestamps |
 
 ### Shellder Scripts
 

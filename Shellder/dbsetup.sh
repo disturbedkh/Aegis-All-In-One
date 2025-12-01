@@ -59,6 +59,12 @@ draw_box_line_colored() {
 MYSQL_CMD=""
 DBS=("dragonite" "golbat" "reactmap" "koji" "poracle")
 
+# Source Shellder database helper
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/db_helper.sh" ]; then
+    source "$SCRIPT_DIR/db_helper.sh"
+fi
+
 # Get the original user who called sudo (to prevent files being locked to root)
 # Check if REAL_USER was passed from shellder.sh (preferred), otherwise use SUDO_USER
 if [ -n "$REAL_USER" ] && [ "$REAL_USER" != "root" ]; then
@@ -1500,6 +1506,235 @@ if [ $? -eq 0 ]; then
     done
 }
 
+# =============================================================================
+# SHELLDER STATISTICS DATABASE MENU
+# =============================================================================
+
+shellder_db_menu() {
+    # Check if sqlite3 is available
+    if ! command -v sqlite3 &> /dev/null; then
+        print_error "sqlite3 is not installed. Install it with: apt install sqlite3"
+        press_enter
+        return
+    fi
+    
+    # Initialize database if needed
+    if ! check_shellder_db 2>/dev/null; then
+        print_info "Initializing Shellder statistics database..."
+        init_shellder_db
+    fi
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "         SHELLDER STATISTICS DATABASE"
+        draw_box_bottom
+        echo ""
+        
+        # Show database info
+        local db_size=$(get_db_size)
+        echo -e "  ${WHITE}Database:${NC} $SHELLDER_DB"
+        echo -e "  ${WHITE}Size:${NC} $db_size"
+        echo ""
+        
+        echo "  ${WHITE}${BOLD}View Statistics${NC}"
+        echo "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    1) All-Time Proxy Stats (Xilriws)"
+        echo "    2) All-Time Error Stats"
+        echo "    3) All-Time Container Stats"
+        echo "    4) Log Summaries (last 7 days)"
+        echo "    5) Recent System Events"
+        echo "    6) Full Database Statistics"
+        echo ""
+        echo "  ${WHITE}${BOLD}Maintenance${NC}"
+        echo "  ${DIM}────────────────────────────────────────${NC}"
+        echo "    7) Optimize Database (Vacuum)"
+        echo "    8) Clear Old Records (30+ days)"
+        echo "    9) Backup Database"
+        echo "    e) Export Table to CSV"
+        echo "    r) Reset All Statistics"
+        echo "    i) Check Database Integrity"
+        echo ""
+        echo "    0) Back"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         ALL-TIME PROXY STATISTICS"
+                draw_box_bottom
+                echo ""
+                
+                local summary=$(get_proxy_stats_summary)
+                if [ -n "$summary" ]; then
+                    IFS='|' read -r total_proxies total_req total_success total_failed total_timeout success_rate <<< "$summary"
+                    echo -e "  ${WHITE}Summary:${NC}"
+                    echo -e "    Total Proxies:    ${CYAN}$total_proxies${NC}"
+                    echo -e "    Total Requests:   ${CYAN}$total_req${NC}"
+                    echo -e "    Successful:       ${GREEN}$total_success${NC}"
+                    echo -e "    Failed:           ${RED}$total_failed${NC}"
+                    echo -e "    Timeouts:         ${YELLOW}$total_timeout${NC}"
+                    echo -e "    Success Rate:     ${CYAN}${success_rate}%${NC}"
+                    echo ""
+                fi
+                
+                echo -e "  ${WHITE}Individual Proxy Stats:${NC}"
+                echo ""
+                get_proxy_stats_all_time
+                echo ""
+                press_enter
+                ;;
+            2)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         ALL-TIME ERROR STATISTICS"
+                draw_box_bottom
+                echo ""
+                
+                echo -e "  ${WHITE}Error Summary by Service:${NC}"
+                echo ""
+                get_error_summary
+                echo ""
+                echo -e "  ${WHITE}Top 50 Errors (All Time):${NC}"
+                echo ""
+                get_error_stats_all_time
+                echo ""
+                press_enter
+                ;;
+            3)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         ALL-TIME CONTAINER STATISTICS"
+                draw_box_bottom
+                echo ""
+                get_container_stats_all_time
+                echo ""
+                press_enter
+                ;;
+            4)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         LOG SUMMARIES (LAST 7 DAYS)"
+                draw_box_bottom
+                echo ""
+                get_log_summaries "" 7
+                echo ""
+                press_enter
+                ;;
+            5)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         RECENT SYSTEM EVENTS"
+                draw_box_bottom
+                echo ""
+                get_recent_events 30
+                echo ""
+                press_enter
+                ;;
+            6)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "         DATABASE STATISTICS"
+                draw_box_bottom
+                echo ""
+                get_db_stats
+                echo ""
+                press_enter
+                ;;
+            7)
+                echo ""
+                print_info "Optimizing database..."
+                if vacuum_db; then
+                    print_success "Database optimized successfully"
+                else
+                    print_error "Failed to optimize database"
+                fi
+                press_enter
+                ;;
+            8)
+                echo ""
+                read -p "  Clear records older than how many days? [30]: " days
+                days="${days:-30}"
+                echo ""
+                print_info "Clearing records older than $days days..."
+                clear_old_records "$days"
+                print_success "Old records cleared"
+                press_enter
+                ;;
+            9)
+                echo ""
+                print_info "Creating backup..."
+                local backup_path=$(backup_db)
+                if [ -n "$backup_path" ] && [ -f "$backup_path" ]; then
+                    print_success "Backup created: $backup_path"
+                else
+                    print_error "Failed to create backup"
+                fi
+                press_enter
+                ;;
+            e|E)
+                echo ""
+                echo "  Available tables:"
+                echo "    1) proxy_stats"
+                echo "    2) error_stats"
+                echo "    3) container_stats"
+                echo "    4) log_summaries"
+                echo "    5) system_events"
+                echo ""
+                read -p "  Select table to export [1-5]: " table_choice
+                
+                local table=""
+                case $table_choice in
+                    1) table="proxy_stats" ;;
+                    2) table="error_stats" ;;
+                    3) table="container_stats" ;;
+                    4) table="log_summaries" ;;
+                    5) table="system_events" ;;
+                esac
+                
+                if [ -n "$table" ]; then
+                    local csv_path=$(export_table_csv "$table")
+                    print_success "Exported to: $csv_path"
+                fi
+                press_enter
+                ;;
+            r|R)
+                echo ""
+                echo -e "  ${RED}${BOLD}WARNING: This will delete ALL statistics!${NC}"
+                read -p "  Type 'RESET' to confirm: " confirm
+                if [ "$confirm" = "RESET" ]; then
+                    reset_all_stats
+                    print_success "All statistics have been reset"
+                else
+                    print_info "Reset cancelled"
+                fi
+                press_enter
+                ;;
+            i|I)
+                echo ""
+                print_info "Checking database integrity..."
+                local integrity=$(check_db_integrity)
+                if [ "$integrity" = "ok" ]; then
+                    print_success "Database integrity: OK"
+                else
+                    print_error "Database integrity issue: $integrity"
+                fi
+                press_enter
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
 # Main Maintenance Menu
 run_maintenance_mode() {
     # Check connection first
@@ -1519,7 +1754,8 @@ run_maintenance_mode() {
         echo "    3) Nest Management"
         echo "    4) General Database Maintenance"
         echo "    5) Database & User Management"
-        echo "    6) Refresh Status"
+        echo "    6) Shellder Statistics Database"
+        echo "    7) Refresh Status"
         if [ "$SHELLDER_LAUNCHER" = "1" ]; then
             echo "    0) Return to Main Menu"
         else
@@ -1534,7 +1770,8 @@ run_maintenance_mode() {
             3) nest_management_menu ;;
             4) general_maintenance_menu ;;
             5) db_user_management_menu ;;
-            6) continue ;;
+            6) shellder_db_menu ;;
+            7) continue ;;
             0) 
                 echo ""
                 if [ "$SHELLDER_LAUNCHER" = "1" ]; then

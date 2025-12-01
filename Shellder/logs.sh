@@ -29,6 +29,15 @@ NC='\033[0m'
 # Services to monitor
 SERVICES=("database" "golbat" "dragonite" "rotom" "reactmap" "koji" "admin" "grafana" "pma" "xilriws" "vmagent" "victoriametrics" "poracle" "fletchling")
 
+# Source Shellder database helper for persistent statistics
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/db_helper.sh" ]; then
+    source "$SCRIPT_DIR/db_helper.sh"
+    DB_AVAILABLE=true
+else
+    DB_AVAILABLE=false
+fi
+
 # Error patterns for categorization
 declare -A ERROR_PATTERNS
 ERROR_PATTERNS=(
@@ -2027,6 +2036,58 @@ show_xilriws_status() {
     return 0
 }
 
+# Show all-time proxy stats from database
+show_alltime_proxy_stats() {
+    if [ "$DB_AVAILABLE" != "true" ]; then
+        print_error "Shellder database not available"
+        press_enter
+        return
+    fi
+    
+    clear
+    echo ""
+    draw_box_top
+    draw_box_line "           ALL-TIME PROXY STATISTICS"
+    draw_box_bottom
+    echo ""
+    echo -e "  ${DIM}These statistics persist even after Xilriws logs are cleared.${NC}"
+    echo ""
+    
+    local summary=$(get_proxy_stats_summary)
+    if [ -n "$summary" ]; then
+        IFS='|' read -r total_proxies total_req total_success total_failed total_timeout success_rate <<< "$summary"
+        
+        if [ "$total_proxies" = "0" ] || [ -z "$total_proxies" ]; then
+            echo -e "  ${YELLOW}No proxy statistics recorded yet.${NC}"
+            echo ""
+            echo "  To record statistics:"
+            echo "    1. Make sure Xilriws is running and processing requests"
+            echo "    2. Press 's' in the Xilriws menu to save current stats"
+            echo ""
+        else
+            echo -e "  ${WHITE}${BOLD}Summary${NC}"
+            echo -e "  ${DIM}────────────────────────────────────────────────────────${NC}"
+            echo -e "    Total Proxies Tracked:  ${CYAN}$total_proxies${NC}"
+            echo -e "    Total Requests:         ${CYAN}$total_req${NC}"
+            echo -e "    Successful:             ${GREEN}$total_success${NC}"
+            echo -e "    Failed:                 ${RED}$total_failed${NC}"
+            echo -e "    Timeouts:               ${YELLOW}$total_timeout${NC}"
+            echo -e "    Overall Success Rate:   ${CYAN}${success_rate}%${NC}"
+            echo ""
+            
+            echo -e "  ${WHITE}${BOLD}Individual Proxy Performance${NC}"
+            echo -e "  ${DIM}────────────────────────────────────────────────────────${NC}"
+            echo ""
+            get_proxy_stats_all_time
+        fi
+    else
+        echo -e "  ${YELLOW}No proxy statistics in database yet.${NC}"
+    fi
+    
+    echo ""
+    press_enter
+}
+
 # Xilriws menu
 show_xilriws_menu() {
     while true; do
@@ -2072,10 +2133,12 @@ show_xilriws_menu() {
         # Normal menu when xilriws is running
         echo -e "${WHITE}${BOLD}Xilriws Options${NC}"
         echo -e "${DIM}──────────────────────────────────────────────────────────────────────────${NC}"
-        echo "    1) View recent errors"
+        echo "    1) View recent errors (current logs)"
         echo "    2) Live monitoring mode (auto-restart on failure)"
         echo "    3) Clear Xilriws logs"
         echo "    4) Restart Xilriws container"
+        echo "    a) All-Time Proxy Stats (from database)"
+        echo "    s) Save Current Stats to Database"
         echo "    p) Proxy Manager"
         echo "    r) Refresh"
         echo "    0) Back to main menu"
@@ -2087,6 +2150,13 @@ show_xilriws_menu() {
             2) xilriws_live_monitor ;;
             3) clear_xilriws_logs ;;
             4) restart_xilriws ;;
+            a|A) show_alltime_proxy_stats ;;
+            s|S) 
+                echo ""
+                print_info "Saving current proxy statistics..."
+                save_current_proxy_stats
+                press_enter
+                ;;
             p|P) show_proxy_manager ;;
             r|R) continue ;;
             0|"") return ;;
@@ -3382,6 +3452,248 @@ search_logs_menu() {
 }
 
 # =============================================================================
+# ALL-TIME STATISTICS (FROM DATABASE)
+# =============================================================================
+
+show_alltime_stats_menu() {
+    if [ "$DB_AVAILABLE" != "true" ]; then
+        print_error "Shellder database not available. Check if db_helper.sh exists."
+        press_enter
+        return
+    fi
+    
+    # Initialize database if needed
+    if ! check_shellder_db 2>/dev/null; then
+        print_info "Initializing Shellder statistics database..."
+        init_shellder_db
+    fi
+    
+    while true; do
+        clear
+        echo ""
+        draw_box_top
+        draw_box_line "           ALL-TIME STATISTICS (FROM DATABASE)"
+        draw_box_bottom
+        echo ""
+        echo -e "  ${DIM}These statistics persist even after logs are cleared.${NC}"
+        echo ""
+        
+        echo -e "  ${WHITE}${BOLD}View Statistics${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────────────────────${NC}"
+        echo "    1) All-Time Error Summary"
+        echo "    2) All-Time Error Details by Service"
+        echo "    3) All-Time Proxy Statistics (Xilriws)"
+        echo "    4) All-Time Container Statistics"
+        echo "    5) Log History (last 30 days)"
+        echo "    6) Recent System Events"
+        echo ""
+        echo -e "  ${WHITE}${BOLD}Record Current Stats${NC}"
+        echo -e "  ${DIM}────────────────────────────────────────────────────────${NC}"
+        echo "    s) Save Current Log Stats to Database"
+        echo "    p) Save Current Proxy Stats to Database"
+        echo ""
+        echo "    0) Back"
+        echo ""
+        read -p "  Select option: " choice
+        
+        case $choice in
+            1)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "           ALL-TIME ERROR SUMMARY"
+                draw_box_bottom
+                echo ""
+                get_error_summary
+                echo ""
+                press_enter
+                ;;
+            2)
+                echo ""
+                echo "  Available services:"
+                local i=1
+                for svc in "${SERVICES[@]}"; do
+                    echo "    $i) $svc"
+                    ((i++))
+                done
+                echo ""
+                read -p "  Select service [1-${#SERVICES[@]}]: " svc_choice
+                if [ "$svc_choice" -ge 1 ] 2>/dev/null && [ "$svc_choice" -le "${#SERVICES[@]}" ] 2>/dev/null; then
+                    local service="${SERVICES[$((svc_choice-1))]}"
+                    clear
+                    echo ""
+                    draw_box_top
+                    draw_box_line "           ALL-TIME ERRORS: $service"
+                    draw_box_bottom
+                    echo ""
+                    get_error_stats_by_service "$service"
+                    echo ""
+                fi
+                press_enter
+                ;;
+            3)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "           ALL-TIME PROXY STATISTICS"
+                draw_box_bottom
+                echo ""
+                
+                local summary=$(get_proxy_stats_summary)
+                if [ -n "$summary" ]; then
+                    IFS='|' read -r total_proxies total_req total_success total_failed total_timeout success_rate <<< "$summary"
+                    echo -e "  ${WHITE}Summary:${NC}"
+                    echo -e "    Total Proxies Seen:  ${CYAN}$total_proxies${NC}"
+                    echo -e "    Total Requests:      ${CYAN}$total_req${NC}"
+                    echo -e "    Successful:          ${GREEN}$total_success${NC}"
+                    echo -e "    Failed:              ${RED}$total_failed${NC}"
+                    echo -e "    Timeouts:            ${YELLOW}$total_timeout${NC}"
+                    echo -e "    Success Rate:        ${CYAN}${success_rate}%${NC}"
+                    echo ""
+                fi
+                
+                echo -e "  ${WHITE}Individual Proxy Stats:${NC}"
+                echo ""
+                get_proxy_stats_all_time
+                echo ""
+                press_enter
+                ;;
+            4)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "           ALL-TIME CONTAINER STATISTICS"
+                draw_box_bottom
+                echo ""
+                get_container_stats_all_time
+                echo ""
+                press_enter
+                ;;
+            5)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "           LOG HISTORY (LAST 30 DAYS)"
+                draw_box_bottom
+                echo ""
+                get_log_summaries "" 30
+                echo ""
+                press_enter
+                ;;
+            6)
+                clear
+                echo ""
+                draw_box_top
+                draw_box_line "           RECENT SYSTEM EVENTS"
+                draw_box_bottom
+                echo ""
+                get_recent_events 50
+                echo ""
+                press_enter
+                ;;
+            s|S)
+                echo ""
+                print_info "Saving current log statistics to database..."
+                save_current_log_stats
+                print_success "Log statistics saved"
+                press_enter
+                ;;
+            p|P)
+                echo ""
+                print_info "Saving current proxy statistics to database..."
+                save_current_proxy_stats
+                print_success "Proxy statistics saved"
+                press_enter
+                ;;
+            0) return ;;
+        esac
+    done
+}
+
+# Save current log statistics to database
+save_current_log_stats() {
+    if [ "$DB_AVAILABLE" != "true" ]; then
+        return 1
+    fi
+    
+    local today=$(date +%Y-%m-%d)
+    
+    for service in "${SERVICES[@]}"; do
+        # Check if container exists
+        if ! docker ps -a --format "{{.Names}}" | grep -q "^${service}$"; then
+            continue
+        fi
+        
+        # Get log stats
+        local log_output=$(docker logs "$service" 2>&1 | tail -10000)
+        local total_lines=$(echo "$log_output" | wc -l)
+        local error_count=$(echo "$log_output" | grep -ciE "error|exception|failed|fatal" 2>/dev/null || echo 0)
+        local warning_count=$(echo "$log_output" | grep -ciE "warn|warning" 2>/dev/null || echo 0)
+        local info_count=$(echo "$log_output" | grep -ciE "info|\[INFO\]" 2>/dev/null || echo 0)
+        
+        # Record to database
+        record_log_summary "$service" "$total_lines" "$error_count" "$warning_count" "$info_count" "$today"
+        
+        # Also categorize and record specific errors
+        for category in "${!ERROR_PATTERNS[@]}"; do
+            local pattern="${ERROR_PATTERNS[$category]}"
+            local cat_count=$(echo "$log_output" | grep -ciE "$pattern" 2>/dev/null || echo 0)
+            if [ "$cat_count" -gt 0 ]; then
+                record_error_bulk "$service" "$category" "$cat_count" "From log analysis on $today"
+            fi
+        done
+        
+        echo -e "  ${GREEN}✓${NC} $service: $total_lines lines, $error_count errors"
+    done
+    
+    # Record event
+    record_event "log_analysis" "logs.sh" "Saved log stats for ${#SERVICES[@]} services" ""
+}
+
+# Save current proxy stats from xilriws to database
+save_current_proxy_stats() {
+    if [ "$DB_AVAILABLE" != "true" ]; then
+        return 1
+    fi
+    
+    # Check if xilriws is running
+    if ! docker ps --format "{{.Names}}" | grep -q "^xilriws$"; then
+        print_warning "Xilriws container not running"
+        return 1
+    fi
+    
+    # Get recent xilriws logs and parse proxy stats
+    local log_output=$(docker logs xilriws 2>&1 | tail -5000)
+    
+    # Look for proxy usage patterns in logs
+    # This will vary based on xilriws log format - adjust patterns as needed
+    local proxy_file="unown/proxies.txt"
+    if [ -f "$proxy_file" ]; then
+        while IFS= read -r line || [ -n "$line" ]; do
+            [ -z "$line" ] && continue
+            [[ "$line" =~ ^#.*$ ]] && continue
+            
+            # Extract proxy identifier
+            local proxy_addr=$(echo "$line" | sed -E 's|^[^:]+://||' | sed -E 's|^[^@]+@||' | cut -d: -f1)
+            
+            # Count occurrences in logs (success/fail patterns - adjust based on actual log format)
+            local success_count=$(echo "$log_output" | grep -c "$proxy_addr.*success\|$proxy_addr.*200\|$proxy_addr.*OK" 2>/dev/null || echo 0)
+            local fail_count=$(echo "$log_output" | grep -c "$proxy_addr.*fail\|$proxy_addr.*error\|$proxy_addr.*timeout" 2>/dev/null || echo 0)
+            local total=$((success_count + fail_count))
+            
+            if [ "$total" -gt 0 ]; then
+                update_proxy_stats "$proxy_addr" "$total" "$success_count" "$fail_count" 0
+            fi
+        done < "$proxy_file"
+        
+        echo -e "  ${GREEN}✓${NC} Proxy stats updated from logs"
+    fi
+    
+    # Record event
+    record_event "proxy_analysis" "logs.sh" "Saved proxy stats from xilriws logs" ""
+}
+
+# =============================================================================
 # MAIN MENU
 # =============================================================================
 
@@ -3394,6 +3706,7 @@ show_main_menu() {
         echo "    1-${#SERVICES[@]}) Select service for details"
         echo "    s) Search logs"
         echo "    q) Quick health check"
+        echo "    a) All-Time Statistics (from database)"
         echo "    x) Xilriws status & proxy management"
         echo "    d) Device disconnect monitor"
         echo "    m) Log maintenance"
@@ -3411,6 +3724,7 @@ show_main_menu() {
                 ;;
             s|S) search_logs_menu ;;
             q|Q) quick_health_check ;;
+            a|A) show_alltime_stats_menu ;;
             x|X) show_xilriws_menu ;;
             d|D) show_device_disconnects ;;
             m|M) log_maintenance_menu ;;

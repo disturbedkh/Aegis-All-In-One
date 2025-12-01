@@ -29,6 +29,15 @@ ERRORS=0
 WARNINGS=0
 PASSED=0
 
+# Source Shellder database helper for persistent statistics
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [ -f "$SCRIPT_DIR/db_helper.sh" ]; then
+    source "$SCRIPT_DIR/db_helper.sh"
+    DB_AVAILABLE=true
+else
+    DB_AVAILABLE=false
+fi
+
 # Print functions
 print_info() { echo -e "${BLUE}[INFO]${NC} $1"; }
 print_pass() { echo -e "${GREEN}[✓]${NC} $1"; ((PASSED++)); }
@@ -372,9 +381,19 @@ check_containers() {
                     health_display="${DIM}-${NC}"
                 fi
                 printf "  %-18s ${GREEN}%-12s${NC} %-20b\n" "$container" "Running" "$health_display"
+                
+                # Record to database if available
+                if [ "$DB_AVAILABLE" = "true" ]; then
+                    update_container_status "$container" "running" 2>/dev/null
+                fi
             else
                 ((stopped++))
                 printf "  %-18s ${RED}%-12s${NC} %-20s\n" "$container" "Stopped" "-"
+                
+                # Record to database if available
+                if [ "$DB_AVAILABLE" = "true" ]; then
+                    update_container_status "$container" "stopped" 2>/dev/null
+                fi
             fi
         else
             ((missing++))
