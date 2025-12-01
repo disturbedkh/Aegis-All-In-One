@@ -1324,26 +1324,67 @@ class DeviceMonitor:
                 ),
             },
             'dragonite': {
-                'task_assigned': re.compile(
-                    r'\[([^\]]+)\].*\[(\S+)\]\s*Worker.*assigned.*task|scan', re.I
+                # Real Dragonite log format: INFO 2025-12-01 09:38:15 [New York_01] Catching PIKACHU
+                
+                # Catch attempt: Catching POKEMON (ball: ITEM_X, capture rate: 0.XXX)
+                'catch_attempt': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Catching\s+(\S+)\s*\(ball:\s*(\S+),\s*capture rate:\s*([\d.]+)\)'
                 ),
-                'task_complete': re.compile(
-                    r'\[([^\]]+)\].*\[(\S+)\]\s*(completed|finished|done)', re.I
+                # Catch result: Catch: CATCH_SUCCESS/CATCH_FLEE/CATCH_ESCAPE POKEMON Wild/Lure
+                'catch_result': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Catch:\s+(CATCH_SUCCESS|CATCH_FLEE|CATCH_ESCAPE)\s+(\S+)\s+(Wild|Lure)'
                 ),
-                'device_error': re.compile(
-                    r'\[([^\]]+)\].*\[(\S+)\].*(error|failed|timeout)', re.I
+                # Location complete: Done with level location after X.XXs: X spins, X encounters, X catches
+                'location_complete': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Done with level location after ([\d.]+)s:\s*(\d+)\s*spins,\s*(\d+)\s*encounters,\s*(\d+)\s*catches,\s*(\d+)\s*fled,\s*(\d+)\s*escaped'
                 ),
-                'account_issue': re.compile(
-                    r'\[([^\]]+)\].*(banned|invalid|suspended|auth_banned)', re.I
+                # Fort spin success: Successfully spun Fort XXXXX
+                'fort_spin': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Successfully spun Fort\s+(\S+)'
                 ),
+                # Level up: Leveled up to X
+                'level_up': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Leveled up to\s+(\d+)'
+                ),
+                # Player stats: [Player stats] [Session: Xm Ys ID] Level: X -> Y | XP made: X
+                'player_stats': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*\[Player stats\].*Level:\s*(\d+)\s*->\s*(\d+)\s*\|\s*XP made:\s*(\d+).*Stops spun:\s*(\d+).*Mons caught:\s*(\d+)'
+                ),
+                # GMO received: Got a GMO: X cells | Y pokemon
+                'gmo_received': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Got a GMO:\s*(\d+)\s*cells\s*\|\s*(\d+)\s*pokemon'
+                ),
+                # Movement: Moving to X.X/82 LAT, LON
+                'movement': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Moving to\s+([\d.]+)/(\d+)\s+([\d.-]+),\s*([\d.-]+)'
+                ),
+                # APICHECK: APICHECK: X is OK/not reachable
                 'api_check': re.compile(
-                    r'\[([^\]]+)\].*APICHECK:.*(\S+).*is (OK|not reachable|error)', re.I
+                    r'INFO.*\[\]\s*APICHECK:\s*(\S+).*is\s+(OK|not reachable)'
                 ),
-                'db_error': re.compile(
-                    r'\[([^\]]+)\].*(database|mysql|connection refused.*3306)', re.I
+                # Auth error: PTC Auth - Remote Auth for USER - Error
+                'auth_error': re.compile(
+                    r'ERRO.*\[([^\]]+)\]\s*PTC Auth.*for\s+(\S+)\s*-\s*Error.*?:\s*(.+)'
                 ),
+                # Auth failed warning
+                'auth_failed': re.compile(
+                    r'WARN.*\[([^\]]+)\].*Authentication failed for user\s+(\S+)'
+                ),
+                # Token refresh: Background token refresher
+                'token_refresh': re.compile(
+                    r'INFO.*\[([^\]]+)\]\s*Background token (initer|refresher):\s*(.+)'
+                ),
+                # Scout queue
+                'scout_queue': re.compile(
+                    r'INFO.*\[\]\s*SCOUT:\s*(\d+)\s*locations in queue'
+                ),
+                # Fatal error
                 'fatal': re.compile(
-                    r'\[([^\]]+)\].*FATL.*(.+)'
+                    r'FATL.*\[([^\]]*)\]\s*(.+)'
+                ),
+                # General error
+                'error': re.compile(
+                    r'ERRO.*\[([^\]]+)\]\s*(.+)'
                 ),
             },
             'golbat': {
@@ -1613,19 +1654,116 @@ class DeviceMonitor:
                 event['severity'] = 'error'
         
         elif container == 'dragonite':
-            if event_type in ('task_assigned', 'task_complete', 'device_error'):
-                event['device'] = groups[1] if len(groups) > 1 else None
-                event['severity'] = 'info' if 'complete' in event_type else 'warning'
-            elif event_type == 'account_issue':
-                event['message'] = groups[1]
-                event['severity'] = 'error'
+            # Instance name from most events
+            instance = groups[0] if groups else None
+            event['instance'] = instance
+            
+            if event_type == 'catch_attempt':
+                # Catching POKEMON (ball: X, capture rate: Y)
+                event['pokemon'] = groups[1] if len(groups) > 1 else None
+                event['ball'] = groups[2] if len(groups) > 2 else None
+                event['capture_rate'] = float(groups[3]) if len(groups) > 3 else None
+                event['severity'] = 'info'
+                self._update_instance_stats(instance, 'catch_attempts', 1)
+                return None  # Don't emit, too noisy
+            
+            elif event_type == 'catch_result':
+                # Catch: CATCH_SUCCESS/FLEE/ESCAPE POKEMON Wild/Lure
+                event['result'] = groups[1] if len(groups) > 1 else None
+                event['pokemon'] = groups[2] if len(groups) > 2 else None
+                event['spawn_type'] = groups[3] if len(groups) > 3 else None
+                event['severity'] = 'success' if 'SUCCESS' in str(event['result']) else 'info'
+                self._update_instance_stats(instance, 'catches' if 'SUCCESS' in str(event['result']) else 'fled', 1)
+                return None  # Don't emit, too noisy
+            
+            elif event_type == 'location_complete':
+                # Done with level location after X.XXs: X spins, X encounters, X catches
+                event['duration'] = float(groups[1]) if len(groups) > 1 else 0
+                event['spins'] = int(groups[2]) if len(groups) > 2 else 0
+                event['encounters'] = int(groups[3]) if len(groups) > 3 else 0
+                event['catches'] = int(groups[4]) if len(groups) > 4 else 0
+                event['fled'] = int(groups[5]) if len(groups) > 5 else 0
+                event['escaped'] = int(groups[6]) if len(groups) > 6 else 0
+                event['severity'] = 'info'
+                self._update_instance_stats(instance, 'locations', 1)
+                return None  # Track but don't emit
+            
+            elif event_type == 'fort_spin':
+                event['fort_id'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'info'
+                self._update_instance_stats(instance, 'spins', 1)
+                return None  # Track but don't emit
+            
+            elif event_type == 'level_up':
+                event['new_level'] = int(groups[1]) if len(groups) > 1 else None
+                event['severity'] = 'success'
+                # Emit level ups - these are interesting
+            
+            elif event_type == 'player_stats':
+                # [Player stats] Level: X -> Y | XP made: Z
+                event['old_level'] = int(groups[1]) if len(groups) > 1 else None
+                event['new_level'] = int(groups[2]) if len(groups) > 2 else None
+                event['xp_made'] = int(groups[3]) if len(groups) > 3 else 0
+                event['stops_spun'] = int(groups[4]) if len(groups) > 4 else 0
+                event['mons_caught'] = int(groups[5]) if len(groups) > 5 else 0
+                event['severity'] = 'success'
+                # Emit player stats - useful summary
+            
+            elif event_type == 'gmo_received':
+                event['cells'] = int(groups[1]) if len(groups) > 1 else 0
+                event['pokemon'] = int(groups[2]) if len(groups) > 2 else 0
+                event['severity'] = 'info'
+                return None  # Too noisy
+            
+            elif event_type == 'movement':
+                event['step'] = groups[1] if len(groups) > 1 else None
+                event['total_steps'] = groups[2] if len(groups) > 2 else None
+                event['lat'] = groups[3] if len(groups) > 3 else None
+                event['lon'] = groups[4] if len(groups) > 4 else None
+                event['severity'] = 'info'
+                return None  # Too noisy
+            
             elif event_type == 'api_check':
-                event['service'] = groups[1]
-                event['status'] = groups[2]
-                event['severity'] = 'success' if 'OK' in groups[2] else 'error'
-            elif event_type in ('db_error', 'fatal'):
-                event['message'] = groups[1]
+                event['service'] = groups[0] if groups else None
+                event['status'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'success' if event['status'] == 'OK' else 'error'
+                # Only emit failures
+                if event['status'] == 'OK':
+                    return None
+            
+            elif event_type == 'auth_error':
+                event['worker'] = groups[0] if groups else None
+                event['username'] = groups[1] if len(groups) > 1 else None
+                event['error_msg'] = groups[2] if len(groups) > 2 else None
+                event['severity'] = 'error'
+                # Emit auth errors
+            
+            elif event_type == 'auth_failed':
+                event['worker'] = groups[0] if groups else None
+                event['username'] = groups[1] if len(groups) > 1 else None
+                event['severity'] = 'warning'
+            
+            elif event_type == 'token_refresh':
+                event['worker'] = groups[0] if groups else None
+                event['action'] = groups[1] if len(groups) > 1 else None
+                event['message'] = groups[2] if len(groups) > 2 else None
+                event['severity'] = 'info'
+                return None  # Routine
+            
+            elif event_type == 'scout_queue':
+                event['queue_size'] = int(groups[0]) if groups else 0
+                event['severity'] = 'info'
+                return None  # Routine
+            
+            elif event_type == 'fatal':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
                 event['severity'] = 'critical'
+                # Always emit fatal errors
+            
+            elif event_type == 'error':
+                event['message'] = groups[1] if len(groups) > 1 else raw_line
+                event['severity'] = 'error'
+                # Emit errors
         
         elif container == 'golbat':
             event['severity'] = 'error' if 'error' in event_type else 'info'
@@ -1778,6 +1916,33 @@ class DeviceMonitor:
         
         # Emit via WebSocket
         self._emit_event(event)
+    
+    def _update_instance_stats(self, instance, stat_name, increment):
+        """Update scanning stats for an instance (silently)"""
+        if not instance:
+            return
+        
+        with self.lock:
+            if not hasattr(self, 'instance_stats'):
+                self.instance_stats = {}
+            
+            if instance not in self.instance_stats:
+                self.instance_stats[instance] = {
+                    'name': instance,
+                    'catches': 0,
+                    'fled': 0,
+                    'escaped': 0,
+                    'catch_attempts': 0,
+                    'spins': 0,
+                    'locations': 0,
+                    'last_activity': None,
+                    'session_start': datetime.now().isoformat()
+                }
+            
+            stats = self.instance_stats[instance]
+            if stat_name in stats:
+                stats[stat_name] += increment
+            stats['last_activity'] = datetime.now().isoformat()
     
     def _update_device_memory(self, device_name, mem_data):
         """Update device memory stats without emitting an event"""
@@ -5421,6 +5586,58 @@ def api_monitor_memory():
         'devices': devices_with_memory,
         'total_devices': len(devices_with_memory),
         'low_memory_devices': len([d for d in devices_with_memory if d['memory'].get('free_mb', 99999) < 500]),
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/monitor/instances')
+def api_monitor_instances():
+    """Get scanning statistics per Dragonite instance"""
+    if not device_monitor:
+        return jsonify({'error': 'Monitor not available'}), 503
+    
+    instances = []
+    
+    with device_monitor.lock:
+        if hasattr(device_monitor, 'instance_stats'):
+            for name, stats in device_monitor.instance_stats.items():
+                # Calculate catch rate
+                attempts = stats.get('catch_attempts', 0)
+                catches = stats.get('catches', 0)
+                fled = stats.get('fled', 0)
+                escaped = stats.get('escaped', 0)
+                catch_rate = round((catches / max(attempts, 1)) * 100, 1)
+                
+                instances.append({
+                    'instance': name,
+                    'catches': catches,
+                    'fled': fled,
+                    'escaped': escaped,
+                    'attempts': attempts,
+                    'catch_rate': catch_rate,
+                    'spins': stats.get('spins', 0),
+                    'locations': stats.get('locations', 0),
+                    'last_activity': stats.get('last_activity'),
+                    'session_start': stats.get('session_start')
+                })
+    
+    # Sort by most catches
+    instances.sort(key=lambda x: x['catches'], reverse=True)
+    
+    # Calculate totals
+    total_catches = sum(i['catches'] for i in instances)
+    total_fled = sum(i['fled'] for i in instances)
+    total_spins = sum(i['spins'] for i in instances)
+    total_locations = sum(i['locations'] for i in instances)
+    
+    return jsonify({
+        'instances': instances,
+        'totals': {
+            'catches': total_catches,
+            'fled': total_fled,
+            'spins': total_spins,
+            'locations': total_locations,
+            'catch_rate': round((total_catches / max(total_catches + total_fled, 1)) * 100, 1)
+        },
         'timestamp': datetime.now().isoformat()
     })
 
