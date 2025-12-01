@@ -1452,8 +1452,479 @@ showPage = function(page) {
         case 'stack':
             loadStackData();
             break;
+        case 'devices':
+            loadDevicesPage();
+            break;
     }
 };
+
+// =============================================================================
+// DEVICE MANAGEMENT FUNCTIONS (Cross-Reference Rotom/Dragonite)
+// =============================================================================
+
+let currentCrashId = null;
+let currentLogContainer = null;
+let currentLogLine = null;
+
+async function loadDevicesPage() {
+    await Promise.all([
+        loadDeviceSummary(),
+        loadDevicesList(),
+        loadCrashList()
+    ]);
+}
+
+async function refreshDevices() {
+    await loadDevicesPage();
+    showToast('Device data refreshed', 'success');
+}
+
+async function loadDeviceSummary() {
+    try {
+        const data = await fetchAPI('/api/devices/summary');
+        
+        document.getElementById('devicesOnline').textContent = data.online_devices || 0;
+        document.getElementById('devicesOffline').textContent = data.offline_devices || 0;
+        document.getElementById('devicesCrashes24h').textContent = data.crashes_24h || 0;
+        
+        // Format average uptime
+        const avgSeconds = data.avg_uptime_seconds || 0;
+        document.getElementById('devicesAvgUptime').textContent = formatDuration(avgSeconds);
+        
+    } catch (e) {
+        console.error('Error loading device summary:', e);
+    }
+}
+
+async function loadDevicesList() {
+    const el = document.getElementById('devicesList');
+    if (!el) return;
+    
+    try {
+        const devices = await fetchAPI('/api/devices');
+        
+        if (!devices || devices.length === 0) {
+            el.innerHTML = '<div class="no-data">No devices found</div>';
+            return;
+        }
+        
+        // Also populate the crash filter dropdown
+        const filterEl = document.getElementById('crashDeviceFilter');
+        if (filterEl) {
+            filterEl.innerHTML = '<option value="">All Devices</option>' +
+                devices.map(d => `<option value="${d.uuid}">${d.uuid}</option>`).join('');
+        }
+        
+        el.innerHTML = `
+            <table class="devices-table">
+                <thead>
+                    <tr>
+                        <th>Status</th>
+                        <th>Device</th>
+                        <th>Instance</th>
+                        <th>Account</th>
+                        <th>Crashes</th>
+                        <th>Uptime %</th>
+                        <th>Last Seen</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    ${devices.map(d => `
+                        <tr class="${d.online ? 'online' : 'offline'}">
+                            <td>
+                                <span class="status-indicator ${d.online ? 'online' : 'offline'}">
+                                    ${d.online ? '🟢' : '🔴'}
+                                </span>
+                            </td>
+                            <td class="device-name" onclick="showDeviceDetail('${d.uuid}')">
+                                ${d.uuid || 'Unknown'}
+                                ${d.origin ? `<small class="device-origin">${d.origin}</small>` : ''}
+                            </td>
+                            <td>${d.instance || '-'}</td>
+                            <td>${d.account || '-'}</td>
+                            <td class="crash-count ${(d.total_crashes || 0) > 5 ? 'danger' : ''}">
+                                ${d.total_crashes || 0}
+                            </td>
+                            <td class="uptime ${(d.uptime_percent || 0) < 50 ? 'danger' : (d.uptime_percent || 0) < 80 ? 'warning' : 'success'}">
+                                ${(d.uptime_percent || 0).toFixed(1)}%
+                            </td>
+                            <td>${formatTimeAgo(d.last_seen || d.last_seen_shellder)}</td>
+                            <td>
+                                <button class="btn btn-sm btn-icon" onclick="showDeviceDetail('${d.uuid}')" title="Details">📊</button>
+                                <button class="btn btn-sm btn-icon" onclick="showDeviceCrashes('${d.uuid}')" title="Crashes">💥</button>
+                                <button class="btn btn-sm btn-icon" onclick="searchDeviceLogs('${d.uuid}')" title="Search Logs">🔍</button>
+                            </td>
+                        </tr>
+                    `).join('')}
+                </tbody>
+            </table>
+        `;
+        
+        // Setup search
+        const searchEl = document.getElementById('deviceSearch');
+        if (searchEl) {
+            searchEl.addEventListener('input', (e) => {
+                const term = e.target.value.toLowerCase();
+                el.querySelectorAll('tbody tr').forEach(tr => {
+                    const text = tr.textContent.toLowerCase();
+                    tr.style.display = text.includes(term) ? '' : 'none';
+                });
+            });
+        }
+        
+    } catch (e) {
+        el.innerHTML = `<div class="error-msg">Failed to load devices: ${e.message}</div>`;
+    }
+}
+
+async function loadCrashList(deviceName = null) {
+    const el = document.getElementById('crashList');
+    if (!el) return;
+    
+    try {
+        const url = deviceName 
+            ? `/api/devices/${deviceName}/crashes?limit=50`
+            : '/api/devices/crashes?limit=50';
+        const crashes = await fetchAPI(url);
+        
+        if (!crashes || crashes.length === 0) {
+            el.innerHTML = '<div class="no-data">No crashes recorded</div>';
+            return;
+        }
+        
+        el.innerHTML = crashes.map(c => `
+            <div class="crash-item ${c.resolved ? 'resolved' : ''}" onclick="showCrashContext(${c.id})">
+                <div class="crash-header">
+                    <span class="crash-type ${c.type}">${getCrashIcon(c.type)} ${c.type}</span>
+                    <span class="crash-time">${formatTimeAgo(c.time)}</span>
+                </div>
+                <div class="crash-device">${c.device}</div>
+                <div class="crash-message">${truncate(c.message, 100)}</div>
+                <div class="crash-source">
+                    <span class="log-source">${c.log_source}</span>
+                    ${c.line_start ? `<span class="log-line">Line ${c.line_start}</span>` : ''}
+                    ${c.is_startup ? '<span class="startup-badge">STARTUP</span>' : ''}
+                </div>
+            </div>
+        `).join('');
+        
+    } catch (e) {
+        el.innerHTML = `<div class="error-msg">Failed to load crashes: ${e.message}</div>`;
+    }
+}
+
+function getCrashIcon(type) {
+    const icons = {
+        'disconnect': '🔌',
+        'worker_disconnect': '👷',
+        'error': '❌',
+        'crash': '💥',
+        'timeout': '⏰',
+        'failed': '⚠️',
+        'account_banned': '🚫',
+        'no_account': '👤',
+        'task_failed': '📋',
+        'connection_refused': '🔒'
+    };
+    return icons[type] || '❓';
+}
+
+function filterCrashes() {
+    const device = document.getElementById('crashDeviceFilter').value;
+    loadCrashList(device || null);
+}
+
+async function showCrashContext(crashId) {
+    currentCrashId = crashId;
+    
+    try {
+        const data = await fetchAPI(`/api/devices/crashes/${crashId}/context?lines=50`);
+        
+        if (data.error) {
+            showToast(`Error: ${data.error}`, 'error');
+            return;
+        }
+        
+        // Update modal info
+        document.getElementById('logContextDevice').textContent = `Device: ${data.device}`;
+        document.getElementById('logContextType').textContent = `Type: ${data.type}`;
+        document.getElementById('logContextTime').textContent = `Time: ${formatTimeAgo(data.time)}`;
+        
+        if (data.context_range) {
+            document.getElementById('logContextRange').textContent = 
+                `Lines ${data.context_range.start} - ${data.context_range.end}`;
+            currentLogLine = data.context_range.crash_line;
+        }
+        
+        currentLogContainer = data.log_source;
+        
+        // Display log content with highlighted crash line
+        const logEl = document.getElementById('logContextContent');
+        const context = data.live_context || data.stored_context || 'No log context available';
+        logEl.innerHTML = highlightCrashLine(context, data.message);
+        
+        // Show modal
+        document.getElementById('logContextModal').style.display = 'flex';
+        
+    } catch (e) {
+        showToast(`Failed to load crash context: ${e.message}`, 'error');
+    }
+}
+
+function highlightCrashLine(logContent, crashMessage) {
+    if (!crashMessage) return escapeHtml(logContent);
+    
+    const lines = logContent.split('\n');
+    return lines.map(line => {
+        if (line.includes(crashMessage.substring(0, 50))) {
+            return `<span class="crash-highlight">${escapeHtml(line)}</span>`;
+        }
+        return escapeHtml(line);
+    }).join('\n');
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function loadMoreContext(delta) {
+    if (!currentLogContainer || currentLogLine === null) return;
+    
+    const newLine = currentLogLine + delta;
+    if (newLine < 0) return;
+    
+    try {
+        const data = await fetchAPI(
+            `/api/devices/log-context/${currentLogContainer}/${newLine}?lines=50`
+        );
+        
+        if (data.error) {
+            showToast(data.error, 'error');
+            return;
+        }
+        
+        document.getElementById('logContextRange').textContent = 
+            `Lines ${data.range.start} - ${data.range.end}`;
+        document.getElementById('logContextContent').textContent = data.context;
+        currentLogLine = newLine;
+        
+    } catch (e) {
+        showToast(`Failed to load context: ${e.message}`, 'error');
+    }
+}
+
+function closeLogModal() {
+    document.getElementById('logContextModal').style.display = 'none';
+    currentCrashId = null;
+}
+
+async function showDeviceDetail(deviceName) {
+    const modal = document.getElementById('deviceDetailModal');
+    const content = document.getElementById('deviceDetailContent');
+    
+    modal.style.display = 'flex';
+    content.innerHTML = '<div class="loading">Loading device details...</div>';
+    
+    try {
+        const device = await fetchAPI(`/api/devices/${deviceName}`);
+        
+        if (device.error) {
+            content.innerHTML = `<div class="error-msg">${device.error}</div>`;
+            return;
+        }
+        
+        content.innerHTML = `
+            <div class="device-detail">
+                <div class="device-detail-header">
+                    <span class="status-indicator ${device.online ? 'online' : 'offline'}">
+                        ${device.online ? '🟢 Online' : '🔴 Offline'}
+                    </span>
+                    <h2>${device.uuid}</h2>
+                </div>
+                
+                <div class="device-detail-grid">
+                    <div class="detail-section">
+                        <h4>Current Session</h4>
+                        <div class="detail-row">
+                            <span>Instance:</span>
+                            <span>${device.instance || '-'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Account:</span>
+                            <span>${device.account || '-'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Worker ID:</span>
+                            <span>${device.worker_id || '-'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Origin:</span>
+                            <span>${device.origin || '-'}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Version:</span>
+                            <span>${device.version || '-'}</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <h4>Statistics</h4>
+                        <div class="detail-row">
+                            <span>Total Connections:</span>
+                            <span>${device.total_connections || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Disconnections:</span>
+                            <span>${device.total_disconnections || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Crashes:</span>
+                            <span class="${(device.total_crashes || 0) > 5 ? 'text-danger' : ''}">${device.total_crashes || 0}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Uptime:</span>
+                            <span>${formatDuration(device.total_uptime_seconds || 0)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Uptime %:</span>
+                            <span class="${(device.uptime_percent || 0) < 50 ? 'text-danger' : ''}">${(device.uptime_percent || 0).toFixed(1)}%</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Crash Rate:</span>
+                            <span>${device.crash_rate || 0}/hour</span>
+                        </div>
+                    </div>
+                    
+                    <div class="detail-section">
+                        <h4>Timeline</h4>
+                        <div class="detail-row">
+                            <span>First Seen:</span>
+                            <span>${formatTimeAgo(device.first_seen)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Last Seen:</span>
+                            <span>${formatTimeAgo(device.last_seen || device.last_seen_shellder)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Last Connect:</span>
+                            <span>${formatTimeAgo(device.last_connect)}</span>
+                        </div>
+                        <div class="detail-row">
+                            <span>Last Disconnect:</span>
+                            <span>${formatTimeAgo(device.last_disconnect)}</span>
+                        </div>
+                    </div>
+                </div>
+                
+                ${device.recent_crashes && device.recent_crashes.length > 0 ? `
+                <div class="detail-section full-width">
+                    <h4>Recent Crashes</h4>
+                    <div class="recent-crashes-list">
+                        ${device.recent_crashes.map(c => `
+                            <div class="crash-mini" onclick="showCrashContext(${c.id})">
+                                <span class="crash-type">${getCrashIcon(c.type)} ${c.type}</span>
+                                <span class="crash-message">${truncate(c.message, 60)}</span>
+                                <span class="crash-time">${formatTimeAgo(c.time)}</span>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+                ` : ''}
+            </div>
+        `;
+        
+    } catch (e) {
+        content.innerHTML = `<div class="error-msg">Failed to load device: ${e.message}</div>`;
+    }
+}
+
+function closeDeviceModal() {
+    document.getElementById('deviceDetailModal').style.display = 'none';
+}
+
+async function showDeviceCrashes(deviceName) {
+    document.getElementById('crashDeviceFilter').value = deviceName;
+    await loadCrashList(deviceName);
+    
+    // Scroll to crash list
+    document.querySelector('.crashes-card').scrollIntoView({ behavior: 'smooth' });
+}
+
+async function searchDeviceLogs(deviceName) {
+    const term = prompt(`Search logs for device: ${deviceName}\n\nEnter additional search term (optional):`, '');
+    
+    if (term === null) return; // Cancelled
+    
+    try {
+        const results = await fetchAPI(
+            `/api/devices/search-logs?device=${encodeURIComponent(deviceName)}&keyword=${encodeURIComponent(term)}`
+        );
+        
+        if (results.total === 0) {
+            showToast('No matching log entries found', 'info');
+            return;
+        }
+        
+        // Show results in a modal-like display
+        const content = document.getElementById('logContextContent');
+        const formattedResults = results.results.map(r => 
+            `[${r.container}:${r.line}] ${r.content}`
+        ).join('\n\n');
+        
+        document.getElementById('logContextDevice').textContent = `Search: ${deviceName}`;
+        document.getElementById('logContextType').textContent = `Term: ${term || '(none)'}`;
+        document.getElementById('logContextTime').textContent = `Found: ${results.total} results`;
+        document.getElementById('logContextRange').textContent = '';
+        content.textContent = formattedResults;
+        
+        document.getElementById('logContextModal').style.display = 'flex';
+        
+    } catch (e) {
+        showToast(`Search failed: ${e.message}`, 'error');
+    }
+}
+
+function formatDuration(seconds) {
+    if (!seconds || seconds < 0) return '-';
+    
+    const hours = Math.floor(seconds / 3600);
+    const minutes = Math.floor((seconds % 3600) / 60);
+    
+    if (hours > 24) {
+        const days = Math.floor(hours / 24);
+        return `${days}d ${hours % 24}h`;
+    }
+    if (hours > 0) {
+        return `${hours}h ${minutes}m`;
+    }
+    return `${minutes}m`;
+}
+
+function formatTimeAgo(timestamp) {
+    if (!timestamp) return '-';
+    
+    try {
+        const d = new Date(timestamp);
+        const now = new Date();
+        const diff = (now - d) / 1000;
+        
+        if (diff < 60) return 'Just now';
+        if (diff < 3600) return `${Math.floor(diff/60)}m ago`;
+        if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
+        if (diff < 604800) return `${Math.floor(diff/86400)}d ago`;
+        return d.toLocaleDateString();
+    } catch {
+        return timestamp;
+    }
+}
+
+function truncate(str, len) {
+    if (!str) return '';
+    return str.length > len ? str.substring(0, len) + '...' : str;
+}
 
 // =============================================================================
 // STACK DATABASE FUNCTIONS (Cross-Reference with MariaDB)

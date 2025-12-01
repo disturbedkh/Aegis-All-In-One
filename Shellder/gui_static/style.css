@@ -1741,8 +1741,424 @@ select:focus {
 }
 
 /* =============================================================================
+   DEVICES PAGE
+   ============================================================================= */
+
+.device-stats-grid {
+    margin-bottom: 24px;
+}
+
+.devices-layout {
+    display: grid;
+    grid-template-columns: 2fr 1fr;
+    gap: 20px;
+}
+
+.devices-list-card {
+    min-height: 400px;
+}
+
+.crashes-card {
+    min-height: 400px;
+    max-height: 600px;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+}
+
+.crashes-card .card-body {
+    overflow-y: auto;
+}
+
+.search-input {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 12px;
+    color: var(--text-primary);
+    font-size: 0.9em;
+    width: 180px;
+}
+
+.search-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+/* Devices Table */
+.devices-table-container {
+    overflow-x: auto;
+}
+
+.devices-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.devices-table th {
+    text-align: left;
+    padding: 12px 8px;
+    border-bottom: 2px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.85em;
+    font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.devices-table td {
+    padding: 10px 8px;
+    border-bottom: 1px solid var(--border-color);
+    vertical-align: middle;
+}
+
+.devices-table tr:hover {
+    background: var(--bg-hover);
+}
+
+.devices-table tr.online .status-indicator {
+    color: var(--success);
+}
+
+.devices-table tr.offline {
+    opacity: 0.7;
+}
+
+.devices-table tr.offline .status-indicator {
+    color: var(--danger);
+}
+
+.device-name {
+    cursor: pointer;
+    font-weight: 500;
+}
+
+.device-name:hover {
+    color: var(--accent-primary);
+}
+
+.device-origin {
+    display: block;
+    color: var(--text-muted);
+    font-size: 0.8em;
+}
+
+.crash-count.danger {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.uptime.success { color: var(--success); }
+.uptime.warning { color: var(--warning); }
+.uptime.danger { color: var(--danger); }
+
+/* Crash List */
+.crash-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.crash-item {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    cursor: pointer;
+    border-left: 3px solid var(--danger);
+    transition: var(--transition-fast);
+}
+
+.crash-item:hover {
+    background: var(--bg-hover);
+    border-left-color: var(--accent-primary);
+}
+
+.crash-item.resolved {
+    opacity: 0.6;
+    border-left-color: var(--success);
+}
+
+.crash-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 6px;
+}
+
+.crash-type {
+    font-size: 0.85em;
+    font-weight: 500;
+    padding: 2px 8px;
+    background: rgba(239, 68, 68, 0.2);
+    border-radius: 12px;
+    color: var(--danger);
+}
+
+.crash-type.disconnect { background: rgba(245, 158, 11, 0.2); color: var(--warning); }
+.crash-type.timeout { background: rgba(59, 130, 246, 0.2); color: var(--accent-secondary); }
+
+.crash-time {
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.crash-device {
+    font-weight: 500;
+    margin-bottom: 4px;
+}
+
+.crash-message {
+    font-size: 0.85em;
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.crash-source {
+    margin-top: 8px;
+    display: flex;
+    gap: 10px;
+    font-size: 0.8em;
+}
+
+.log-source {
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--accent-secondary);
+}
+
+.log-line {
+    color: var(--text-muted);
+}
+
+.startup-badge {
+    background: var(--warning);
+    color: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-weight: 500;
+}
+
+/* Log Context Modal */
+.modal {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: rgba(0, 0, 0, 0.8);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    z-index: 1000;
+    padding: 20px;
+}
+
+.modal-content {
+    background: var(--bg-card);
+    border-radius: var(--radius-lg);
+    width: 100%;
+    max-width: 600px;
+    max-height: 80vh;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+}
+
+.modal-content.large {
+    max-width: 900px;
+    max-height: 90vh;
+}
+
+.modal-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 20px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.modal-header h3 {
+    margin: 0;
+    font-size: 1.1em;
+}
+
+.close-modal {
+    background: none;
+    border: none;
+    font-size: 1.2em;
+    cursor: pointer;
+    color: var(--text-muted);
+}
+
+.close-modal:hover {
+    color: var(--text-primary);
+}
+
+.modal-body {
+    padding: 20px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.log-context-info {
+    display: flex;
+    gap: 20px;
+    margin-bottom: 16px;
+    padding-bottom: 12px;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
+}
+
+.log-context-info span {
+    font-size: 0.9em;
+    color: var(--text-secondary);
+}
+
+.log-context-controls {
+    display: flex;
+    gap: 10px;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+#logContextRange {
+    color: var(--text-muted);
+    font-size: 0.9em;
+}
+
+#logContextContent {
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    padding: 16px;
+    font-family: var(--font-mono);
+    font-size: 0.85em;
+    line-height: 1.6;
+    white-space: pre-wrap;
+    word-break: break-word;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.crash-highlight {
+    background: rgba(239, 68, 68, 0.3);
+    display: inline-block;
+    width: 100%;
+    margin: 0 -16px;
+    padding: 2px 16px;
+}
+
+/* Device Detail Modal */
+.device-detail-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+}
+
+.device-detail-header h2 {
+    margin: 0;
+    font-family: var(--font-mono);
+}
+
+.device-detail-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 20px;
+}
+
+.detail-section {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+}
+
+.detail-section.full-width {
+    grid-column: 1 / -1;
+}
+
+.detail-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 0.9em;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.detail-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+    font-size: 0.9em;
+}
+
+.detail-row span:first-child {
+    color: var(--text-muted);
+}
+
+.recent-crashes-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.crash-mini {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    font-size: 0.85em;
+}
+
+.crash-mini:hover {
+    background: var(--bg-hover);
+}
+
+.crash-mini .crash-type {
+    font-size: 0.8em;
+}
+
+.crash-mini .crash-message {
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.crash-mini .crash-time {
+    white-space: nowrap;
+}
+
+/* Text colors */
+.text-danger { color: var(--danger) !important; }
+.text-success { color: var(--success) !important; }
+.text-warning { color: var(--warning) !important; }
+
+/* =============================================================================
    RESPONSIVE
    ============================================================================= */
+
+@media (max-width: 1200px) {
+    .devices-layout {
+        grid-template-columns: 1fr;
+    }
+    
+    .device-detail-grid {
+        grid-template-columns: 1fr 1fr;
+    }
+}
+
+@media (max-width: 768px) {
+    .device-detail-grid {
+        grid-template-columns: 1fr;
+    }
+}
 
 @media (max-width: 1024px) {
     .sidebar {

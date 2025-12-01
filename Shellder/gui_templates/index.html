@@ -35,6 +35,10 @@
             
             <div class="nav-section">
                 <div class="nav-label">Monitoring</div>
+                <a href="#" class="nav-item" data-page="devices">
+                    <span class="nav-icon">📱</span>
+                    <span>Devices</span>
+                </a>
                 <a href="#" class="nav-item" data-page="stack">
                     <span class="nav-icon">🎮</span>
                     <span>Stack Data</span>
@@ -426,6 +430,112 @@
                     <div class="card-body">
                         <div id="deviceList" class="device-list">
                             <div class="loading">Loading device list...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Devices Page - Comprehensive Device Management -->
+            <div id="page-devices" class="page">
+                <!-- Summary Stats -->
+                <div class="stats-grid device-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon success">📱</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="devicesOnline">-</div>
+                            <div class="stat-label">Online</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon stopped">⏹️</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="devicesOffline">-</div>
+                            <div class="stat-label">Offline</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon danger">💥</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="devicesCrashes24h">-</div>
+                            <div class="stat-label">Crashes (24h)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">⏱️</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="devicesAvgUptime">-</div>
+                            <div class="stat-label">Avg Uptime</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="devices-layout">
+                    <!-- Device List -->
+                    <div class="card devices-list-card">
+                        <div class="card-header">
+                            <h2>📱 Device Status</h2>
+                            <div class="card-actions">
+                                <input type="text" id="deviceSearch" placeholder="Search devices..." class="search-input">
+                                <button class="btn btn-sm btn-icon" onclick="refreshDevices()">🔄</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="devicesList" class="devices-table-container">
+                                <div class="loading">Loading devices...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Crash History -->
+                    <div class="card crashes-card">
+                        <div class="card-header">
+                            <h2>💥 Recent Crashes</h2>
+                            <select id="crashDeviceFilter" onchange="filterCrashes()">
+                                <option value="">All Devices</option>
+                            </select>
+                        </div>
+                        <div class="card-body">
+                            <div id="crashList" class="crash-list">
+                                <div class="loading">Loading crashes...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Log Context Viewer Modal -->
+                <div id="logContextModal" class="modal" style="display:none;">
+                    <div class="modal-content large">
+                        <div class="modal-header">
+                            <h3>📜 Log Context</h3>
+                            <button class="btn btn-icon close-modal" onclick="closeLogModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="log-context-info">
+                                <span id="logContextDevice"></span>
+                                <span id="logContextType"></span>
+                                <span id="logContextTime"></span>
+                            </div>
+                            <div class="log-context-controls">
+                                <button class="btn btn-sm" onclick="loadMoreContext(-50)">⬆️ Earlier</button>
+                                <span id="logContextRange"></span>
+                                <button class="btn btn-sm" onclick="loadMoreContext(50)">⬇️ Later</button>
+                            </div>
+                            <pre id="logContextContent" class="log-viewer"></pre>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Device Detail Modal -->
+                <div id="deviceDetailModal" class="modal" style="display:none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3>📱 Device Details</h3>
+                            <button class="btn btn-icon close-modal" onclick="closeDeviceModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div id="deviceDetailContent">
+                                <div class="loading">Loading...</div>
+                            </div>
                         </div>
                     </div>
                 </div>

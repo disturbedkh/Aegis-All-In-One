@@ -675,6 +675,545 @@ class StackDB:
 stack_db = StackDB()
 
 # =============================================================================
+# DEVICE MANAGER - Cross-Reference Devices Across Logs & Database
+# =============================================================================
+
+class DeviceManager:
+    """
+    Comprehensive device tracking that cross-references:
+    - Rotom logs (connection, disconnect, memory)
+    - Dragonite logs (task assignment, errors, crashes)
+    - Dragonite database (device table)
+    - Shellder SQLite (persistent stats, crash history)
+    
+    Tracks: crashes, disconnects, uptime, reconnects with log line references
+    """
+    
+    def __init__(self, shellder_db_path, aegis_root):
+        self.db_path = shellder_db_path
+        self.aegis_root = aegis_root
+        self.devices = {}  # In-memory device cache
+        self.lock = threading.Lock()
+        
+        # Crash patterns to detect in logs
+        self.crash_patterns = {
+            'rotom': [
+                (re.compile(r'(\S+)/\d+:\s*Disconnected.*performing disconnection activities'), 'disconnect'),
+                (re.compile(r'CONTROLLER:\s*Disconnected worker\s+(\S+)'), 'worker_disconnect'),
+                (re.compile(r'(\S+):\s*error|Error|ERROR'), 'error'),
+                (re.compile(r'(\S+):\s*crash|Crash|CRASH'), 'crash'),
+                (re.compile(r'(\S+):\s*timeout|Timeout|TIMEOUT'), 'timeout'),
+                (re.compile(r'(\S+):\s*failed|Failed|FAILED'), 'failed'),
+            ],
+            'dragonite': [
+                (re.compile(r'device.*(\S+).*disconnect', re.I), 'disconnect'),
+                (re.compile(r'worker.*(\S+).*error', re.I), 'worker_error'),
+                (re.compile(r'device.*(\S+).*timeout', re.I), 'timeout'),
+                (re.compile(r'(\S+).*account.*banned', re.I), 'account_banned'),
+                (re.compile(r'(\S+).*no.*suitable.*account', re.I), 'no_account'),
+                (re.compile(r'(\S+).*failed.*task', re.I), 'task_failed'),
+                (re.compile(r'(\S+).*connection.*refused', re.I), 'connection_refused'),
+            ]
+        }
+    
+    def _connect_sqlite(self):
+        """Connect to Shellder's SQLite database"""
+        if not self.db_path.exists():
+            return None
+        return sqlite3.connect(str(self.db_path), timeout=10)
+    
+    def get_all_devices(self):
+        """Get comprehensive device list from all sources"""
+        devices = {}
+        
+        # 1. Get from Dragonite database (authoritative source)
+        db_devices = stack_db.get_device_status()
+        for dev in db_devices:
+            name = dev.get('uuid', '')
+            if name:
+                devices[name] = {
+                    'uuid': name,
+                    'source': 'dragonite_db',
+                    'instance': dev.get('instance'),
+                    'account': dev.get('account'),
+                    'host': dev.get('host'),
+                    'last_seen': dev.get('last_seen'),
+                    'lat': dev.get('lat'),
+                    'lon': dev.get('lon'),
+                    'online': dev.get('online', False),
+                    'stats': self._get_device_stats(name)
+                }
+        
+        # 2. Merge with Shellder persistent data
+        conn = self._connect_sqlite()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT device_name, worker_id, origin, version, 
+                           total_connections, total_disconnections,
+                           total_crashes, total_errors, total_uptime_seconds,
+                           is_online, first_seen, last_seen,
+                           last_connect_time, last_disconnect_time
+                    FROM rotom_devices
+                """)
+                for row in cursor.fetchall():
+                    name = row[0]
+                    if name not in devices:
+                        devices[name] = {
+                            'uuid': name,
+                            'source': 'shellder_db',
+                            'online': bool(row[9])
+                        }
+                    devices[name].update({
+                        'worker_id': row[1],
+                        'origin': row[2],
+                        'version': row[3],
+                        'total_connections': row[4] or 0,
+                        'total_disconnections': row[5] or 0,
+                        'total_crashes': row[6] or 0,
+                        'total_errors': row[7] or 0,
+                        'total_uptime_seconds': row[8] or 0,
+                        'first_seen': row[10],
+                        'last_seen_shellder': row[11],
+                        'last_connect': row[12],
+                        'last_disconnect': row[13]
+                    })
+            except Exception as e:
+                print(f"Error getting device data from SQLite: {e}")
+            finally:
+                conn.close()
+        
+        # 3. Calculate derived stats
+        for name, dev in devices.items():
+            dev['uptime_percent'] = self._calculate_uptime_percent(dev)
+            dev['crash_rate'] = self._calculate_crash_rate(dev)
+            dev['recent_crashes'] = self._get_recent_crashes(name, limit=5)
+        
+        return list(devices.values())
+    
+    def _get_device_stats(self, device_name):
+        """Get device stats from SQLite"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return {}
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT total_connections, total_disconnections, 
+                       total_crashes, total_errors, total_uptime_seconds
+                FROM rotom_devices WHERE device_name = ?
+            """, (device_name,))
+            row = cursor.fetchone()
+            if row:
+                return {
+                    'connections': row[0] or 0,
+                    'disconnections': row[1] or 0,
+                    'crashes': row[2] or 0,
+                    'errors': row[3] or 0,
+                    'uptime_seconds': row[4] or 0
+                }
+            return {}
+        except:
+            return {}
+        finally:
+            conn.close()
+    
+    def _calculate_uptime_percent(self, device):
+        """Calculate uptime percentage based on sessions"""
+        total_uptime = device.get('total_uptime_seconds', 0)
+        first_seen = device.get('first_seen')
+        if not first_seen or total_uptime == 0:
+            return 0.0
+        
+        try:
+            first = datetime.fromisoformat(first_seen.replace('Z', '+00:00'))
+            total_possible = (datetime.now(first.tzinfo or None) - first).total_seconds()
+            if total_possible > 0:
+                return round((total_uptime / total_possible) * 100, 1)
+        except:
+            pass
+        return 0.0
+    
+    def _calculate_crash_rate(self, device):
+        """Calculate crashes per hour"""
+        crashes = device.get('total_crashes', 0)
+        uptime = device.get('total_uptime_seconds', 0)
+        if uptime > 0:
+            return round((crashes / (uptime / 3600)), 2)
+        return 0.0
+    
+    def _get_recent_crashes(self, device_name, limit=10):
+        """Get recent crashes for a device"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT id, crash_type, error_message, log_source,
+                       log_line_start, log_line_end, is_during_startup, created_at
+                FROM device_crashes
+                WHERE device_name = ?
+                ORDER BY created_at DESC
+                LIMIT ?
+            """, (device_name, limit))
+            return [
+                {
+                    'id': row[0],
+                    'type': row[1],
+                    'message': row[2],
+                    'log_source': row[3],
+                    'line_start': row[4],
+                    'line_end': row[5],
+                    'is_startup': bool(row[6]),
+                    'time': row[7]
+                }
+                for row in cursor.fetchall()
+            ]
+        except Exception as e:
+            print(f"Error getting crashes: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_device_crash_history(self, device_name=None, limit=100):
+        """Get crash history, optionally filtered by device"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            if device_name:
+                cursor.execute("""
+                    SELECT id, device_name, crash_type, error_message, log_source,
+                           log_line_start, log_line_end, is_during_startup, 
+                           resolved, created_at
+                    FROM device_crashes
+                    WHERE device_name = ?
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (device_name, limit))
+            else:
+                cursor.execute("""
+                    SELECT id, device_name, crash_type, error_message, log_source,
+                           log_line_start, log_line_end, is_during_startup,
+                           resolved, created_at
+                    FROM device_crashes
+                    ORDER BY created_at DESC
+                    LIMIT ?
+                """, (limit,))
+            
+            return [
+                {
+                    'id': row[0],
+                    'device': row[1],
+                    'type': row[2],
+                    'message': row[3],
+                    'log_source': row[4],
+                    'line_start': row[5],
+                    'line_end': row[6],
+                    'is_startup': bool(row[7]),
+                    'resolved': bool(row[8]),
+                    'time': row[9]
+                }
+                for row in cursor.fetchall()
+            ]
+        except Exception as e:
+            print(f"Error getting crash history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_crash_log_context(self, crash_id, context_lines=50):
+        """Get log context for a specific crash"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return {'error': 'Database not available'}
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT device_name, crash_type, error_message, log_source,
+                       log_line_start, log_line_end, log_context, created_at
+                FROM device_crashes
+                WHERE id = ?
+            """, (crash_id,))
+            row = cursor.fetchone()
+            
+            if not row:
+                return {'error': 'Crash not found'}
+            
+            result = {
+                'device': row[0],
+                'type': row[1],
+                'message': row[2],
+                'log_source': row[3],
+                'line_start': row[4],
+                'line_end': row[5],
+                'stored_context': row[6],
+                'time': row[7]
+            }
+            
+            # Try to get fresh context from Docker logs
+            if docker_client and row[3]:
+                try:
+                    container = docker_client.containers.get(row[3])
+                    if container.status == 'running':
+                        logs = container.logs(tail=2000, timestamps=True).decode('utf-8', errors='ignore')
+                        lines = logs.split('\n')
+                        
+                        # Find the crash line and get context
+                        crash_line = row[4] or 0
+                        start = max(0, crash_line - context_lines)
+                        end = min(len(lines), crash_line + context_lines)
+                        
+                        result['live_context'] = '\n'.join(lines[start:end])
+                        result['context_range'] = {'start': start, 'end': end, 'crash_line': crash_line}
+                except Exception as e:
+                    result['live_context_error'] = str(e)
+            
+            return result
+        except Exception as e:
+            return {'error': str(e)}
+        finally:
+            conn.close()
+    
+    def record_device_event(self, device_name, event_type, details=None, 
+                           log_source=None, log_line=None):
+        """Record a device event"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO rotom_events (event_type, device_name, details, 
+                                         log_source, log_line_number)
+                VALUES (?, ?, ?, ?, ?)
+            """, (event_type, device_name, json.dumps(details) if details else None,
+                  log_source, log_line))
+            
+            # Update device stats based on event type
+            if event_type == 'connect':
+                cursor.execute("""
+                    UPDATE rotom_devices SET 
+                        total_connections = total_connections + 1,
+                        is_online = 1,
+                        last_connect_time = CURRENT_TIMESTAMP,
+                        current_session_start = CURRENT_TIMESTAMP,
+                        last_seen = CURRENT_TIMESTAMP
+                    WHERE device_name = ?
+                """, (device_name,))
+                
+            elif event_type in ('disconnect', 'worker_disconnect'):
+                # Calculate session duration and update uptime
+                cursor.execute("""
+                    SELECT current_session_start FROM rotom_devices WHERE device_name = ?
+                """, (device_name,))
+                row = cursor.fetchone()
+                session_duration = 0
+                if row and row[0]:
+                    try:
+                        start = datetime.fromisoformat(row[0])
+                        session_duration = int((datetime.now() - start).total_seconds())
+                    except:
+                        pass
+                
+                cursor.execute("""
+                    UPDATE rotom_devices SET 
+                        total_disconnections = total_disconnections + 1,
+                        is_online = 0,
+                        last_disconnect_time = CURRENT_TIMESTAMP,
+                        total_uptime_seconds = total_uptime_seconds + ?,
+                        last_seen = CURRENT_TIMESTAMP
+                    WHERE device_name = ?
+                """, (session_duration, device_name))
+                
+                # Record session
+                cursor.execute("""
+                    INSERT INTO device_sessions (device_name, session_start, session_end, 
+                                                duration_seconds, end_reason)
+                    VALUES (?, (SELECT current_session_start FROM rotom_devices WHERE device_name = ?),
+                            CURRENT_TIMESTAMP, ?, ?)
+                """, (device_name, device_name, session_duration, event_type))
+                
+            elif event_type in ('crash', 'error', 'timeout', 'failed'):
+                cursor.execute("""
+                    UPDATE rotom_devices SET 
+                        total_crashes = total_crashes + 1,
+                        last_seen = CURRENT_TIMESTAMP
+                    WHERE device_name = ?
+                """, (device_name,))
+            
+            conn.commit()
+        except Exception as e:
+            print(f"Error recording device event: {e}")
+        finally:
+            conn.close()
+    
+    def record_crash(self, device_name, crash_type, error_message, log_source,
+                    log_line_start=None, log_line_end=None, log_context=None,
+                    is_during_startup=False):
+        """Record a device crash with log reference"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return None
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Check for similar recent crash (deduplication)
+            cursor.execute("""
+                SELECT id FROM device_crashes 
+                WHERE device_name = ? AND crash_type = ? 
+                AND error_message = ? AND log_source = ?
+                AND created_at > datetime('now', '-5 minutes')
+            """, (device_name, crash_type, error_message, log_source))
+            existing = cursor.fetchone()
+            
+            if existing:
+                # Link to existing crash instead of creating duplicate
+                return existing[0]
+            
+            cursor.execute("""
+                INSERT INTO device_crashes (device_name, crash_type, error_message,
+                                           log_source, log_line_start, log_line_end,
+                                           log_context, is_during_startup)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """, (device_name, crash_type, error_message, log_source,
+                  log_line_start, log_line_end, log_context, int(is_during_startup)))
+            
+            crash_id = cursor.lastrowid
+            
+            # Update device crash count
+            cursor.execute("""
+                INSERT INTO rotom_devices (device_name, total_crashes)
+                VALUES (?, 1)
+                ON CONFLICT(device_name) DO UPDATE SET
+                    total_crashes = total_crashes + 1,
+                    last_seen = CURRENT_TIMESTAMP
+            """, (device_name,))
+            
+            conn.commit()
+            return crash_id
+        except Exception as e:
+            print(f"Error recording crash: {e}")
+            return None
+        finally:
+            conn.close()
+    
+    def get_device_summary(self):
+        """Get summary statistics across all devices"""
+        conn = self._connect_sqlite()
+        if not conn:
+            return {}
+        
+        try:
+            cursor = conn.cursor()
+            
+            # Overall stats
+            cursor.execute("""
+                SELECT 
+                    COUNT(*) as total_devices,
+                    SUM(CASE WHEN is_online = 1 THEN 1 ELSE 0 END) as online_devices,
+                    SUM(total_connections) as total_connections,
+                    SUM(total_disconnections) as total_disconnections,
+                    SUM(total_crashes) as total_crashes,
+                    SUM(total_uptime_seconds) as total_uptime,
+                    AVG(total_uptime_seconds) as avg_uptime
+                FROM rotom_devices
+            """)
+            row = cursor.fetchone()
+            
+            summary = {
+                'total_devices': row[0] or 0,
+                'online_devices': row[1] or 0,
+                'offline_devices': (row[0] or 0) - (row[1] or 0),
+                'total_connections': row[2] or 0,
+                'total_disconnections': row[3] or 0,
+                'total_crashes': row[4] or 0,
+                'total_uptime_seconds': row[5] or 0,
+                'avg_uptime_seconds': row[6] or 0
+            }
+            
+            # Recent crashes (last 24h)
+            cursor.execute("""
+                SELECT COUNT(*) FROM device_crashes
+                WHERE created_at > datetime('now', '-24 hours')
+            """)
+            summary['crashes_24h'] = cursor.fetchone()[0] or 0
+            
+            # Devices with most crashes
+            cursor.execute("""
+                SELECT device_name, total_crashes 
+                FROM rotom_devices 
+                WHERE total_crashes > 0
+                ORDER BY total_crashes DESC
+                LIMIT 5
+            """)
+            summary['worst_devices'] = [
+                {'device': row[0], 'crashes': row[1]} 
+                for row in cursor.fetchall()
+            ]
+            
+            # Recent events
+            cursor.execute("""
+                SELECT event_type, device_name, created_at 
+                FROM rotom_events
+                ORDER BY created_at DESC
+                LIMIT 20
+            """)
+            summary['recent_events'] = [
+                {'type': row[0], 'device': row[1], 'time': row[2]}
+                for row in cursor.fetchall()
+            ]
+            
+            summary['timestamp'] = datetime.now().isoformat()
+            return summary
+        except Exception as e:
+            print(f"Error getting device summary: {e}")
+            return {'error': str(e)}
+        finally:
+            conn.close()
+    
+    def parse_logs_for_crashes(self, container_name, log_content, line_offset=0):
+        """Parse log content for device-related crashes and errors"""
+        patterns = self.crash_patterns.get(container_name, [])
+        crashes_found = []
+        
+        lines = log_content.split('\n')
+        for i, line in enumerate(lines):
+            line_num = line_offset + i
+            
+            for pattern, crash_type in patterns:
+                match = pattern.search(line)
+                if match:
+                    device_name = match.group(1) if match.groups() else 'unknown'
+                    
+                    # Get context (5 lines before and after)
+                    context_start = max(0, i - 5)
+                    context_end = min(len(lines), i + 6)
+                    context = '\n'.join(lines[context_start:context_end])
+                    
+                    crashes_found.append({
+                        'device': device_name,
+                        'type': crash_type,
+                        'message': line.strip()[:500],  # Limit message length
+                        'line': line_num,
+                        'context': context
+                    })
+        
+        return crashes_found
+
+# Initialize device manager (will be done after ShellderDB is available)
+device_manager = None
+
+# =============================================================================
 # SQLITE DATABASE ACCESS (Shellder's own database for persistence)
 # =============================================================================
 
@@ -904,7 +1443,7 @@ class ShellderDB:
         try:
             cursor = conn.cursor()
             
-            # Rotom device stats
+            # Rotom device stats - Enhanced for comprehensive tracking
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rotom_devices (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -916,13 +1455,20 @@ class ShellderDB:
                     last_memory_mitm INTEGER,
                     total_connections INTEGER DEFAULT 0,
                     total_disconnections INTEGER DEFAULT 0,
+                    total_crashes INTEGER DEFAULT 0,
+                    total_errors INTEGER DEFAULT 0,
+                    total_uptime_seconds INTEGER DEFAULT 0,
+                    last_connect_time DATETIME,
+                    last_disconnect_time DATETIME,
+                    current_session_start DATETIME,
+                    is_online INTEGER DEFAULT 0,
                     first_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
                     UNIQUE(device_name)
                 )
             """)
             
-            # Rotom connection events
+            # Rotom connection events - Enhanced
             cursor.execute("""
                 CREATE TABLE IF NOT EXISTS rotom_events (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -931,7 +1477,42 @@ class ShellderDB:
                     worker_id TEXT,
                     ip_address TEXT,
                     details TEXT,
+                    log_source TEXT,
+                    log_line_number INTEGER,
                     created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Device crash/error tracking with log references
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS device_crashes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_name TEXT NOT NULL,
+                    crash_type TEXT NOT NULL,
+                    error_message TEXT,
+                    log_source TEXT NOT NULL,
+                    log_line_start INTEGER,
+                    log_line_end INTEGER,
+                    log_context TEXT,
+                    related_crash_id INTEGER,
+                    is_during_startup INTEGER DEFAULT 0,
+                    resolved INTEGER DEFAULT 0,
+                    created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                    FOREIGN KEY (related_crash_id) REFERENCES device_crashes(id)
+                )
+            """)
+            
+            # Device uptime sessions
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS device_sessions (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    device_name TEXT NOT NULL,
+                    session_start DATETIME NOT NULL,
+                    session_end DATETIME,
+                    duration_seconds INTEGER,
+                    end_reason TEXT,
+                    crash_id INTEGER,
+                    FOREIGN KEY (crash_id) REFERENCES device_crashes(id)
                 )
             """)
             
@@ -1551,6 +2132,9 @@ shellder_db = ShellderDB(SHELLDER_DB)
 
 # Ensure service tables exist on startup
 shellder_db.ensure_service_tables()
+
+# Initialize device manager for cross-referencing
+device_manager = DeviceManager(SHELLDER_DB, AEGIS_ROOT)
 
 # =============================================================================
 # STATS COLLECTOR (Real-time)
@@ -3226,6 +3810,121 @@ def api_stack_efficiency():
 def api_stack_health():
     """Get comprehensive health dashboard from all databases"""
     return jsonify(stack_db.get_health_dashboard())
+
+# =============================================================================
+# DEVICE MANAGEMENT ENDPOINTS (Cross-reference Rotom/Dragonite logs & DB)
+# =============================================================================
+
+@app.route('/api/devices')
+def api_devices():
+    """Get all devices with cross-referenced stats from logs and database"""
+    return jsonify(device_manager.get_all_devices())
+
+@app.route('/api/devices/summary')
+def api_devices_summary():
+    """Get device summary statistics"""
+    return jsonify(device_manager.get_device_summary())
+
+@app.route('/api/devices/<device_name>')
+def api_device_detail(device_name):
+    """Get detailed info for a specific device"""
+    devices = device_manager.get_all_devices()
+    for dev in devices:
+        if dev.get('uuid') == device_name:
+            return jsonify(dev)
+    return jsonify({'error': 'Device not found'}), 404
+
+@app.route('/api/devices/<device_name>/crashes')
+def api_device_crashes(device_name):
+    """Get crash history for a specific device"""
+    limit = request.args.get('limit', 50, type=int)
+    return jsonify(device_manager.get_device_crash_history(device_name, limit))
+
+@app.route('/api/devices/crashes')
+def api_all_crashes():
+    """Get all device crashes across all devices"""
+    limit = request.args.get('limit', 100, type=int)
+    return jsonify(device_manager.get_device_crash_history(None, limit))
+
+@app.route('/api/devices/crashes/<int:crash_id>')
+def api_crash_detail(crash_id):
+    """Get details of a specific crash"""
+    return jsonify(device_manager.get_crash_log_context(crash_id))
+
+@app.route('/api/devices/crashes/<int:crash_id>/context')
+def api_crash_context(crash_id):
+    """Get log context for a crash with configurable line count"""
+    context_lines = request.args.get('lines', 50, type=int)
+    return jsonify(device_manager.get_crash_log_context(crash_id, context_lines))
+
+@app.route('/api/devices/log-context/<container>/<int:line>')
+def api_device_log_context(container, line):
+    """Get log context around a specific line number"""
+    context_lines = request.args.get('lines', 50, type=int)
+    
+    if docker_client:
+        try:
+            cont = docker_client.containers.get(container)
+            if cont.status == 'running':
+                logs = cont.logs(tail=2000, timestamps=True).decode('utf-8', errors='ignore')
+                lines = logs.split('\n')
+                
+                start = max(0, line - context_lines)
+                end = min(len(lines), line + context_lines)
+                
+                return jsonify({
+                    'container': container,
+                    'line': line,
+                    'context': '\n'.join(lines[start:end]),
+                    'range': {'start': start, 'end': end},
+                    'total_lines': len(lines)
+                })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    return jsonify({'error': 'Docker not available'}), 503
+
+@app.route('/api/devices/search-logs')
+def api_device_search_logs():
+    """Search logs for a device across all containers"""
+    device = request.args.get('device', '')
+    container = request.args.get('container', 'rotom')
+    keyword = request.args.get('keyword', '')
+    limit = request.args.get('limit', 100, type=int)
+    
+    if not device and not keyword:
+        return jsonify({'error': 'Must specify device or keyword'}), 400
+    
+    search_term = device or keyword
+    results = []
+    
+    if docker_client:
+        containers = [container] if container else ['rotom', 'dragonite']
+        for cont_name in containers:
+            try:
+                cont = docker_client.containers.get(cont_name)
+                if cont.status == 'running':
+                    logs = cont.logs(tail=2000, timestamps=True).decode('utf-8', errors='ignore')
+                    lines = logs.split('\n')
+                    
+                    for i, line in enumerate(lines):
+                        if search_term.lower() in line.lower():
+                            results.append({
+                                'container': cont_name,
+                                'line': i,
+                                'content': line[:500],
+                                'timestamp': line[:30] if '[' in line[:30] else None
+                            })
+                            if len(results) >= limit:
+                                break
+            except Exception as e:
+                print(f"Error searching {cont_name}: {e}")
+    
+    return jsonify({
+        'query': search_term,
+        'results': results[:limit],
+        'total': len(results)
+    })
 
 # =============================================================================
 # SYSTEM ENDPOINTS
