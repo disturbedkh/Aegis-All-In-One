@@ -2016,10 +2016,10 @@ fix_directory_permissions "Shellder/data"
 fix_directory_permissions "Shellder/logs"
 
 # Verify permissions were set correctly
-local perm_issues=0
+perm_issues=0
 for dir in grafana victoriametrics/data vmagent/data unown/logs Shellder/data; do
     if [ -d "$dir" ]; then
-        local owner_uid=$(stat -c '%u' "$dir" 2>/dev/null || echo "unknown")
+        owner_uid=$(stat -c '%u' "$dir" 2>/dev/null || echo "unknown")
         if [ "$owner_uid" != "$CONTAINER_UID" ]; then
             print_warning "$dir ownership mismatch (is $owner_uid, should be $CONTAINER_UID)"
             ((perm_issues++))
