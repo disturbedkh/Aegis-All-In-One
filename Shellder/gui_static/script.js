@@ -139,6 +139,9 @@ function navigateTo(page) {
     const titles = {
         'dashboard': 'Dashboard',
         'containers': 'Containers',
+        'xilriws': 'Xilriws Auth Proxy',
+        'stats': 'Statistics',
+        'files': 'File Manager',
         'scripts': 'Scripts',
         'logs': 'Logs',
         'updates': 'Updates'
@@ -148,7 +151,10 @@ function navigateTo(page) {
     currentPage = page;
     
     // Load page-specific data
-    if (page === 'logs') {
+    if (page === 'xilriws') {
+        loadXilriwsStats();
+        loadXilriwsLogs();
+    } else if (page === 'logs') {
         loadShellderLogs();
     } else if (page === 'updates') {
         checkGitStatus();
@@ -271,51 +277,244 @@ function updateSystemStats(data) {
 }
 
 function updateXilriwsStats(data) {
-    // If we have an Xilriws stats section, update it
-    const statsEl = document.getElementById('xilriwsStats');
-    if (!statsEl) return;
+    /**
+     * Update Xilriws statistics on both dashboard and Xilriws page
+     * Handles the new detailed stats format from the improved log parser
+     */
     
-    if (!data || Object.keys(data).length === 0) {
-        statsEl.innerHTML = '<div class="xilriws-empty">Xilriws not running or no data yet</div>';
+    // Update dashboard summary if present
+    const dashboardEl = document.getElementById('xilriwsStats');
+    if (dashboardEl) {
+        if (!data || Object.keys(data).length === 0) {
+            dashboardEl.innerHTML = '<div class="xilriws-empty">Xilriws not running or no data yet</div>';
+        } else {
+            const successRate = data.success_rate || 0;
+            const rateClass = successRate > 80 ? 'excellent' : successRate > 50 ? 'good' : successRate > 20 ? 'warning' : 'critical';
+            
+            dashboardEl.innerHTML = `
+                <div class="xilriws-summary">
+                    <div class="xilriws-stat primary">
+                        <span class="stat-value ${rateClass}">${successRate.toFixed(1)}%</span>
+                        <span class="stat-label">Success Rate</span>
+                    </div>
+                    <div class="xilriws-stat">
+                        <span class="stat-value success">${data.successful || 0}</span>
+                        <span class="stat-label">Successful</span>
+                    </div>
+                    <div class="xilriws-stat">
+                        <span class="stat-value error">${data.failed || 0}</span>
+                        <span class="stat-label">Failed</span>
+                    </div>
+                    <div class="xilriws-stat">
+                        <span class="stat-value">${data.total_requests || 0}</span>
+                        <span class="stat-label">Total</span>
+                    </div>
+                </div>
+            `;
+        }
+    }
+    
+    // Update Xilriws page elements if present
+    updateXilriwsPage(data);
+}
+
+function updateXilriwsPage(data) {
+    /**
+     * Update the dedicated Xilriws page with detailed statistics
+     */
+    if (!data) return;
+    
+    // Main stats
+    const successRate = data.success_rate || 0;
+    const rateEl = document.getElementById('xilSuccessRate');
+    if (rateEl) {
+        rateEl.textContent = `${successRate.toFixed(1)}%`;
+        rateEl.parentElement?.classList.remove('excellent', 'good', 'warning', 'critical');
+        const rateClass = successRate > 80 ? 'excellent' : successRate > 50 ? 'good' : successRate > 20 ? 'warning' : 'critical';
+        rateEl.parentElement?.classList.add(rateClass);
+    }
+    
+    setElementText('xilSuccessful', data.successful || data.auth_success || 0);
+    setElementText('xilFailed', data.failed || 0);
+    setElementText('xilTotal', data.total_requests || 0);
+    
+    // Cookie storage
+    const cookieCurrent = data.cookie_current ?? 0;
+    const cookieMax = data.cookie_max ?? 2;
+    setElementText('xilCookieStatus', `${cookieCurrent}/${cookieMax}`);
+    
+    // Critical events
+    setElementText('xilCritical', data.critical_failures || 0);
+    const criticalIcon = document.getElementById('criticalIcon');
+    if (criticalIcon) {
+        criticalIcon.textContent = data.critical_failures > 0 ? '🔥' : '⚠️';
+        criticalIcon.parentElement?.classList.toggle('danger', data.critical_failures > 0);
+    }
+    
+    // Error breakdown - Account Status
+    setElementText('xilAuthBanned', data.auth_banned || 0);
+    setElementText('xilMaxRetries', data.auth_max_retries || 0);
+    setElementText('xilInternalError', data.auth_internal_error || 0);
+    
+    // Error breakdown - Browser Issues
+    setElementText('xilCode15', data.browser_bot_protection || 0);
+    setElementText('xilBrowserTimeout', data.browser_timeout || 0);
+    setElementText('xilBrowserUnreachable', data.browser_unreachable || 0);
+    setElementText('xilJSTimeout', data.browser_js_timeout || 0);
+    
+    // Error breakdown - Connection Issues
+    setElementText('xilTunnelFailed', data.ptc_tunnel_failed || 0);
+    setElementText('xilConnTimeout', data.ptc_connection_timeout || 0);
+    setElementText('xilCaptcha', data.ptc_captcha || 0);
+    
+    // Current proxy badge
+    const proxyBadge = document.getElementById('currentProxyBadge');
+    if (proxyBadge) {
+        proxyBadge.textContent = data.current_proxy ? `Current: ${data.current_proxy}` : 'Current: --';
+    }
+    
+    // Update proxy stats
+    updateProxyStats(data.proxy_stats || {});
+    
+    // Update recent errors
+    updateRecentErrors(data.recent_errors || []);
+    
+    // Update error count badge
+    const errorCountEl = document.getElementById('errorCount');
+    if (errorCountEl) {
+        const errorCount = (data.recent_errors || []).length;
+        errorCountEl.textContent = `${errorCount} error${errorCount !== 1 ? 's' : ''}`;
+    }
+}
+
+function setElementText(id, value) {
+    const el = document.getElementById(id);
+    if (el) el.textContent = value;
+}
+
+function updateProxyStats(proxyStats) {
+    /**
+     * Update the proxy performance table
+     */
+    const container = document.getElementById('proxyStats');
+    if (!container) return;
+    
+    const proxies = Object.entries(proxyStats);
+    
+    if (proxies.length === 0) {
+        container.innerHTML = '<div class="no-data">No proxy data available</div>';
         return;
     }
     
-    const successRate = data.success_rate || 0;
-    const rateClass = successRate > 80 ? 'excellent' : successRate > 50 ? 'good' : successRate > 20 ? 'warning' : 'critical';
+    // Sort by requests (most active first)
+    proxies.sort((a, b) => (b[1].requests || 0) - (a[1].requests || 0));
     
-    statsEl.innerHTML = `
-        <div class="xilriws-summary">
-            <div class="xilriws-stat primary">
-                <span class="stat-value ${rateClass}">${successRate.toFixed(1)}%</span>
-                <span class="stat-label">Success Rate</span>
-            </div>
-            <div class="xilriws-stat">
-                <span class="stat-value success">${data.successful || 0}</span>
-                <span class="stat-label">Successful</span>
-            </div>
-            <div class="xilriws-stat">
-                <span class="stat-value error">${data.failed || 0}</span>
-                <span class="stat-label">Failed</span>
-            </div>
-            <div class="xilriws-stat">
-                <span class="stat-value">${data.total_requests || 0}</span>
-                <span class="stat-label">Total Requests</span>
-            </div>
-        </div>
-        ${data.auth_banned > 0 || data.code_15 > 0 || data.rate_limited > 0 ? `
-        <div class="xilriws-errors">
-            <div class="error-title">Error Breakdown</div>
-            <div class="error-grid">
-                ${data.auth_banned > 0 ? `<div class="error-item"><span class="count">${data.auth_banned}</span> Auth Banned</div>` : ''}
-                ${data.code_15 > 0 ? `<div class="error-item"><span class="count">${data.code_15}</span> Code 15</div>` : ''}
-                ${data.rate_limited > 0 ? `<div class="error-item"><span class="count">${data.rate_limited}</span> Rate Limited</div>` : ''}
-                ${data.invalid_credentials > 0 ? `<div class="error-item"><span class="count">${data.invalid_credentials}</span> Invalid Creds</div>` : ''}
-                ${data.tunneling_errors > 0 ? `<div class="error-item"><span class="count">${data.tunneling_errors}</span> Tunnel Errors</div>` : ''}
-                ${data.timeouts > 0 ? `<div class="error-item"><span class="count">${data.timeouts}</span> Timeouts</div>` : ''}
-            </div>
-        </div>
-        ` : ''}
+    let html = `
+        <table class="proxy-table">
+            <thead>
+                <tr>
+                    <th>Proxy</th>
+                    <th>Success</th>
+                    <th>Fail</th>
+                    <th>Rate</th>
+                    <th>Issues</th>
+                </tr>
+            </thead>
+            <tbody>
     `;
+    
+    for (const [proxy, stats] of proxies) {
+        const successRate = stats.success_rate || 0;
+        const rateClass = successRate > 80 ? 'rate-good' : successRate > 50 ? 'rate-ok' : 'rate-bad';
+        
+        // Build issues summary
+        const issues = [];
+        if (stats.timeout > 0) issues.push(`⏱${stats.timeout}`);
+        if (stats.unreachable > 0) issues.push(`🌐${stats.unreachable}`);
+        if (stats.bot_blocked > 0) issues.push(`🛡${stats.bot_blocked}`);
+        
+        // Highlight consistently failing proxies
+        const rowClass = stats.unreachable > 3 ? 'proxy-problematic' : '';
+        
+        html += `
+            <tr class="${rowClass}">
+                <td class="proxy-addr" title="${proxy}">${truncateProxy(proxy)}</td>
+                <td class="success">${stats.success || 0}</td>
+                <td class="fail">${stats.fail || 0}</td>
+                <td class="${rateClass}">${successRate.toFixed(0)}%</td>
+                <td class="issues">${issues.join(' ') || '-'}</td>
+            </tr>
+        `;
+    }
+    
+    html += '</tbody></table>';
+    container.innerHTML = html;
+}
+
+function truncateProxy(proxy) {
+    // Show IP or hostname briefly
+    if (proxy.length > 20) {
+        const parts = proxy.split(':');
+        const host = parts[0];
+        const port = parts[1];
+        if (host.includes('.') && host.length > 15) {
+            // IP address - show last octet and port
+            const ip = host.split('.');
+            return `...${ip[ip.length - 1]}:${port}`;
+        }
+        return proxy.substring(0, 17) + '...';
+    }
+    return proxy;
+}
+
+function updateRecentErrors(errors) {
+    /**
+     * Update the recent errors list
+     */
+    const container = document.getElementById('recentErrors');
+    if (!container) return;
+    
+    if (errors.length === 0) {
+        container.innerHTML = '<div class="no-data">No recent errors</div>';
+        return;
+    }
+    
+    // Show last 15 errors (newest first)
+    const recentErrors = errors.slice(-15).reverse();
+    
+    let html = '';
+    for (const error of recentErrors) {
+        const typeIcon = getErrorIcon(error.type);
+        const proxyInfo = error.proxy ? `<span class="error-proxy">${truncateProxy(error.proxy)}</span>` : '';
+        
+        html += `
+            <div class="error-entry ${error.type === 'CRITICAL' ? 'critical' : ''}">
+                <span class="error-time">${error.time || '--:--'}</span>
+                <span class="error-icon">${typeIcon}</span>
+                <span class="error-message">${escapeHtml(error.message || 'Unknown error')}</span>
+                ${proxyInfo}
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function getErrorIcon(type) {
+    const icons = {
+        'browser': '🌐',
+        'ptc': '🔐',
+        'xilriws': '⚡',
+        'captcha': '🔐',
+        'CRITICAL': '🔥'
+    };
+    return icons[type] || '⚠️';
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 async function loadXilriwsStats() {
@@ -325,6 +524,31 @@ async function loadXilriwsStats() {
     } catch (error) {
         console.error('Failed to load Xilriws stats:', error);
     }
+}
+
+function filterXilriwsLogs() {
+    /**
+     * Filter displayed logs based on selection
+     */
+    const filter = document.getElementById('logFilter')?.value || 'all';
+    const logContent = document.getElementById('xilriwsLogContent');
+    if (!logContent) return;
+    
+    // Get all lines
+    const lines = logContent.textContent.split('\n');
+    const filtered = lines.filter(line => {
+        if (filter === 'all') return true;
+        const lineLower = line.toLowerCase();
+        switch (filter) {
+            case 'success': return line.includes('| S |') || lineLower.includes('200 ok');
+            case 'error': return line.includes('| E |') || line.includes('| C |');
+            case 'warning': return line.includes('| W |');
+            case 'proxy': return lineLower.includes('proxy') || lineLower.includes('switching');
+            default: return true;
+        }
+    });
+    
+    logContent.textContent = filtered.join('\n');
 }
 
 function updatePortStatus(ports) {

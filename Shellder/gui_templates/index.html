@@ -325,6 +325,7 @@
             
             <!-- Xilriws Page -->
             <div id="page-xilriws" class="page">
+                <!-- Main Stats -->
                 <div class="stats-grid xilriws-stats-grid">
                     <div class="stat-card large">
                         <div class="stat-icon success">✓</div>
@@ -337,7 +338,7 @@
                         <div class="stat-icon success">🟢</div>
                         <div class="stat-info">
                             <div class="stat-value" id="xilSuccessful">-</div>
-                            <div class="stat-label">Successful</div>
+                            <div class="stat-label">Successful Auth</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -354,66 +355,124 @@
                             <div class="stat-label">Total Requests</div>
                         </div>
                     </div>
+                    <div class="stat-card">
+                        <div class="stat-icon warning">🍪</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilCookieStatus">-/-</div>
+                            <div class="stat-label">Cookie Storage</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon" id="criticalIcon">⚠️</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilCritical">0</div>
+                            <div class="stat-label">Critical Events</div>
+                        </div>
+                    </div>
                 </div>
                 
-                <div class="dashboard-grid">
+                <div class="dashboard-grid xilriws-grid">
+                    <!-- Error Breakdown - Updated categories -->
                     <div class="card">
                         <div class="card-header">
-                            <h2>Error Breakdown</h2>
+                            <h2>🔴 Error Breakdown</h2>
                         </div>
                         <div class="card-body">
                             <div id="xilErrorBreakdown" class="error-breakdown">
-                                <div class="error-row">
-                                    <span class="error-type">Auth Banned</span>
-                                    <span class="error-count" id="xilAuthBanned">0</span>
+                                <div class="error-section">
+                                    <h4>Account Status</h4>
+                                    <div class="error-row">
+                                        <span class="error-type">🚫 Account Banned (418)</span>
+                                        <span class="error-count" id="xilAuthBanned">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">🔄 Max Retries Exceeded</span>
+                                        <span class="error-count" id="xilMaxRetries">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">💥 Internal Server Error</span>
+                                        <span class="error-count" id="xilInternalError">0</span>
+                                    </div>
                                 </div>
-                                <div class="error-row">
-                                    <span class="error-type">Code 15</span>
-                                    <span class="error-count" id="xilCode15">0</span>
+                                <div class="error-section">
+                                    <h4>Browser Issues</h4>
+                                    <div class="error-row">
+                                        <span class="error-type">🛡️ Bot Protection (Code 15)</span>
+                                        <span class="error-count" id="xilCode15">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">⏱️ Page Timeout</span>
+                                        <span class="error-count" id="xilBrowserTimeout">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">🌐 Page Unreachable</span>
+                                        <span class="error-count" id="xilBrowserUnreachable">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">⏳ JS Challenge Timeout</span>
+                                        <span class="error-count" id="xilJSTimeout">0</span>
+                                    </div>
                                 </div>
-                                <div class="error-row">
-                                    <span class="error-type">Rate Limited</span>
-                                    <span class="error-count" id="xilRateLimited">0</span>
-                                </div>
-                                <div class="error-row">
-                                    <span class="error-type">Invalid Credentials</span>
-                                    <span class="error-count" id="xilInvalidCreds">0</span>
-                                </div>
-                                <div class="error-row">
-                                    <span class="error-type">Tunnel Errors</span>
-                                    <span class="error-count" id="xilTunnelErrors">0</span>
-                                </div>
-                                <div class="error-row">
-                                    <span class="error-type">Timeouts</span>
-                                    <span class="error-count" id="xilTimeouts">0</span>
-                                </div>
-                                <div class="error-row">
-                                    <span class="error-type">Connection Refused</span>
-                                    <span class="error-count" id="xilConnRefused">0</span>
+                                <div class="error-section">
+                                    <h4>Connection Issues</h4>
+                                    <div class="error-row">
+                                        <span class="error-type">🚇 Tunnel Failed (407)</span>
+                                        <span class="error-count" id="xilTunnelFailed">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">⏰ Connection Timeout</span>
+                                        <span class="error-count" id="xilConnTimeout">0</span>
+                                    </div>
+                                    <div class="error-row">
+                                        <span class="error-type">🔐 Captcha Triggered</span>
+                                        <span class="error-count" id="xilCaptcha">0</span>
+                                    </div>
                                 </div>
                             </div>
                         </div>
                     </div>
                     
+                    <!-- Proxy Stats -->
                     <div class="card">
                         <div class="card-header">
-                            <h2>Proxy Info</h2>
-                            <button class="btn btn-sm" onclick="loadProxyInfo()">Refresh</button>
+                            <h2>🌐 Proxy Performance</h2>
+                            <span class="badge" id="currentProxyBadge">Current: --</span>
                         </div>
                         <div class="card-body">
-                            <div id="proxyInfo" class="proxy-info">
-                                <div class="loading">Loading proxy info...</div>
+                            <div id="proxyStats" class="proxy-stats-container">
+                                <div class="loading">Loading proxy stats...</div>
                             </div>
                         </div>
                     </div>
                 </div>
                 
+                <!-- Recent Errors -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>⚡ Recent Errors</h2>
+                        <span class="badge error-badge" id="errorCount">0 errors</span>
+                    </div>
+                    <div class="card-body">
+                        <div id="recentErrors" class="recent-errors-list">
+                            <div class="no-data">No recent errors</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Live Logs -->
                 <div class="card full-height">
                     <div class="card-header">
-                        <h2>Live Xilriws Logs</h2>
+                        <h2>📜 Live Xilriws Logs</h2>
                         <div class="card-actions">
+                            <select id="logFilter" class="log-filter" onchange="filterXilriwsLogs()">
+                                <option value="all">All Logs</option>
+                                <option value="success">Success Only</option>
+                                <option value="error">Errors Only</option>
+                                <option value="warning">Warnings Only</option>
+                                <option value="proxy">Proxy Events</option>
+                            </select>
                             <label class="toggle-label">
-                                <input type="checkbox" id="xilLiveToggle" onchange="toggleXilriwsLive()">
+                                <input type="checkbox" id="xilLiveToggle" onchange="toggleXilriwsLive()" checked>
                                 <span>Auto-scroll</span>
                             </label>
                             <button class="btn btn-sm" onclick="loadXilriwsLogs()">Refresh</button>
@@ -550,4 +609,5 @@
     <script src="/static/script.js"></script>
 </body>
 </html>
+
 

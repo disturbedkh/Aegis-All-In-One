@@ -979,36 +979,268 @@ select:focus {
    ============================================================================= */
 
 .xilriws-stats-grid {
-    grid-template-columns: repeat(4, 1fr);
+    grid-template-columns: repeat(6, 1fr);
+}
+
+@media (max-width: 1200px) {
+    .xilriws-stats-grid {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .xilriws-stats-grid {
+        grid-template-columns: repeat(2, 1fr);
+    }
 }
 
 .stat-card.large .stat-value {
     font-size: 2.5rem;
 }
 
+/* Success rate coloring */
+.stat-info.excellent .stat-value { color: #22c55e; }
+.stat-info.good .stat-value { color: #84cc16; }
+.stat-info.warning .stat-value { color: #eab308; }
+.stat-info.critical .stat-value { color: #ef4444; }
+
+/* Xilriws specific grid */
+.xilriws-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 20px;
+}
+
+@media (max-width: 1000px) {
+    .xilriws-grid {
+        grid-template-columns: 1fr;
+    }
+}
+
+/* Error breakdown improvements */
 .error-breakdown {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
+}
+
+.error-section {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 12px;
+}
+
+.error-section h4 {
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    color: var(--text-muted);
+    letter-spacing: 0.05em;
+    margin-bottom: 10px;
+    padding-bottom: 6px;
+    border-bottom: 1px solid var(--border-color);
 }
 
 .error-row {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 12px;
+    padding: 6px 10px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-sm);
+    margin-bottom: 4px;
+}
+
+.error-row:last-child {
+    margin-bottom: 0;
 }
 
 .error-type {
     color: var(--text-secondary);
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    gap: 6px;
 }
 
 .error-count {
     font-family: var(--font-mono);
     font-weight: 600;
     color: var(--danger);
+    min-width: 40px;
+    text-align: right;
+}
+
+.error-count:not(:empty):after {
+    content: '';
+}
+
+/* Proxy stats table */
+.proxy-stats-container {
+    max-height: 350px;
+    overflow-y: auto;
+}
+
+.proxy-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.85rem;
+}
+
+.proxy-table th {
+    text-align: left;
+    padding: 8px 10px;
+    border-bottom: 2px solid var(--border-color);
+    color: var(--text-muted);
+    font-size: 0.75rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    background: var(--bg-secondary);
+    position: sticky;
+    top: 0;
+}
+
+.proxy-table td {
+    padding: 8px 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.proxy-table tbody tr:hover {
+    background: var(--bg-tertiary);
+}
+
+.proxy-table .proxy-addr {
+    font-family: var(--font-mono);
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+}
+
+.proxy-table .success {
+    color: var(--success);
+    font-weight: 500;
+}
+
+.proxy-table .fail {
+    color: var(--danger);
+    font-weight: 500;
+}
+
+.proxy-table .rate-good { color: #22c55e; }
+.proxy-table .rate-ok { color: #eab308; }
+.proxy-table .rate-bad { color: #ef4444; }
+
+.proxy-table .issues {
+    font-size: 0.8rem;
+}
+
+.proxy-table .proxy-problematic {
+    background: rgba(239, 68, 68, 0.1);
+}
+
+.proxy-table .proxy-problematic:hover {
+    background: rgba(239, 68, 68, 0.15);
+}
+
+/* Current proxy badge */
+#currentProxyBadge {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    padding: 4px 10px;
+    background: var(--bg-tertiary);
+    border-radius: 12px;
+    color: var(--text-secondary);
+}
+
+/* Recent errors list */
+.recent-errors-list {
+    max-height: 250px;
+    overflow-y: auto;
+}
+
+.error-entry {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid var(--border-color);
+    font-size: 0.85rem;
+}
+
+.error-entry:hover {
+    background: var(--bg-tertiary);
+}
+
+.error-entry.critical {
+    background: rgba(239, 68, 68, 0.1);
+    border-left: 3px solid var(--danger);
+}
+
+.error-time {
+    font-family: var(--font-mono);
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.error-icon {
+    flex-shrink: 0;
+}
+
+.error-message {
+    flex: 1;
+    color: var(--text-secondary);
+    word-break: break-word;
+}
+
+.error-proxy {
+    font-family: var(--font-mono);
+    font-size: 0.7rem;
+    background: var(--bg-tertiary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+/* Error count badge */
+.error-badge {
+    background: var(--danger);
+    color: white;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 0.75rem;
+}
+
+/* Log filter dropdown */
+.log-filter {
+    padding: 4px 8px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    color: var(--text-primary);
+    font-size: 0.85rem;
+    cursor: pointer;
+}
+
+.log-filter:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+/* Cookie status warning icon */
+.stat-icon.warning {
+    color: #eab308;
+}
+
+.stat-card .stat-icon.danger {
+    color: var(--danger);
+}
+
+/* No data placeholder */
+.no-data {
+    text-align: center;
+    padding: 20px;
+    color: var(--text-muted);
+    font-style: italic;
 }
 
 .proxy-info .proxy-sample {

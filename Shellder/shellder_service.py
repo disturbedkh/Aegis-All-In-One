@@ -551,8 +551,19 @@ class StatsCollector:
             time.sleep(10)
     
     def _parse_xilriws_logs(self):
-        """Parse Xilriws container logs for proxy statistics"""
-        last_log_pos = 0
+        """
+        Parse Xilriws container logs for proxy statistics
+        
+        Log format: HH:MM:SS.SS | LEVEL | Component | Message
+        Levels: I (Info), S (Success), W (Warning), E (Error), C (Critical)
+        Components: Browser, Proxy, PTC, Cookie, Xilriws
+        """
+        import re
+        
+        # Regex patterns for Xilriws log format
+        log_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2}\.\d{2})\s*\|\s*([ISEWC])\s*\|\s*(\w+)\s*\|\s*(.*)$')
+        proxy_pattern = re.compile(r'[Pp]roxy[:\s]+(\d+\.\d+\.\d+\.\d+:\d+|[\w.-]+:\d+)')
+        cookie_storage_pattern = re.compile(r'Cookie storage at (\d+)/(\d+)')
         
         while self.running:
             if docker_client:
@@ -562,68 +573,187 @@ class StatsCollector:
                         time.sleep(30)
                         continue
                     
-                    # Get recent logs
-                    logs = container.logs(tail=500, timestamps=False).decode('utf-8', errors='ignore')
+                    # Get recent logs (more lines for better stats)
+                    logs = container.logs(tail=1000, timestamps=False).decode('utf-8', errors='ignore')
                     
-                    # Parse proxy stats from logs
+                    # Initialize stats
                     stats = {
                         'total_requests': 0,
                         'successful': 0,
-                        'auth_banned': 0,
-                        'invalid_credentials': 0,
-                        'tunneling_errors': 0,
-                        'code_15': 0,
-                        'rate_limited': 0,
-                        'timeouts': 0,
-                        'connection_refused': 0,
-                        'proxy_errors': 0,
-                        'recent_errors': []
+                        'failed': 0,
+                        'success_rate': 0,
+                        # Auth results
+                        'auth_success': 0,          # S | Xilriws | 200 OK: successful auth
+                        'auth_banned': 0,           # W | Xilriws | 418: account is ptc-banned
+                        'auth_max_retries': 0,      # E | Xilriws | Error: Exceeded max retries
+                        'auth_internal_error': 0,   # W | Xilriws | 500 Internal Server Error
+                        # Browser errors
+                        'browser_timeout': 0,       # E | Browser | Page timed out
+                        'browser_unreachable': 0,   # E | Browser | Page couldn't be reached
+                        'browser_bot_protection': 0,# E | Browser | Didn't pass JS check. Code 15
+                        'browser_js_timeout': 0,    # E | Browser | Timeout on JS challenge
+                        # PTC errors
+                        'ptc_tunnel_failed': 0,     # E | PTC | curl: (56) CONNECT tunnel failed
+                        'ptc_connection_timeout': 0,# E | PTC | curl: (28) Connection timed out
+                        'ptc_captcha': 0,           # W | PTC | Error code 12 (Captcha)
+                        # Critical
+                        'critical_failures': 0,     # C | Browser | consecutive failures
+                        # Cookie status
+                        'cookie_current': 0,
+                        'cookie_max': 2,
+                        # Proxy stats (per-proxy tracking)
+                        'proxy_stats': {},
+                        'current_proxy': None,
+                        # Recent events
+                        'recent_errors': [],
+                        'recent_successes': [],
+                        'last_critical': None
                     }
+                    
+                    current_proxy = None
                     
                     for line in logs.split('\n'):
                         if not line.strip():
                             continue
                         
-                        line_lower = line.lower()
+                        match = log_pattern.match(line.strip())
+                        if not match:
+                            continue
                         
-                        # Count successes
-                        if 'success' in line_lower or 'got cookie' in line_lower or 'token obtained' in line_lower:
-                            stats['successful'] += 1
+                        timestamp, level, component, message = match.groups()
+                        component = component.strip()
+                        message = message.strip()
+                        msg_lower = message.lower()
                         
-                        # Count specific errors (order matters - check most specific first)
-                        if 'auth-banned' in line_lower or 'auth banned' in line_lower:
-                            stats['auth_banned'] += 1
-                        elif 'invalid' in line_lower and ('credential' in line_lower or 'password' in line_lower):
-                            stats['invalid_credentials'] += 1
-                        elif ('tunnel' in line_lower or 'connect' in line_lower) and 'error' in line_lower:
-                            # Fixed: added parentheses for correct operator precedence
-                            stats['tunneling_errors'] += 1
-                        elif 'code 15' in line_lower or 'code:15' in line_lower or 'code: 15' in line_lower:
-                            stats['code_15'] += 1
-                        elif 'rate limit' in line_lower or 'ratelimit' in line_lower or '429' in line:
-                            stats['rate_limited'] += 1
-                        elif 'timeout' in line_lower or 'timed out' in line_lower:
-                            stats['timeouts'] += 1
-                        elif 'refused' in line_lower or 'connection refused' in line_lower:
-                            stats['connection_refused'] += 1
-                        elif 'proxy' in line_lower and ('error' in line_lower or 'fail' in line_lower):
-                            stats['proxy_errors'] += 1
+                        # Track proxy switches
+                        if component == 'Proxy' and 'Switching to Proxy' in message:
+                            proxy_match = proxy_pattern.search(message)
+                            if proxy_match:
+                                current_proxy = proxy_match.group(1)
+                                stats['current_proxy'] = current_proxy
+                                if current_proxy not in stats['proxy_stats']:
+                                    stats['proxy_stats'][current_proxy] = {
+                                        'requests': 0, 'success': 0, 'fail': 0,
+                                        'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                    }
                         
-                        # Track errors
-                        if 'error' in line_lower or 'fail' in line_lower or 'banned' in line_lower:
+                        # Track cookie storage
+                        if component == 'Cookie':
+                            cookie_match = cookie_storage_pattern.search(message)
+                            if cookie_match:
+                                stats['cookie_current'] = int(cookie_match.group(1))
+                                stats['cookie_max'] = int(cookie_match.group(2))
+                        
+                        # SUCCESS events (S level)
+                        if level == 'S':
+                            if '200 OK' in message and 'successful auth' in msg_lower:
+                                stats['auth_success'] += 1
+                                stats['successful'] += 1
+                                stats['recent_successes'].append({
+                                    'time': timestamp,
+                                    'proxy': current_proxy
+                                })
+                                # Update proxy stats
+                                if current_proxy and current_proxy in stats['proxy_stats']:
+                                    stats['proxy_stats'][current_proxy]['success'] += 1
+                                    stats['proxy_stats'][current_proxy]['requests'] += 1
+                        
+                        # WARNING events (W level)
+                        elif level == 'W':
+                            if component == 'Xilriws':
+                                if '418' in message and 'ptc-banned' in msg_lower:
+                                    stats['auth_banned'] += 1
+                                    stats['failed'] += 1
+                                elif '500' in message and 'internal server error' in msg_lower:
+                                    stats['auth_internal_error'] += 1
+                                    stats['failed'] += 1
+                            elif component == 'PTC':
+                                if 'Error code 12' in message or 'Captcha' in message:
+                                    stats['ptc_captcha'] += 1
+                                    stats['recent_errors'].append({
+                                        'time': timestamp,
+                                        'type': 'captcha',
+                                        'proxy': current_proxy,
+                                        'message': message[:100]
+                                    })
+                        
+                        # ERROR events (E level)
+                        elif level == 'E':
+                            error_recorded = False
+                            
+                            if component == 'Browser':
+                                # Extract proxy from error message if present
+                                error_proxy = current_proxy
+                                proxy_in_msg = proxy_pattern.search(message)
+                                if proxy_in_msg:
+                                    error_proxy = proxy_in_msg.group(1)
+                                
+                                if 'Page timed out' in message:
+                                    stats['browser_timeout'] += 1
+                                    error_recorded = True
+                                    if error_proxy and error_proxy in stats['proxy_stats']:
+                                        stats['proxy_stats'][error_proxy]['timeout'] += 1
+                                        stats['proxy_stats'][error_proxy]['fail'] += 1
+                                        stats['proxy_stats'][error_proxy]['requests'] += 1
+                                elif "Page couldn't be reached" in message or "couldn't be reached" in msg_lower:
+                                    stats['browser_unreachable'] += 1
+                                    error_recorded = True
+                                    if error_proxy and error_proxy in stats['proxy_stats']:
+                                        stats['proxy_stats'][error_proxy]['unreachable'] += 1
+                                        stats['proxy_stats'][error_proxy]['fail'] += 1
+                                        stats['proxy_stats'][error_proxy]['requests'] += 1
+                                elif "Didn't pass JS check" in message or 'Code 15' in message:
+                                    stats['browser_bot_protection'] += 1
+                                    error_recorded = True
+                                    if error_proxy and error_proxy in stats['proxy_stats']:
+                                        stats['proxy_stats'][error_proxy]['bot_blocked'] += 1
+                                        stats['proxy_stats'][error_proxy]['fail'] += 1
+                                        stats['proxy_stats'][error_proxy]['requests'] += 1
+                                elif 'Timeout on JS challenge' in message:
+                                    stats['browser_js_timeout'] += 1
+                                    error_recorded = True
+                            
+                            elif component == 'PTC':
+                                if 'curl: (56)' in message or 'CONNECT tunnel failed' in message or 'response 407' in message:
+                                    stats['ptc_tunnel_failed'] += 1
+                                    error_recorded = True
+                                elif 'curl: (28)' in message or 'Connection timed out' in message or 'timed out after' in msg_lower:
+                                    stats['ptc_connection_timeout'] += 1
+                                    error_recorded = True
+                            
+                            elif component == 'Xilriws':
+                                if 'Exceeded max retries' in message:
+                                    stats['auth_max_retries'] += 1
+                                    error_recorded = True
+                            
+                            if error_recorded:
+                                stats['failed'] += 1
+                                stats['recent_errors'].append({
+                                    'time': timestamp,
+                                    'type': component.lower(),
+                                    'proxy': current_proxy,
+                                    'message': message[:150]
+                                })
+                        
+                        # CRITICAL events (C level)
+                        elif level == 'C':
+                            stats['critical_failures'] += 1
+                            stats['last_critical'] = {
+                                'time': timestamp,
+                                'message': message
+                            }
                             stats['recent_errors'].append({
-                                'time': datetime.now().isoformat(),
-                                'message': line[:200]
+                                'time': timestamp,
+                                'type': 'CRITICAL',
+                                'proxy': current_proxy,
+                                'message': message[:150]
                             })
                     
-                    # Keep only last 50 errors
+                    # Keep only last 50 errors and 20 successes
                     stats['recent_errors'] = stats['recent_errors'][-50:]
+                    stats['recent_successes'] = stats['recent_successes'][-20:]
                     
                     # Calculate totals
-                    stats['failed'] = (stats['auth_banned'] + stats['invalid_credentials'] + 
-                                      stats['tunneling_errors'] + stats['code_15'] + 
-                                      stats['rate_limited'] + stats['timeouts'] + 
-                                      stats['connection_refused'] + stats['proxy_errors'])
                     stats['total_requests'] = stats['successful'] + stats['failed']
                     
                     # Calculate success rate
@@ -631,6 +761,30 @@ class StatsCollector:
                         stats['success_rate'] = round((stats['successful'] / stats['total_requests']) * 100, 1)
                     else:
                         stats['success_rate'] = 0
+                    
+                    # Calculate per-proxy success rates
+                    for proxy_addr, proxy_data in stats['proxy_stats'].items():
+                        if proxy_data['requests'] > 0:
+                            proxy_data['success_rate'] = round(
+                                (proxy_data['success'] / proxy_data['requests']) * 100, 1
+                            )
+                        else:
+                            proxy_data['success_rate'] = 0
+                    
+                    # Create error breakdown for display
+                    stats['error_breakdown'] = {
+                        'Browser Timeouts': stats['browser_timeout'],
+                        'Proxy Unreachable': stats['browser_unreachable'],
+                        'Bot Protection (Code 15)': stats['browser_bot_protection'],
+                        'JS Challenge Timeout': stats['browser_js_timeout'],
+                        'Tunnel Failed (407)': stats['ptc_tunnel_failed'],
+                        'Connection Timeout': stats['ptc_connection_timeout'],
+                        'Captcha Triggered': stats['ptc_captcha'],
+                        'Account Banned (418)': stats['auth_banned'],
+                        'Max Retries Exceeded': stats['auth_max_retries'],
+                        'Internal Server Error': stats['auth_internal_error'],
+                        'Critical Failures': stats['critical_failures']
+                    }
                     
                     with self.lock:
                         self.xilriws_stats = stats
@@ -643,7 +797,7 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Xilriws logs: {e}")
             
-            time.sleep(10)
+            time.sleep(5)  # More frequent updates for live monitoring
     
     def _scan_ports(self):
         """Scan important ports"""

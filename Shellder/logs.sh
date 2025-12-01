@@ -1845,19 +1845,41 @@ XILRIWS_PATTERNS=(
 )
 
 # Initialize Xilriws variables to safe defaults
+# Log format: HH:MM:SS.SS | LEVEL | Component | Message
+# Levels: I (Info), S (Success), W (Warning), E (Error), C (Critical)
+# Components: Browser, Proxy, PTC, Cookie, Xilriws
 init_xilriws_vars() {
-    XILRIWS_SUCCESS=0
-    XILRIWS_AUTH_BANNED=0
+    # Auth results
+    XILRIWS_SUCCESS=0           # S | Xilriws | 200 OK: successful auth
+    XILRIWS_AUTH_BANNED=0       # W | Xilriws | 418: account is ptc-banned
+    XILRIWS_MAX_RETRIES=0       # E | Xilriws | Exceeded max retries
+    XILRIWS_INTERNAL_ERROR=0    # W | Xilriws | 500 Internal Server Error
+    
+    # Browser issues
+    XILRIWS_CODE_15=0           # E | Browser | Didn't pass JS check. Code 15
+    XILRIWS_BROWSER_TIMEOUT=0   # E | Browser | Page timed out
+    XILRIWS_BROWSER_UNREACHABLE=0 # E | Browser | Page couldn't be reached
+    XILRIWS_JS_TIMEOUT=0        # E | Browser | Timeout on JS challenge
+    
+    # Connection issues
+    XILRIWS_TUNNEL_ERROR=0      # E | PTC | curl: (56) CONNECT tunnel failed
+    XILRIWS_CONN_TIMEOUT=0      # E | PTC | curl: (28) Connection timed out
+    XILRIWS_CAPTCHA=0           # W | PTC | Error code 12 (Captcha)
+    
+    # Critical
+    XILRIWS_CRITICAL=0          # C | Browser | consecutive failures
+    
+    # Totals
+    XILRIWS_TOTAL_ERRORS=0
+    XILRIWS_OTHER_ERRORS=0
+    
+    # Legacy variables for backward compatibility
     XILRIWS_INVALID_CRED=0
-    XILRIWS_TUNNEL_ERROR=0
-    XILRIWS_CODE_15=0
     XILRIWS_PERM_BANNED=0
     XILRIWS_RATE_LIMIT=0
     XILRIWS_TIMEOUT=0
     XILRIWS_CONN_REFUSED=0
     XILRIWS_PROXY_ERROR=0
-    XILRIWS_TOTAL_ERRORS=0
-    XILRIWS_OTHER_ERRORS=0
 }
 
 # Get Xilriws stats from logs
@@ -1873,41 +1895,77 @@ get_xilriws_stats() {
         return 1
     fi
     
-    # Get log content once for efficiency
+    # Get log content once for efficiency (last 5000 lines)
     local log_content
-    log_content=$(docker logs "$container" 2>&1) || {
+    log_content=$(docker logs --tail 5000 "$container" 2>&1) || {
         echo "Failed to get Xilriws logs" >&2
         return 1
     }
     
-    # Count various events (use || true to prevent pipeline failures)
-    XILRIWS_SUCCESS=$(echo "$log_content" | grep -iEc "Successfully obtained cookies|cookie.*success|login.*success" 2>/dev/null || echo "0")
-    XILRIWS_AUTH_BANNED=$(echo "$log_content" | grep -iEc "auth.banned|auth_banned|authentication.*banned" 2>/dev/null || echo "0")
-    XILRIWS_INVALID_CRED=$(echo "$log_content" | grep -iEc "invalid.*credential|wrong.*password|incorrect.*login|invalid.*password" 2>/dev/null || echo "0")
-    XILRIWS_TUNNEL_ERROR=$(echo "$log_content" | grep -iEc "tunnel.*error|tunneling.*failed|proxy.*tunnel|CONNECT.*failed" 2>/dev/null || echo "0")
-    XILRIWS_CODE_15=$(echo "$log_content" | grep -iEc "code.*15|error.*15|status.*15|code\":15" 2>/dev/null || echo "0")
-    XILRIWS_PERM_BANNED=$(echo "$log_content" | grep -iEc "permanently.*banned|permanent.*ban|IP.*banned" 2>/dev/null || echo "0")
-    XILRIWS_RATE_LIMIT=$(echo "$log_content" | grep -iEc "rate.*limit|too.*many.*requests|429" 2>/dev/null || echo "0")
-    XILRIWS_TIMEOUT=$(echo "$log_content" | grep -iEc "timeout|timed.*out|ETIMEDOUT" 2>/dev/null || echo "0")
-    XILRIWS_CONN_REFUSED=$(echo "$log_content" | grep -iEc "connection.*refused|ECONNREFUSED" 2>/dev/null || echo "0")
-    XILRIWS_PROXY_ERROR=$(echo "$log_content" | grep -iEc "proxy.*error|proxy.*failed|bad.*proxy" 2>/dev/null || echo "0")
-    XILRIWS_TOTAL_ERRORS=$(echo "$log_content" | grep -iEc "error|failed|exception" 2>/dev/null || echo "0")
+    # Count events using actual Xilriws log format:
+    # Format: HH:MM:SS.SS | LEVEL | Component | Message
+    
+    # Auth results - Success (S | Xilriws | 200 OK: successful auth)
+    XILRIWS_SUCCESS=$(echo "$log_content" | grep -Ec '\| S \| Xilriws.*200 OK|successful auth' 2>/dev/null || echo "0")
+    
+    # Auth results - Banned (W | Xilriws | 418: account is ptc-banned)
+    XILRIWS_AUTH_BANNED=$(echo "$log_content" | grep -Ec '\| W \| Xilriws.*418.*ptc-banned|418.*banned' 2>/dev/null || echo "0")
+    
+    # Auth results - Max Retries (E | Xilriws | Exceeded max retries)
+    XILRIWS_MAX_RETRIES=$(echo "$log_content" | grep -Ec 'Exceeded max retries' 2>/dev/null || echo "0")
+    
+    # Auth results - Internal Error (W | Xilriws | 500 Internal Server Error)
+    XILRIWS_INTERNAL_ERROR=$(echo "$log_content" | grep -Ec '500.*Internal Server Error' 2>/dev/null || echo "0")
+    
+    # Browser - Bot Protection Code 15 (E | Browser | Didn't pass JS check. Code 15)
+    XILRIWS_CODE_15=$(echo "$log_content" | grep -Ec "Didn't pass JS check.*Code 15|Code 15.*bot protection" 2>/dev/null || echo "0")
+    
+    # Browser - Page Timeout (E | Browser | Page timed out)
+    XILRIWS_BROWSER_TIMEOUT=$(echo "$log_content" | grep -Ec '\| E \| Browser.*Page timed out' 2>/dev/null || echo "0")
+    
+    # Browser - Page Unreachable (E | Browser | Page couldn't be reached)
+    XILRIWS_BROWSER_UNREACHABLE=$(echo "$log_content" | grep -Ec "Page couldn't be reached" 2>/dev/null || echo "0")
+    
+    # Browser - JS Challenge Timeout (E | Browser | Timeout on JS challenge)
+    XILRIWS_JS_TIMEOUT=$(echo "$log_content" | grep -Ec 'Timeout on JS challenge' 2>/dev/null || echo "0")
+    
+    # PTC - Tunnel Failed (E | PTC | curl: (56) CONNECT tunnel failed)
+    XILRIWS_TUNNEL_ERROR=$(echo "$log_content" | grep -Ec 'curl:.*56.*tunnel failed|response 407|CONNECT tunnel' 2>/dev/null || echo "0")
+    
+    # PTC - Connection Timeout (E | PTC | curl: (28) Connection timed out)
+    XILRIWS_CONN_TIMEOUT=$(echo "$log_content" | grep -Ec 'curl:.*28.*timed out|Connection timed out after' 2>/dev/null || echo "0")
+    
+    # PTC - Captcha (W | PTC | Error code 12 (Captcha))
+    XILRIWS_CAPTCHA=$(echo "$log_content" | grep -Ec 'Error code 12.*Captcha' 2>/dev/null || echo "0")
+    
+    # Critical events (C | Browser | consecutive failures)
+    XILRIWS_CRITICAL=$(echo "$log_content" | grep -Ec '\| C \|' 2>/dev/null || echo "0")
+    
+    # Total errors (any E or C level log line)
+    XILRIWS_TOTAL_ERRORS=$(echo "$log_content" | grep -Ec '\| E \||\| C \|' 2>/dev/null || echo "0")
     
     # Ensure all variables are numbers
     XILRIWS_SUCCESS=${XILRIWS_SUCCESS:-0}
     XILRIWS_AUTH_BANNED=${XILRIWS_AUTH_BANNED:-0}
-    XILRIWS_INVALID_CRED=${XILRIWS_INVALID_CRED:-0}
-    XILRIWS_TUNNEL_ERROR=${XILRIWS_TUNNEL_ERROR:-0}
+    XILRIWS_MAX_RETRIES=${XILRIWS_MAX_RETRIES:-0}
+    XILRIWS_INTERNAL_ERROR=${XILRIWS_INTERNAL_ERROR:-0}
     XILRIWS_CODE_15=${XILRIWS_CODE_15:-0}
-    XILRIWS_PERM_BANNED=${XILRIWS_PERM_BANNED:-0}
-    XILRIWS_RATE_LIMIT=${XILRIWS_RATE_LIMIT:-0}
-    XILRIWS_TIMEOUT=${XILRIWS_TIMEOUT:-0}
-    XILRIWS_CONN_REFUSED=${XILRIWS_CONN_REFUSED:-0}
-    XILRIWS_PROXY_ERROR=${XILRIWS_PROXY_ERROR:-0}
+    XILRIWS_BROWSER_TIMEOUT=${XILRIWS_BROWSER_TIMEOUT:-0}
+    XILRIWS_BROWSER_UNREACHABLE=${XILRIWS_BROWSER_UNREACHABLE:-0}
+    XILRIWS_JS_TIMEOUT=${XILRIWS_JS_TIMEOUT:-0}
+    XILRIWS_TUNNEL_ERROR=${XILRIWS_TUNNEL_ERROR:-0}
+    XILRIWS_CONN_TIMEOUT=${XILRIWS_CONN_TIMEOUT:-0}
+    XILRIWS_CAPTCHA=${XILRIWS_CAPTCHA:-0}
+    XILRIWS_CRITICAL=${XILRIWS_CRITICAL:-0}
     XILRIWS_TOTAL_ERRORS=${XILRIWS_TOTAL_ERRORS:-0}
     
+    # Calculate legacy/combined values for backward compatibility
+    XILRIWS_TIMEOUT=$((XILRIWS_BROWSER_TIMEOUT + XILRIWS_JS_TIMEOUT + XILRIWS_CONN_TIMEOUT))
+    XILRIWS_CONN_REFUSED=${XILRIWS_BROWSER_UNREACHABLE:-0}
+    XILRIWS_PROXY_ERROR=$((XILRIWS_TUNNEL_ERROR + XILRIWS_BROWSER_UNREACHABLE))
+    
     # Calculate other errors
-    local known_errors=$((XILRIWS_AUTH_BANNED + XILRIWS_INVALID_CRED + XILRIWS_TUNNEL_ERROR + XILRIWS_CODE_15 + XILRIWS_PERM_BANNED + XILRIWS_RATE_LIMIT + XILRIWS_TIMEOUT + XILRIWS_CONN_REFUSED + XILRIWS_PROXY_ERROR))
+    local known_errors=$((XILRIWS_CODE_15 + XILRIWS_BROWSER_TIMEOUT + XILRIWS_BROWSER_UNREACHABLE + XILRIWS_JS_TIMEOUT + XILRIWS_TUNNEL_ERROR + XILRIWS_CONN_TIMEOUT + XILRIWS_MAX_RETRIES + XILRIWS_CRITICAL))
     XILRIWS_OTHER_ERRORS=$((XILRIWS_TOTAL_ERRORS - known_errors))
     [ "$XILRIWS_OTHER_ERRORS" -lt 0 ] && XILRIWS_OTHER_ERRORS=0
     
@@ -2036,34 +2094,51 @@ show_xilriws_status() {
     printf "${CYAN}║${NC}  Log Size:         %-54s ${CYAN}║${NC}\n" "$log_size_fmt"
     
     draw_box_divider
-    draw_box_line "  LOGIN STATISTICS"
+    draw_box_line "  AUTH RESULTS"
     draw_box_divider
     
-    printf "${CYAN}║${NC}    ${GREEN}✓ Successful Logins:${NC}    %-49s ${CYAN}║${NC}\n" "${XILRIWS_SUCCESS:-0}"
-    printf "${CYAN}║${NC}    ${RED}✗ Auth-Banned:${NC}           %-49s ${CYAN}║${NC}\n" "${XILRIWS_AUTH_BANNED:-0}"
-    printf "${CYAN}║${NC}    ${RED}✗ Invalid Credentials:${NC}   %-49s ${CYAN}║${NC}\n" "${XILRIWS_INVALID_CRED:-0}"
+    printf "${CYAN}║${NC}    ${GREEN}✓ Successful Auth (200 OK):${NC}      %-42s ${CYAN}║${NC}\n" "${XILRIWS_SUCCESS:-0}"
+    printf "${CYAN}║${NC}    ${RED}✗ Account Banned (418):${NC}          %-42s ${CYAN}║${NC}\n" "${XILRIWS_AUTH_BANNED:-0}"
+    printf "${CYAN}║${NC}    ${RED}✗ Max Retries Exceeded:${NC}          %-42s ${CYAN}║${NC}\n" "${XILRIWS_MAX_RETRIES:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⚠ Internal Server Error (500):${NC}  %-42s ${CYAN}║${NC}\n" "${XILRIWS_INTERNAL_ERROR:-0}"
     
     draw_box_divider
-    draw_box_line "  ERROR BREAKDOWN"
+    draw_box_line "  BROWSER ISSUES"
     draw_box_divider
     
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Tunneling Errors:${NC}      %-49s ${CYAN}║${NC}\n" "${XILRIWS_TUNNEL_ERROR:-0}"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Code 15 Errors:${NC}        %-49s ${CYAN}║${NC}\n" "${XILRIWS_CODE_15:-0}"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Rate Limited:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_RATE_LIMIT:-0}"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Timeouts:${NC}              %-49s ${CYAN}║${NC}\n" "${XILRIWS_TIMEOUT:-0}"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Connection Refused:${NC}    %-49s ${CYAN}║${NC}\n" "${XILRIWS_CONN_REFUSED:-0}"
-    printf "${CYAN}║${NC}    ${YELLOW}⚠ Proxy Errors:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_PROXY_ERROR:-0}"
-    printf "${CYAN}║${NC}    ${RED}✗ Permanently Banned IPs:${NC} %-49s ${CYAN}║${NC}\n" "${XILRIWS_PERM_BANNED:-0}"
-    printf "${CYAN}║${NC}    ${DIM}○ Other Errors:${NC}          %-49s ${CYAN}║${NC}\n" "${XILRIWS_OTHER_ERRORS:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}🛡 Bot Protection (Code 15):${NC}    %-42s ${CYAN}║${NC}\n" "${XILRIWS_CODE_15:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⏱ Page Timeout:${NC}                 %-42s ${CYAN}║${NC}\n" "${XILRIWS_BROWSER_TIMEOUT:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}🌐 Page Unreachable:${NC}            %-42s ${CYAN}║${NC}\n" "${XILRIWS_BROWSER_UNREACHABLE:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⏳ JS Challenge Timeout:${NC}        %-42s ${CYAN}║${NC}\n" "${XILRIWS_JS_TIMEOUT:-0}"
     
     draw_box_divider
-    printf "${CYAN}║${NC}    ${WHITE}TOTAL ERRORS:${NC}            %-49s ${CYAN}║${NC}\n" "${XILRIWS_TOTAL_ERRORS:-0}"
+    draw_box_line "  CONNECTION ISSUES"
+    draw_box_divider
+    
+    printf "${CYAN}║${NC}    ${YELLOW}🚇 Tunnel Failed (407):${NC}         %-42s ${CYAN}║${NC}\n" "${XILRIWS_TUNNEL_ERROR:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}⏰ Connection Timeout:${NC}          %-42s ${CYAN}║${NC}\n" "${XILRIWS_CONN_TIMEOUT:-0}"
+    printf "${CYAN}║${NC}    ${YELLOW}🔐 Captcha Triggered:${NC}           %-42s ${CYAN}║${NC}\n" "${XILRIWS_CAPTCHA:-0}"
+    
+    if [ "${XILRIWS_CRITICAL:-0}" -gt 0 ]; then
+        draw_box_divider
+        draw_box_line "  ⚠️ CRITICAL EVENTS"
+        draw_box_divider
+        printf "${CYAN}║${NC}    ${RED}🔥 Critical Failures:${NC}           %-42s ${CYAN}║${NC}\n" "${XILRIWS_CRITICAL:-0}"
+    fi
+    
+    printf "${CYAN}║${NC}    ${DIM}○ Other Errors:${NC}                 %-42s ${CYAN}║${NC}\n" "${XILRIWS_OTHER_ERRORS:-0}"
+    
+    draw_box_divider
+    printf "${CYAN}║${NC}    ${WHITE}TOTAL ERRORS:${NC}                   %-42s ${CYAN}║${NC}\n" "${XILRIWS_TOTAL_ERRORS:-0}"
     
     # Calculate success rate (safely)
-    local total_attempts=$((${XILRIWS_SUCCESS:-0} + ${XILRIWS_AUTH_BANNED:-0} + ${XILRIWS_INVALID_CRED:-0}))
+    local total_attempts=$((${XILRIWS_SUCCESS:-0} + ${XILRIWS_AUTH_BANNED:-0}))
     if [ "$total_attempts" -gt 0 ] 2>/dev/null; then
         local success_rate=$((${XILRIWS_SUCCESS:-0} * 100 / total_attempts))
-        printf "${CYAN}║${NC}    ${WHITE}Success Rate:${NC}            %-49s ${CYAN}║${NC}\n" "${success_rate}%"
+        local rate_color="${GREEN}"
+        [ "$success_rate" -lt 80 ] && rate_color="${YELLOW}"
+        [ "$success_rate" -lt 50 ] && rate_color="${RED}"
+        printf "${CYAN}║${NC}    ${WHITE}Success Rate:${NC}                   ${rate_color}%-42s${NC} ${CYAN}║${NC}\n" "${success_rate}%"
     fi
     
     draw_box_bottom
