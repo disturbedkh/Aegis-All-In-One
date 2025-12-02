@@ -2085,15 +2085,15 @@ function stopContainerLogStream() {
 // PAGE INITIALIZATION HOOKS
 // =============================================================================
 
-// Override the existing showPage to add page-specific initialization
-const originalShowPage = showPage;
-showPage = function(page) {
+// Store original navigateTo and extend it with page-specific initialization
+const originalNavigateTo = navigateTo;
+navigateTo = function(page) {
     // Stop any streams when leaving a page
     stopXilriwsLiveStream();
     stopContainerLogStream();
     
     // Call original function
-    originalShowPage(page);
+    originalNavigateTo(page);
     
     // Page-specific initialization
     switch(page) {
