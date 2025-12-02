@@ -1106,12 +1106,21 @@ async function loadMetricHistory(metric, hours) {
             timeLabels.push(label);
         }
         
-        // Render chart as bar graph with proper axes
+        // Calculate expected data points for this time range (data collected every 30 seconds)
+        // Cap at reasonable display max for readability
+        const expectedPoints = Math.min(Math.ceil(hours * 60 * 2), 120); // hours * 60min * 2 (per 30s), max 120
+        const actualPoints = data.data.length;
+        
+        // Calculate bar width as percentage of container, based on expected points
+        // Use expected points so bars are consistent size even with partial data
+        const barWidthPercent = Math.max(0.5, Math.min(4, 100 / expectedPoints));
+        
+        // Render chart as bar graph with proper axes - fixed width bars
         const chartBars = data.data.map((d, i) => {
             const height = Math.max(2, (d.value / 100) * 100);
             let colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
             const time = new Date(d.time).toLocaleTimeString();
-            return `<div class="chart-bar ${colorClass}" style="height: ${height}%" 
+            return `<div class="chart-bar ${colorClass}" style="height: ${height}%; width: ${barWidthPercent}%; flex: none;" 
                         title="${d.value.toFixed(1)}% at ${time}"></div>`;
         }).join('');
         

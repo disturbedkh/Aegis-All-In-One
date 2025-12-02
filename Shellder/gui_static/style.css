@@ -445,14 +445,16 @@ html, body {
     flex: 1;
     display: flex;
     align-items: flex-end;
+    justify-content: flex-start; /* Align bars to left, not stretched */
     gap: 1px;
     border-left: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
     padding: 4px 4px 0 4px;
+    min-height: 150px;
 }
 
 .chart-bar {
-    flex: 1;
+    /* Width set inline based on expected data points */
     min-width: 2px;
     max-width: 20px;
     border-radius: 2px 2px 0 0;
