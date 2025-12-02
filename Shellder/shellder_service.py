@@ -6412,10 +6412,14 @@ def api_nginx_setup():
 
 @app.route('/api/sites/check')
 def api_sites_check():
-    """Check availability of configured sites"""
+    """Check availability of configured sites (fast parallel version)"""
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     import urllib.request
     import urllib.error
     import ssl
+    
+    info('SITES', 'Site availability check started')
+    start_time = time.time()
     
     sites_to_check = []
     
@@ -6426,7 +6430,7 @@ def api_sites_check():
             if site.name != 'default':
                 sites_to_check.append(site.name)
     
-    # Also check local services
+    # Also check local services (only if stack is likely running)
     local_services = [
         {'name': 'ReactMap', 'url': 'http://localhost:6001', 'port': 6001},
         {'name': 'Koji', 'url': 'http://localhost:6002', 'port': 6002},
@@ -6440,101 +6444,79 @@ def api_sites_check():
     healthy = 0
     total = 0
     
-    # Check local services
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     
-    for svc in local_services:
-        total += 1
+    def check_service(svc):
+        """Check a single service with short timeout"""
         try:
             req = urllib.request.Request(svc['url'], method='HEAD')
             req.add_header('User-Agent', 'Shellder-Health-Check')
-            response = urllib.request.urlopen(req, timeout=5, context=ctx)
+            response = urllib.request.urlopen(req, timeout=2, context=ctx)  # Reduced timeout
             status = response.getcode()
-            results.append({
+            return {
                 'name': svc['name'],
                 'url': svc['url'],
                 'status': status,
                 'healthy': 200 <= status < 400,
-                'type': 'local'
-            })
-            if 200 <= status < 400:
-                healthy += 1
+                'type': svc.get('type', 'local')
+            }
         except urllib.error.HTTPError as e:
-            results.append({
+            return {
                 'name': svc['name'],
                 'url': svc['url'],
                 'status': e.code,
                 'healthy': False,
                 'error': str(e.reason),
-                'type': 'local'
-            })
+                'type': svc.get('type', 'local')
+            }
         except Exception as e:
-            results.append({
+            return {
                 'name': svc['name'],
                 'url': svc['url'],
                 'status': 0,
                 'healthy': False,
-                'error': 'Connection failed',
-                'type': 'local'
-            })
+                'error': 'Offline',
+                'type': svc.get('type', 'local')
+            }
     
-    # Check external sites
+    # Check all services in parallel
+    all_checks = local_services.copy()
     for site_name in sites_to_check:
-        total += 1
-        url = f'https://{site_name}'
-        try:
-            req = urllib.request.Request(url, method='HEAD')
-            req.add_header('User-Agent', 'Shellder-Health-Check')
-            response = urllib.request.urlopen(req, timeout=10, context=ctx)
-            status = response.getcode()
-            results.append({
-                'name': site_name,
-                'url': url,
-                'status': status,
-                'healthy': 200 <= status < 400,
-                'type': 'external'
-            })
-            if 200 <= status < 400:
-                healthy += 1
-        except urllib.error.HTTPError as e:
-            results.append({
-                'name': site_name,
-                'url': url,
-                'status': e.code,
-                'healthy': e.code < 500,
-                'error': str(e.reason),
-                'type': 'external'
-            })
-            if e.code < 500:
-                healthy += 1
-        except Exception as e:
-            # Try HTTP if HTTPS fails
+        all_checks.append({
+            'name': site_name,
+            'url': f'https://{site_name}',
+            'type': 'external'
+        })
+    
+    with ThreadPoolExecutor(max_workers=10) as executor:
+        futures = {executor.submit(check_service, svc): svc for svc in all_checks}
+        for future in as_completed(futures, timeout=5):  # Max 5s total
             try:
-                url = f'http://{site_name}'
-                req = urllib.request.Request(url, method='HEAD')
-                response = urllib.request.urlopen(req, timeout=10)
-                status = response.getcode()
-                results.append({
-                    'name': site_name,
-                    'url': url,
-                    'status': status,
-                    'healthy': 200 <= status < 400,
-                    'type': 'external',
-                    'note': 'HTTP only'
-                })
-                if 200 <= status < 400:
+                result = future.result(timeout=1)
+                results.append(result)
+                total += 1
+                if result.get('healthy'):
                     healthy += 1
-            except:
+            except Exception:
+                svc = futures[future]
                 results.append({
-                    'name': site_name,
-                    'url': f'https://{site_name}',
+                    'name': svc['name'],
+                    'url': svc['url'],
                     'status': 0,
                     'healthy': False,
-                    'error': 'Connection failed',
-                    'type': 'external'
+                    'error': 'Timeout',
+                    'type': svc.get('type', 'local')
                 })
+                total += 1
+    
+    duration = (time.time() - start_time) * 1000
+    info('SITES', f'Site availability check completed in {duration:.0f}ms', {
+        'healthy': healthy,
+        'total': total,
+        'sites': [r['name'] for r in results]
+    })
     
     return jsonify({
         'sites': results,
@@ -7107,8 +7089,11 @@ def api_system_services():
     """Get status of all system services required by the Aegis stack (fast version)"""
     from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeout
     
+    info('SERVICES', 'System services check started')
+    start_time = time.time()
+    
     services = {}
-    TIMEOUT = 2  # 2 second timeout per service check
+    TIMEOUT = 1  # 1 second timeout per service check (reduced for speed)
     
     def check_docker():
         try:
@@ -7214,6 +7199,13 @@ def api_system_services():
     # Calculate summary
     running = sum(1 for s in services.values() if s.get('status') == 'running')
     total = len(services)
+    duration = (time.time() - start_time) * 1000
+    
+    info('SERVICES', f'System services check completed in {duration:.0f}ms', {
+        'running': running, 
+        'total': total,
+        'services': list(services.keys())
+    })
     
     return jsonify({
         'services': services,

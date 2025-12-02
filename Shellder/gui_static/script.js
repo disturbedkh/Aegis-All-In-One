@@ -25,8 +25,9 @@ const RequestManager = {
         '/api/status': 5000,        // Max once per 5s
         '/api/metrics/sparklines': 10000,  // Max once per 10s
         '/api/xilriws/stats': 5000,  // Max once per 5s
-        '/api/services': 30000,      // Max once per 30s (services rarely change)
-        '/api/containers/updates': 60000  // Max once per 60s (image updates are slow to check)
+        '/api/services': 10000,      // Max once per 10s (reduced from 30s)
+        '/api/containers/updates': 60000,  // Max once per 60s (image updates are slow to check)
+        '/api/sites/check': 15000    // Max once per 15s
     },
     callCounts: new Map(),   // Track call counts for logging
     
@@ -834,8 +835,18 @@ function updateDashboard(data) {
     loadSystemServices();
     console.log('[DASHBOARD] loadSystemServices() called');
     
+    // Load site availability check
+    console.log('[DASHBOARD] About to call checkSiteAvailability()');
+    checkSiteAvailability();
+    console.log('[DASHBOARD] checkSiteAvailability() called');
+    
     // Check for container image updates (throttled - runs every 60s max)
     loadContainerUpdates();
+    
+    // Load debug panel if visible
+    if (document.getElementById('debugLogOutput')) {
+        loadDebugPanel();
+    }
 }
 
 // =============================================================================
@@ -853,7 +864,9 @@ async function loadSystemServices() {
     console.log('[SERVICES] Container found, fetching /api/services...');
     
     try {
-        const data = await fetchAPI('/api/services');
+        // Use force:true on first call to bypass throttle
+        const isFirstCall = !RequestManager.lastCall.has('/api/services');
+        const data = await fetchAPI('/api/services', isFirstCall ? { force: true } : {});
         console.log('[SERVICES] Response:', data);
         
         // Skip if throttled
@@ -862,15 +875,26 @@ async function loadSystemServices() {
             return;
         }
         
+        // Check for error response
+        if (data.error) {
+            console.error('[SERVICES] API error:', data.error);
+            container.innerHTML = `<div class="text-danger">Error: ${data.error}</div>`;
+            if (badge) {
+                badge.textContent = 'Error';
+                badge.className = 'badge badge-danger';
+            }
+            return;
+        }
+        
         // Update badge
-        if (badge) {
+        if (badge && data.summary) {
             const { running, total, healthy } = data.summary;
             badge.textContent = `${running}/${total} Running`;
             badge.className = `badge ${healthy ? 'badge-success' : 'badge-warning'}`;
         }
         
         // Build services grid
-        const services = data.services;
+        const services = data.services || {};
         const serviceOrder = ['docker', 'compose', 'mariadb', 'python', 'git', 'sqlite', 'nginx', 'nodejs', 'shellder'];
         
         let html = '';
@@ -894,8 +918,10 @@ async function loadSystemServices() {
         }
         
         container.innerHTML = html || '<div class="text-muted">No services detected</div>';
+        console.log('[SERVICES] Rendered', Object.keys(services).length, 'services');
     } catch (error) {
-        container.innerHTML = '<div class="text-danger">Failed to check services</div>';
+        console.error('[SERVICES] Exception:', error);
+        container.innerHTML = `<div class="text-danger">Failed to check services: ${error.message}</div>`;
         if (badge) {
             badge.textContent = 'Error';
             badge.className = 'badge badge-danger';
@@ -3893,18 +3919,31 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 // =============================================================================
 
 async function checkSiteAvailability() {
+    console.log('[SITES] checkSiteAvailability called');
     const container = document.getElementById('siteAvailability');
-    if (!container) return;
+    if (!container) {
+        console.log('[SITES] ERROR: siteAvailability element not found!');
+        return;
+    }
     
     container.innerHTML = '<div class="loading">Checking sites...</div>';
     
     try {
+        console.log('[SITES] Fetching /api/sites/check...');
         const data = await fetchAPI('/api/sites/check', { force: true });
+        console.log('[SITES] Response:', data);
+        
+        // Check for errors
+        if (data.error) {
+            console.error('[SITES] API error:', data.error);
+            container.innerHTML = `<div class="error-msg">Error: ${data.error}</div>`;
+            return;
+        }
         
         // Update dashboard card
         const healthEl = document.getElementById('siteHealth');
         const iconEl = document.getElementById('siteHealthIcon');
-        if (healthEl) healthEl.textContent = data.summary;
+        if (healthEl) healthEl.textContent = data.summary || 'N/A';
         if (iconEl) iconEl.textContent = data.healthy === data.total ? '✅' : '⚠️';
         
         // Render site list
@@ -3917,11 +3956,14 @@ async function checkSiteAvailability() {
                     ${site.error ? `<span class="site-check-error">${site.error}</span>` : ''}
                 </div>
             `).join('');
+            console.log('[SITES] Rendered', data.sites.length, 'sites');
         } else {
-            container.innerHTML = '<div class="no-data">No sites to check</div>';
+            container.innerHTML = '<div class="no-data">No sites configured in Nginx</div>';
+            console.log('[SITES] No sites to display');
         }
     } catch (e) {
-        container.innerHTML = '<div class="error-msg">Failed to check sites</div>';
+        console.error('[SITES] Exception:', e);
+        container.innerHTML = `<div class="error-msg">Failed to check sites: ${e.message}</div>`;
     }
 }
 
