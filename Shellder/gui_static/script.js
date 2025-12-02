@@ -830,7 +830,9 @@ function updateDashboard(data) {
     loadSparklines();
     
     // Load system services status
+    console.log('[DASHBOARD] About to call loadSystemServices()');
     loadSystemServices();
+    console.log('[DASHBOARD] loadSystemServices() called');
     
     // Check for container image updates (throttled - runs every 60s max)
     loadContainerUpdates();
@@ -841,15 +843,24 @@ function updateDashboard(data) {
 // =============================================================================
 
 async function loadSystemServices() {
+    console.log('[SERVICES] loadSystemServices called');
     const container = document.getElementById('servicesList');
     const badge = document.getElementById('servicesStatus');
-    if (!container) return;
+    if (!container) {
+        console.log('[SERVICES] ERROR: servicesList element not found!');
+        return;
+    }
+    console.log('[SERVICES] Container found, fetching /api/services...');
     
     try {
         const data = await fetchAPI('/api/services');
+        console.log('[SERVICES] Response:', data);
         
         // Skip if throttled
-        if (data._throttled) return;
+        if (data._throttled) {
+            console.log('[SERVICES] Request throttled, skipping');
+            return;
+        }
         
         // Update badge
         if (badge) {
