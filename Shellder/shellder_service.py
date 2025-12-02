@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.15"  # 2025-12-02: Fixed service_db -> shellder_db variable name
-SHELLDER_BUILD = "20251202-4"  # Date-based build number
+SHELLDER_VERSION = "1.0.16"  # 2025-12-02: Fixed metrics history click, sparklines 100% issue
+SHELLDER_BUILD = "20251202-5"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!

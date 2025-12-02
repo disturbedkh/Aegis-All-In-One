@@ -1022,14 +1022,15 @@ function renderSparkline(elementId, values) {
     const el = document.getElementById(elementId);
     if (!el || !values.length) return;
     
-    const max = Math.max(...values, 1);
+    // For percentage metrics, always use 100 as max for proper scaling
+    const max = 100;
     const bars = values.map(v => {
         const height = Math.max(2, (v / max) * 100);
         let colorClass = '';
         if (v < 50) colorClass = 'low';
         else if (v < 80) colorClass = 'medium';
         else colorClass = 'high';
-        return `<div class="bar ${colorClass}" style="height: ${height}%"></div>`;
+        return `<div class="bar ${colorClass}" style="height: ${height}%" title="${v.toFixed(1)}%"></div>`;
     }).join('');
     
     el.innerHTML = bars;
@@ -1135,9 +1136,15 @@ async function loadMetricHistory(metric, hours) {
             </div>
         `;
         
-        // Update active button
-        document.querySelectorAll('.metric-time-controls .btn').forEach(b => b.classList.remove('active'));
-        event.target?.classList?.add('active');
+        // Update active button - find by hours
+        document.querySelectorAll('.metric-time-controls .btn').forEach(b => {
+            b.classList.remove('active');
+            // Match button by its label
+            const hoursMap = {'1h': 1, '6h': 6, '24h': 24, '7d': 168};
+            if (hoursMap[b.textContent] === hours) {
+                b.classList.add('active');
+            }
+        });
         
     } catch (e) {
         SHELLDER_DEBUG.error('METRICS', `Failed to load history for ${metric}: ${e.message}`);
