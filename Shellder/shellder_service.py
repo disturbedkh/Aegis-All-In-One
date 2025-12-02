@@ -5210,8 +5210,13 @@ def index():
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
-    """Serve static files"""
-    return send_from_directory(str(STATIC_DIR), filename)
+    """Serve static files with cache control for development"""
+    response = send_from_directory(str(STATIC_DIR), filename)
+    # Force browsers to revalidate JS/CSS files to get updates quickly
+    if filename.endswith(('.js', '.css')):
+        response.headers['Cache-Control'] = 'no-cache, must-revalidate'
+        response.headers['Pragma'] = 'no-cache'
+    return response
 
 @app.route('/api/metrics/history/<metric_name>')
 def api_metrics_history(metric_name):
