@@ -1206,6 +1206,14 @@ git_pull() {
                 echo -e "The control panel scripts have been updated."
                 echo -e "Restarting to apply changes..."
                 echo ""
+                
+                # Clear debug log for fresh session after update
+                if [ -f "Shellder/debuglog.txt" ]; then
+                    # Backup old log
+                    mv "Shellder/debuglog.txt" "Shellder/debuglog.txt.bak" 2>/dev/null || rm -f "Shellder/debuglog.txt"
+                    echo -e "${DIM}Debug log cleared for fresh session${NC}"
+                fi
+                
                 sleep 2
                 
                 # Re-execute this script to load new code

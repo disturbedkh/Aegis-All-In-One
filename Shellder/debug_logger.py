@@ -390,8 +390,28 @@ def log_http_error(error, request):
 # STARTUP
 # =============================================================================
 
-def initialize():
-    """Initialize the debug logger - call at startup"""
+def initialize(fresh_start=True):
+    """Initialize the debug logger - call at startup
+    
+    Args:
+        fresh_start: If True, clears existing log file for a clean session
+    """
+    global _start_time
+    _start_time = time.time()
+    
+    # Clear existing log on fresh start (new launch/git pull)
+    if fresh_start:
+        with _lock:
+            _log_buffer.clear()
+            if DEBUG_LOG_PATH.exists():
+                try:
+                    # Keep a backup of the last log
+                    backup_path = DEBUG_LOG_PATH.with_suffix('.txt.bak')
+                    DEBUG_LOG_PATH.rename(backup_path)
+                except Exception:
+                    # If rename fails, just truncate
+                    DEBUG_LOG_PATH.unlink(missing_ok=True)
+    
     # Write header
     header = f"""
 {'='*80}
@@ -400,6 +420,7 @@ Started: {datetime.now().isoformat()}
 PID: {os.getpid()}
 Python: {sys.version.split()[0]}
 Platform: {platform.platform()}
+Session: {'FRESH START' if fresh_start else 'CONTINUING'}
 {'='*80}
 """
     _write_log(header)

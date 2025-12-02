@@ -24,7 +24,8 @@ const RequestManager = {
     throttleMs: {
         '/api/status': 5000,        // Max once per 5s
         '/api/metrics/sparklines': 10000,  // Max once per 10s
-        '/api/xilriws/stats': 5000   // Max once per 5s
+        '/api/xilriws/stats': 5000,  // Max once per 5s
+        '/api/services': 30000       // Max once per 30s (services rarely change)
     },
     callCounts: new Map(),   // Track call counts for logging
     
@@ -826,6 +827,65 @@ function updateDashboard(data) {
     
     // Load sparklines (will be throttled automatically by RequestManager)
     loadSparklines();
+    
+    // Load system services status
+    loadSystemServices();
+}
+
+// =============================================================================
+// SYSTEM SERVICES
+// =============================================================================
+
+async function loadSystemServices() {
+    const container = document.getElementById('servicesList');
+    const badge = document.getElementById('servicesStatus');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/services');
+        
+        // Skip if throttled
+        if (data._throttled) return;
+        
+        // Update badge
+        if (badge) {
+            const { running, total, healthy } = data.summary;
+            badge.textContent = `${running}/${total} Running`;
+            badge.className = `badge ${healthy ? 'badge-success' : 'badge-warning'}`;
+        }
+        
+        // Build services grid
+        const services = data.services;
+        const serviceOrder = ['docker', 'compose', 'mariadb', 'python', 'git', 'sqlite', 'nginx', 'nodejs', 'shellder'];
+        
+        let html = '';
+        for (const key of serviceOrder) {
+            const svc = services[key];
+            if (!svc) continue;
+            
+            const statusClass = svc.status;
+            const version = svc.version ? `<span class="service-version">v${svc.version}</span>` : '';
+            
+            html += `
+                <div class="service-item" title="${svc.description}: ${svc.status}">
+                    <span class="service-icon">${svc.icon}</span>
+                    <div class="service-info">
+                        <div class="service-name">${svc.name}</div>
+                        <div class="service-desc">${svc.description} ${version}</div>
+                    </div>
+                    <span class="service-status ${statusClass}" title="${svc.status}"></span>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html || '<div class="text-muted">No services detected</div>';
+    } catch (error) {
+        container.innerHTML = '<div class="text-danger">Failed to check services</div>';
+        if (badge) {
+            badge.textContent = 'Error';
+            badge.className = 'badge badge-danger';
+        }
+    }
 }
 
 function updateContainerStats(containers) {

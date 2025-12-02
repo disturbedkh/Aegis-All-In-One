@@ -693,6 +693,116 @@ html, body {
 }
 
 /* =============================================================================
+   SYSTEM SERVICES GRID
+   ============================================================================= */
+
+.services-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.service-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    transition: var(--transition-fast);
+}
+
+.service-item:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-1px);
+}
+
+.service-icon {
+    font-size: 1.5rem;
+    flex-shrink: 0;
+}
+
+.service-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.service-name {
+    font-weight: 600;
+    font-size: 14px;
+    margin-bottom: 2px;
+}
+
+.service-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.service-version {
+    font-size: 10px;
+    color: var(--accent-secondary);
+    font-family: var(--font-mono);
+}
+
+.service-status {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.service-status.running {
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success-glow);
+}
+
+.service-status.stopped {
+    background: var(--danger);
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.service-status.installed {
+    background: var(--warning);
+}
+
+.service-status.not_found {
+    background: var(--text-muted);
+    opacity: 0.5;
+}
+
+.badge {
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+}
+
+.badge-success {
+    background: var(--success);
+    color: #000;
+}
+
+.badge-warning {
+    background: var(--warning);
+    color: #000;
+}
+
+.badge-danger {
+    background: var(--danger);
+    color: #fff;
+}
+
+.badge-info {
+    background: var(--accent-secondary);
+    color: #000;
+}
+
+/* =============================================================================
    SCRIPTS GRID
    ============================================================================= */
 

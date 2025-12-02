@@ -6262,6 +6262,170 @@ def api_env():
     except Exception as e:
         return jsonify({'configured': False, 'error': str(e)})
 
+@app.route('/api/services')
+def api_system_services():
+    """Get status of all system services required by the Aegis stack"""
+    services = {}
+    
+    # Docker daemon
+    try:
+        result = subprocess.run(['docker', 'info'], capture_output=True, timeout=5)
+        services['docker'] = {
+            'name': 'Docker',
+            'status': 'running' if result.returncode == 0 else 'stopped',
+            'icon': '🐳',
+            'description': 'Container runtime'
+        }
+    except Exception:
+        services['docker'] = {'name': 'Docker', 'status': 'not_found', 'icon': '🐳', 'description': 'Container runtime'}
+    
+    # MariaDB/MySQL - check if container running or native service
+    mariadb_running = False
+    if docker_client:
+        try:
+            for c in docker_client.containers.list():
+                if 'mariadb' in c.name.lower() or 'mysql' in c.name.lower() or c.name == 'database':
+                    mariadb_running = c.status == 'running'
+                    break
+        except Exception:
+            pass
+    
+    if not mariadb_running:
+        # Check native service
+        try:
+            result = subprocess.run(['systemctl', 'is-active', 'mariadb'], capture_output=True, text=True, timeout=5)
+            mariadb_running = result.stdout.strip() == 'active'
+        except Exception:
+            try:
+                result = subprocess.run(['systemctl', 'is-active', 'mysql'], capture_output=True, text=True, timeout=5)
+                mariadb_running = result.stdout.strip() == 'active'
+            except Exception:
+                pass
+    
+    services['mariadb'] = {
+        'name': 'MariaDB',
+        'status': 'running' if mariadb_running else 'stopped',
+        'icon': '🗄️',
+        'description': 'Database server'
+    }
+    
+    # Python
+    try:
+        result = subprocess.run(['python3', '--version'], capture_output=True, text=True, timeout=5)
+        version = result.stdout.strip() if result.returncode == 0 else 'Unknown'
+        services['python'] = {
+            'name': 'Python',
+            'status': 'running',
+            'version': version.replace('Python ', ''),
+            'icon': '🐍',
+            'description': 'Runtime environment'
+        }
+    except Exception:
+        services['python'] = {'name': 'Python', 'status': 'not_found', 'icon': '🐍', 'description': 'Runtime environment'}
+    
+    # Git
+    try:
+        result = subprocess.run(['git', '--version'], capture_output=True, text=True, timeout=5)
+        version = result.stdout.strip() if result.returncode == 0 else 'Unknown'
+        services['git'] = {
+            'name': 'Git',
+            'status': 'running',
+            'version': version.replace('git version ', ''),
+            'icon': '📦',
+            'description': 'Version control'
+        }
+    except Exception:
+        services['git'] = {'name': 'Git', 'status': 'not_found', 'icon': '📦', 'description': 'Version control'}
+    
+    # Nginx
+    try:
+        result = subprocess.run(['systemctl', 'is-active', 'nginx'], capture_output=True, text=True, timeout=5)
+        nginx_running = result.stdout.strip() == 'active'
+        services['nginx'] = {
+            'name': 'Nginx',
+            'status': 'running' if nginx_running else 'stopped',
+            'icon': '🌐',
+            'description': 'Reverse proxy'
+        }
+    except Exception:
+        # Try checking if nginx binary exists
+        try:
+            result = subprocess.run(['which', 'nginx'], capture_output=True, timeout=5)
+            services['nginx'] = {
+                'name': 'Nginx',
+                'status': 'installed' if result.returncode == 0 else 'not_found',
+                'icon': '🌐',
+                'description': 'Reverse proxy'
+            }
+        except Exception:
+            services['nginx'] = {'name': 'Nginx', 'status': 'not_found', 'icon': '🌐', 'description': 'Reverse proxy'}
+    
+    # Node.js (optional, for some tools)
+    try:
+        result = subprocess.run(['node', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            services['nodejs'] = {
+                'name': 'Node.js',
+                'status': 'running',
+                'version': result.stdout.strip().replace('v', ''),
+                'icon': '💚',
+                'description': 'JavaScript runtime'
+            }
+    except Exception:
+        pass  # Node.js is optional
+    
+    # SQLite
+    try:
+        result = subprocess.run(['sqlite3', '--version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            version = result.stdout.strip().split()[0] if result.stdout else 'Unknown'
+            services['sqlite'] = {
+                'name': 'SQLite',
+                'status': 'running',
+                'version': version,
+                'icon': '📋',
+                'description': 'Local database'
+            }
+    except Exception:
+        services['sqlite'] = {'name': 'SQLite', 'status': 'not_found', 'icon': '📋', 'description': 'Local database'}
+    
+    # Compose
+    try:
+        result = subprocess.run(['docker', 'compose', 'version'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            version = result.stdout.strip().split()[-1] if result.stdout else 'Unknown'
+            services['compose'] = {
+                'name': 'Docker Compose',
+                'status': 'running',
+                'version': version.replace('v', ''),
+                'icon': '🔧',
+                'description': 'Container orchestration'
+            }
+    except Exception:
+        services['compose'] = {'name': 'Docker Compose', 'status': 'not_found', 'icon': '🔧', 'description': 'Container orchestration'}
+    
+    # Shellder service itself
+    services['shellder'] = {
+        'name': 'Shellder',
+        'status': 'running',
+        'icon': '🐚',
+        'description': 'Control panel (this service)',
+        'version': '1.0'
+    }
+    
+    # Calculate summary
+    running = sum(1 for s in services.values() if s['status'] == 'running')
+    total = len(services)
+    
+    return jsonify({
+        'services': services,
+        'summary': {
+            'running': running,
+            'total': total,
+            'healthy': running >= 4  # At least Docker, Python, Git, MariaDB
+        }
+    })
+
 @app.route('/api/git/status')
 def api_git_status():
     """Get git status"""
