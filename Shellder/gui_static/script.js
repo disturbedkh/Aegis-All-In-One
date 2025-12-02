@@ -2366,8 +2366,15 @@ navigateTo = function(page) {
             loadXilriwsStats();
             loadProxyInfo();
             loadXilriwsLogs();
+            updateXilriwsContainerStatus();
+            loadProxyFile();
             // Also fetch current stats
             fetchAPI('/api/xilriws/stats').then(data => updateXilriwsPage(data));
+            break;
+        case 'nginx':
+            loadNginxStatus();
+            loadNginxSites();
+            loadNginxLogs();
             break;
         case 'stats':
             loadHistoricalStats();
@@ -3907,18 +3914,4 @@ async function checkSiteAvailability() {
     }
 }
 
-// Auto-load on page navigation
-const originalNavigateTo = window.navigateTo || navigateTo;
-window.navigateTo = function(page) {
-    originalNavigateTo(page);
-    
-    // Page-specific initialization
-    if (page === 'xilriws') {
-        updateXilriwsContainerStatus();
-        loadProxyFile();
-    } else if (page === 'nginx') {
-        loadNginxStatus();
-        loadNginxSites();
-        loadNginxLogs();
-    }
-};
+// Note: Page-specific initialization is handled in the navigateTo override above
