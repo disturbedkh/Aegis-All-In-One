@@ -94,32 +94,32 @@
             <!-- Dashboard Page -->
             <div id="page-dashboard" class="page active">
                 <div class="stats-grid">
-                    <div class="stat-card">
-                        <div class="stat-icon running">🐳</div>
+                    <div class="stat-card" title="Number of Docker containers currently running">
+                        <div class="stat-icon running">🟢</div>
                         <div class="stat-info">
                             <div class="stat-value" id="containersRunning">-</div>
-                            <div class="stat-label">Running</div>
+                            <div class="stat-label">Containers Running</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon stopped">⏹️</div>
+                    <div class="stat-card" title="Number of Docker containers that are stopped">
+                        <div class="stat-icon stopped">🔴</div>
                         <div class="stat-info">
                             <div class="stat-value" id="containersStopped">-</div>
-                            <div class="stat-label">Stopped</div>
+                            <div class="stat-label">Containers Stopped</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon memory">💾</div>
+                    <div class="stat-card" title="System RAM usage - how much memory your server is using">
+                        <div class="stat-icon memory">🧠</div>
                         <div class="stat-info">
                             <div class="stat-value" id="memoryUsed">-</div>
-                            <div class="stat-label">Memory Used</div>
+                            <div class="stat-label">RAM Usage</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon disk">💿</div>
+                    <div class="stat-card" title="Hard drive storage usage - how full your disk is">
+                        <div class="stat-icon disk">💽</div>
                         <div class="stat-info">
                             <div class="stat-value" id="diskUsed">-</div>
-                            <div class="stat-label">Disk Used</div>
+                            <div class="stat-label">Disk Usage</div>
                         </div>
                     </div>
                 </div>
@@ -127,25 +127,25 @@
                 <div class="dashboard-grid">
                     <div class="card">
                         <div class="card-header">
-                            <h2>Quick Actions</h2>
+                            <h2>🎮 Quick Actions</h2>
                         </div>
                         <div class="card-body">
                             <div class="action-grid">
-                                <button class="action-btn" onclick="dockerAction('up')">
+                                <button class="action-btn" onclick="dockerAction('up')" title="Start all Docker containers (docker compose up -d)">
                                     <span class="action-icon">▶️</span>
-                                    <span>Start All</span>
+                                    <span>Start All Containers</span>
                                 </button>
-                                <button class="action-btn" onclick="dockerAction('down')">
+                                <button class="action-btn" onclick="dockerAction('down')" title="Stop all Docker containers (docker compose down)">
                                     <span class="action-icon">⏹️</span>
-                                    <span>Stop All</span>
+                                    <span>Stop All Containers</span>
                                 </button>
-                                <button class="action-btn" onclick="dockerAction('restart')">
+                                <button class="action-btn" onclick="dockerAction('restart')" title="Restart all Docker containers">
                                     <span class="action-icon">🔄</span>
-                                    <span>Restart All</span>
+                                    <span>Restart All Containers</span>
                                 </button>
-                                <button class="action-btn" onclick="dockerAction('pull')">
+                                <button class="action-btn" onclick="dockerAction('pull')" title="Download latest container images from Docker Hub">
                                     <span class="action-icon">⬇️</span>
-                                    <span>Pull Images</span>
+                                    <span>Update Images</span>
                                 </button>
                             </div>
                         </div>
@@ -153,24 +153,24 @@
                     
                     <div class="card">
                         <div class="card-header">
-                            <h2>System Info</h2>
+                            <h2>🖥️ Server Status</h2>
                         </div>
                         <div class="card-body">
                             <div class="info-list">
-                                <div class="info-item">
-                                    <span class="info-label">Uptime</span>
+                                <div class="info-item" title="How long your server has been running since last restart">
+                                    <span class="info-label">⏱️ Server Uptime</span>
                                     <span class="info-value" id="systemUptime">-</span>
                                 </div>
-                                <div class="info-item">
-                                    <span class="info-label">Memory</span>
+                                <div class="info-item" title="RAM memory usage (used / total)">
+                                    <span class="info-label">🧠 RAM (Used/Total)</span>
                                     <span class="info-value" id="memoryInfo">-</span>
                                 </div>
-                                <div class="info-item">
-                                    <span class="info-label">Disk</span>
+                                <div class="info-item" title="Hard disk storage usage (used / total)">
+                                    <span class="info-label">💽 Disk (Used/Total)</span>
                                     <span class="info-value" id="diskInfo">-</span>
                                 </div>
-                                <div class="info-item">
-                                    <span class="info-label">Config</span>
+                                <div class="info-item" title="Whether .env configuration file exists and is set up">
+                                    <span class="info-label">⚙️ .env Config</span>
                                     <span class="info-value" id="envStatus">-</span>
                                 </div>
                             </div>
@@ -181,7 +181,7 @@
                 <div class="dashboard-grid">
                     <div class="card">
                         <div class="card-header">
-                            <h2>Container Status</h2>
+                            <h2>🐳 Docker Containers</h2>
                         </div>
                         <div class="card-body">
                             <div id="containerList" class="container-list">
@@ -192,11 +192,11 @@
                     
                     <div class="card">
                         <div class="card-header">
-                            <h2>Xilriws Proxy Status</h2>
+                            <h2 title="Xilriws handles Pokemon Go authentication - bypassing security checks">🔐 Auth Proxy (Xilriws)</h2>
                         </div>
                         <div class="card-body">
                             <div id="xilriwsStats" class="xilriws-panel">
-                                <div class="loading">Loading Xilriws stats...</div>
+                                <div class="loading">Loading auth proxy stats...</div>
                             </div>
                             <div class="xilriws-details" id="xilriwsDetails">
                                 <!-- Details populated by JS -->
