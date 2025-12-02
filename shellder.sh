@@ -299,6 +299,22 @@ print_status() {
     printf "  %-25s ${color}%s${NC}\n" "$label" "$status"
 }
 
+print_info() {
+    echo -e "${CYAN}[INFO]${NC} $1"
+}
+
+print_success() {
+    echo -e "${GREEN}[✓]${NC} $1"
+}
+
+print_error() {
+    echo -e "${RED}[✗]${NC} $1"
+}
+
+print_warning() {
+    echo -e "${YELLOW}[!]${NC} $1"
+}
+
 press_enter() {
     echo ""
     read -p "Press Enter to continue..."
