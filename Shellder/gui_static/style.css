@@ -3072,3 +3072,102 @@ select:focus {
     background: var(--accent-secondary);
 }
 
+/* =============================================================================
+   AI DEBUG PANEL
+   ============================================================================= */
+
+.debug-panel-card {
+    border: 2px solid var(--accent-primary);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(99, 102, 241, 0.1) 100%);
+}
+
+.debug-panel-card .card-header {
+    border-bottom: 1px solid var(--accent-primary);
+}
+
+.debug-controls {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    margin-bottom: 16px;
+}
+
+.debug-status {
+    display: flex;
+    gap: 20px;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 12px;
+    font-family: var(--font-mono);
+}
+
+.debug-log-container {
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.debug-log-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.debug-autoscroll {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+    cursor: pointer;
+}
+
+.debug-autoscroll input {
+    cursor: pointer;
+}
+
+.debug-log-output {
+    height: 300px;
+    overflow-y: auto;
+    padding: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    line-height: 1.5;
+}
+
+.debug-log-line {
+    padding: 2px 6px;
+    border-radius: 3px;
+    white-space: pre-wrap;
+    word-break: break-all;
+}
+
+.debug-log-line.error,
+.debug-log-line.fatal {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+}
+
+.debug-log-line.warn {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--warning);
+}
+
+.debug-log-line.info {
+    color: var(--success);
+}
+
+.debug-log-line.debug {
+    color: var(--accent-primary);
+}
+
+.debug-log-line.trace {
+    color: var(--text-muted);
+}
+

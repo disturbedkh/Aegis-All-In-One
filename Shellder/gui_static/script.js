@@ -3926,3 +3926,146 @@ async function checkSiteAvailability() {
 }
 
 // Note: Page-specific initialization is handled in the navigateTo override above
+
+// =============================================================================
+// AI DEBUG PANEL
+// =============================================================================
+
+let debugRefreshInterval = null;
+
+async function loadDebugPanel() {
+    try {
+        const data = await fetchAPI('/api/debug/live?count=100');
+        
+        // Update version info
+        const versionEl = document.getElementById('debugVersion');
+        const commitEl = document.getElementById('debugCommit');
+        const uptimeEl = document.getElementById('debugUptime');
+        const pidEl = document.getElementById('debugPid');
+        
+        if (versionEl) versionEl.textContent = `v${data.version || '--'}`;
+        if (commitEl) commitEl.textContent = data.git?.commit || '--';
+        if (uptimeEl) {
+            const secs = Math.floor(data.uptime_seconds || 0);
+            const mins = Math.floor(secs / 60);
+            const hours = Math.floor(mins / 60);
+            uptimeEl.textContent = hours > 0 ? `${hours}h ${mins % 60}m` : `${mins}m ${secs % 60}s`;
+        }
+        if (pidEl) pidEl.textContent = data.pid || '--';
+        
+        // Render logs
+        const logOutput = document.getElementById('debugLogOutput');
+        if (logOutput && data.logs) {
+            const html = data.logs.map(log => {
+                const levelClass = log.level.toLowerCase();
+                return `<div class="debug-log-line ${levelClass}">${escapeHtml(log.raw)}</div>`;
+            }).join('');
+            logOutput.innerHTML = html || '<div class="no-data">No logs yet</div>';
+            
+            // Auto-scroll to bottom
+            logOutput.scrollTop = logOutput.scrollHeight;
+        }
+    } catch (e) {
+        console.error('Failed to load debug panel:', e);
+    }
+}
+
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
+}
+
+async function refreshDebugLogs() {
+    await loadDebugPanel();
+    showToast('Debug logs refreshed', 'success');
+}
+
+async function debugGitPull() {
+    showToast('Pulling from GitHub...', 'info');
+    
+    try {
+        const data = await fetchAPI('/api/debug/git-pull', { method: 'POST' });
+        
+        if (data.success) {
+            showToast(`✅ Pulled successfully! Commit: ${data.new_commit}`, 'success');
+            if (data.needs_restart) {
+                showToast('⚠️ Service files changed - restart recommended', 'warning');
+            }
+            await loadDebugPanel();
+        } else {
+            showToast(`❌ Pull failed: ${data.error || data.output}`, 'error');
+        }
+    } catch (e) {
+        showToast(`❌ Pull failed: ${e.message}`, 'error');
+    }
+}
+
+async function debugRestart() {
+    if (!confirm('Restart the Shellder service? The page will reload after a few seconds.')) {
+        return;
+    }
+    
+    showToast('🔄 Restarting service...', 'info');
+    
+    try {
+        await fetchAPI('/api/debug/restart', { method: 'POST' });
+        showToast('Service restarting... Page will reload in 5 seconds', 'warning');
+        
+        // Wait and reload
+        setTimeout(() => {
+            window.location.reload();
+        }, 5000);
+    } catch (e) {
+        showToast(`Restart may have succeeded - refresh page. Error: ${e.message}`, 'warning');
+        setTimeout(() => window.location.reload(), 3000);
+    }
+}
+
+async function debugPullAndRestart() {
+    if (!confirm('Pull from GitHub and restart? The page will reload after a few seconds.')) {
+        return;
+    }
+    
+    showToast('🚀 Pulling and restarting...', 'info');
+    
+    try {
+        const data = await fetchAPI('/api/debug/pull-and-restart', { method: 'POST' });
+        
+        if (data.success) {
+            showToast(`✅ Pulled commit ${data.new_commit}. Restarting...`, 'success');
+            setTimeout(() => window.location.reload(), 5000);
+        } else {
+            showToast(`❌ Failed: ${data.error}`, 'error');
+        }
+    } catch (e) {
+        showToast('May have succeeded - refreshing...', 'warning');
+        setTimeout(() => window.location.reload(), 3000);
+    }
+}
+
+// Start debug panel auto-refresh when on dashboard
+function startDebugAutoRefresh() {
+    if (debugRefreshInterval) clearInterval(debugRefreshInterval);
+    
+    const checkbox = document.getElementById('debugAutoRefresh');
+    if (checkbox && checkbox.checked) {
+        debugRefreshInterval = setInterval(loadDebugPanel, 5000);
+    }
+}
+
+// Toggle auto-refresh
+document.getElementById('debugAutoRefresh')?.addEventListener('change', function() {
+    if (this.checked) {
+        startDebugAutoRefresh();
+    } else if (debugRefreshInterval) {
+        clearInterval(debugRefreshInterval);
+        debugRefreshInterval = null;
+    }
+});
+
+// Load debug panel on dashboard
+if (document.getElementById('debugLogOutput')) {
+    loadDebugPanel();
+    startDebugAutoRefresh();
+}

@@ -22,6 +22,12 @@ Or standalone:
 """
 
 # =============================================================================
+# VERSION - Update this with each significant change for debugging
+# =============================================================================
+SHELLDER_VERSION = "1.0.12"  # 2025-12-02: Added live debug panel, fixed CPU, version tracking
+SHELLDER_BUILD = "20251202-1"  # Date-based build number
+
+# =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
 # =============================================================================
 # Eventlet monkey_patch() must happen before importing anything else
@@ -5331,6 +5337,153 @@ def api_debug_get_client_logs():
         'logs': client_debug_logs
     })
 
+@app.route('/api/debug/live')
+def api_debug_live():
+    """Get recent debug log entries for live viewing on dashboard"""
+    count = request.args.get('count', 50, type=int)
+    count = min(count, 200)  # Cap at 200 entries
+    
+    logs = get_recent_logs(count)
+    
+    # Parse log entries to extract level and category for filtering/coloring
+    parsed = []
+    for entry in logs:
+        level = 'DEBUG'
+        if '[ERROR]' in entry or '[FATAL]' in entry:
+            level = 'ERROR'
+        elif '[WARN ]' in entry:
+            level = 'WARN'
+        elif '[INFO ]' in entry:
+            level = 'INFO'
+        elif '[TRACE]' in entry:
+            level = 'TRACE'
+        
+        parsed.append({
+            'raw': entry,
+            'level': level
+        })
+    
+    # Get git status
+    git_info = {}
+    try:
+        result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                               capture_output=True, text=True, timeout=5, cwd=str(AEGIS_ROOT))
+        git_info['commit'] = result.stdout.strip() if result.returncode == 0 else 'unknown'
+        
+        result = subprocess.run(['git', 'log', '-1', '--format=%ci'], 
+                               capture_output=True, text=True, timeout=5, cwd=str(AEGIS_ROOT))
+        git_info['commit_date'] = result.stdout.strip() if result.returncode == 0 else 'unknown'
+    except:
+        git_info = {'commit': 'unknown', 'commit_date': 'unknown'}
+    
+    return jsonify({
+        'version': SHELLDER_VERSION,
+        'build': SHELLDER_BUILD,
+        'git': git_info,
+        'count': len(parsed),
+        'logs': parsed,
+        'log_path': get_log_path(),
+        'uptime_seconds': time.time() - _start_time if '_start_time' in dir() else 0,
+        'pid': os.getpid()
+    })
+
+@app.route('/api/debug/git-pull', methods=['POST'])
+def api_debug_git_pull():
+    """Pull latest code from GitHub - for AI live debugging"""
+    info('DEBUG', '🔄 Git pull requested from dashboard')
+    
+    try:
+        # Stash any local changes
+        subprocess.run(['git', 'stash'], capture_output=True, cwd=str(AEGIS_ROOT), timeout=10)
+        
+        # Pull latest
+        result = subprocess.run(['git', 'pull'], capture_output=True, text=True, 
+                               cwd=str(AEGIS_ROOT), timeout=30)
+        
+        output = result.stdout + result.stderr
+        success = result.returncode == 0
+        
+        # Get new commit info
+        commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                       capture_output=True, text=True, cwd=str(AEGIS_ROOT))
+        new_commit = commit_result.stdout.strip()
+        
+        # Check what files changed
+        diff_result = subprocess.run(['git', 'diff', '--name-only', 'HEAD~1'], 
+                                    capture_output=True, text=True, cwd=str(AEGIS_ROOT))
+        changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+        
+        info('DEBUG', f'Git pull {"succeeded" if success else "failed"}', {
+            'output': output[:500],
+            'new_commit': new_commit,
+            'changed_files': changed_files[:10]
+        })
+        
+        return jsonify({
+            'success': success,
+            'output': output,
+            'new_commit': new_commit,
+            'changed_files': changed_files,
+            'needs_restart': any('shellder_service.py' in f or 'script.js' in f for f in changed_files)
+        })
+    except Exception as e:
+        error('DEBUG', f'Git pull failed: {e}')
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/debug/restart', methods=['POST'])
+def api_debug_restart():
+    """Restart the Shellder service - for AI live debugging"""
+    info('DEBUG', '🔄 Service restart requested from dashboard')
+    
+    def delayed_restart():
+        time.sleep(1)  # Give time for response to be sent
+        info('DEBUG', 'Executing restart...')
+        os.execv(sys.executable, [sys.executable] + sys.argv)
+    
+    # Start restart in background thread
+    threading.Thread(target=delayed_restart, daemon=True).start()
+    
+    return jsonify({
+        'success': True,
+        'message': 'Service will restart in 1 second. Refresh page after a few seconds.'
+    })
+
+@app.route('/api/debug/pull-and-restart', methods=['POST'])
+def api_debug_pull_and_restart():
+    """Pull from GitHub and restart - one-click update for AI debugging"""
+    info('DEBUG', '🚀 Pull and restart requested from dashboard')
+    
+    try:
+        # First pull
+        subprocess.run(['git', 'stash'], capture_output=True, cwd=str(AEGIS_ROOT), timeout=10)
+        result = subprocess.run(['git', 'pull'], capture_output=True, text=True, 
+                               cwd=str(AEGIS_ROOT), timeout=30)
+        
+        if result.returncode != 0:
+            return jsonify({'success': False, 'error': 'Git pull failed', 'output': result.stderr})
+        
+        # Get commit info
+        commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
+                                       capture_output=True, text=True, cwd=str(AEGIS_ROOT))
+        new_commit = commit_result.stdout.strip()
+        
+        info('DEBUG', f'Pull successful, restarting with commit {new_commit}')
+        
+        def delayed_restart():
+            time.sleep(1)
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+        
+        threading.Thread(target=delayed_restart, daemon=True).start()
+        
+        return jsonify({
+            'success': True,
+            'new_commit': new_commit,
+            'message': 'Pulled and restarting. Refresh page in 3-5 seconds.'
+        })
+    except Exception as e:
+        error('DEBUG', f'Pull and restart failed: {e}')
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/debug/server-state')
 def api_debug_server_state():
     """Get comprehensive server state for debugging"""
@@ -5582,6 +5735,8 @@ def api_status():
         }
     
     return jsonify({
+        'version': SHELLDER_VERSION,
+        'build': SHELLDER_BUILD,
         'containers': {
             'total': len(containers),
             'running': running,
@@ -7227,13 +7382,20 @@ if SOCKETIO_AVAILABLE:
 # MAIN
 # =============================================================================
 
+_start_time = time.time()  # Track service start time for uptime
+
 def main():
-    # Log startup
+    global _start_time
+    _start_time = time.time()
+    
+    # Log startup with version
     info('STARTUP', '='*60)
-    info('STARTUP', 'SHELLDER SERVICE STARTING')
+    info('STARTUP', f'SHELLDER SERVICE v{SHELLDER_VERSION} (build {SHELLDER_BUILD})')
     info('STARTUP', '='*60)
     
     startup_config = {
+        'VERSION': SHELLDER_VERSION,
+        'BUILD': SHELLDER_BUILD,
         'SHELLDER_PORT': SHELLDER_PORT,
         'AEGIS_ROOT': str(AEGIS_ROOT),
         'SHELLDER_DIR': str(SHELLDER_DIR),
