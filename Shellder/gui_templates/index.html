@@ -23,11 +23,11 @@
             
             <div class="nav-section">
                 <div class="nav-label">Overview</div>
-                <a href="#" class="nav-item active" data-page="dashboard">
+                <a href="#" class="nav-item active" data-page="dashboard" onclick="navigateTo('dashboard'); return false;">
                     <span class="nav-icon">📊</span>
                     <span>Dashboard</span>
                 </a>
-                <a href="#" class="nav-item" data-page="containers">
+                <a href="#" class="nav-item" data-page="containers" onclick="navigateTo('containers'); return false;">
                     <span class="nav-icon">🐳</span>
                     <span>Containers</span>
                 </a>
@@ -35,19 +35,19 @@
             
             <div class="nav-section">
                 <div class="nav-label">Monitoring</div>
-                <a href="#" class="nav-item" data-page="devices">
+                <a href="#" class="nav-item" data-page="devices" onclick="navigateTo('devices'); return false;">
                     <span class="nav-icon">📱</span>
                     <span>Devices</span>
                 </a>
-                <a href="#" class="nav-item" data-page="stack">
+                <a href="#" class="nav-item" data-page="stack" onclick="navigateTo('stack'); return false;">
                     <span class="nav-icon">🎮</span>
                     <span>Stack Data</span>
                 </a>
-                <a href="#" class="nav-item" data-page="xilriws">
+                <a href="#" class="nav-item" data-page="xilriws" onclick="navigateTo('xilriws'); return false;">
                     <span class="nav-icon">🔐</span>
                     <span>Xilriws</span>
                 </a>
-                <a href="#" class="nav-item" data-page="stats">
+                <a href="#" class="nav-item" data-page="stats" onclick="navigateTo('stats'); return false;">
                     <span class="nav-icon">📈</span>
                     <span>Statistics</span>
                 </a>
@@ -55,28 +55,33 @@
             
             <div class="nav-section">
                 <div class="nav-label">Management</div>
-                <a href="#" class="nav-item" data-page="files">
+                <a href="#" class="nav-item" data-page="files" onclick="navigateTo('files'); return false;">
                     <span class="nav-icon">📁</span>
                     <span>Files</span>
                 </a>
-                <a href="#" class="nav-item" data-page="scripts">
+                <a href="#" class="nav-item" data-page="scripts" onclick="navigateTo('scripts'); return false;">
                     <span class="nav-icon">⚡</span>
                     <span>Scripts</span>
                 </a>
-                <a href="#" class="nav-item" data-page="logs">
+                <a href="#" class="nav-item" data-page="logs" onclick="navigateTo('logs'); return false;">
                     <span class="nav-icon">📜</span>
                     <span>Logs</span>
                 </a>
-                <a href="#" class="nav-item" data-page="updates">
+                <a href="#" class="nav-item" data-page="updates" onclick="navigateTo('updates'); return false;">
                     <span class="nav-icon">🔄</span>
                     <span>Updates</span>
                 </a>
             </div>
             
             <div class="sidebar-footer">
-                <div class="status-indicator">
+                <div class="status-indicator" onclick="toggleDebugPanel()" style="cursor: pointer;" title="Click to toggle debug info">
                     <span class="status-dot" id="connectionStatus"></span>
                     <span id="connectionText">Connecting...</span>
+                </div>
+                <div id="debugPanel" style="display: none; font-size: 10px; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px;">
+                    <div>JS: <span id="debugJS">checking...</span></div>
+                    <div>API: <span id="debugAPI">checking...</span></div>
+                    <div>WS: <span id="debugWS">checking...</span></div>
                 </div>
             </div>
         </nav>

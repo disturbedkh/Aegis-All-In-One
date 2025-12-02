@@ -13,6 +13,29 @@ let refreshInterval = null;
 let currentPage = 'dashboard';
 let socket = null;
 let wsConnected = false;
+let debugMode = false;
+
+// Debug helper
+function updateDebug(key, value, isError = false) {
+    const el = document.getElementById(`debug${key}`);
+    if (el) {
+        el.textContent = value;
+        el.style.color = isError ? '#ef4444' : '#22c55e';
+    }
+}
+
+function toggleDebugPanel() {
+    const panel = document.getElementById('debugPanel');
+    if (panel) {
+        debugMode = !debugMode;
+        panel.style.display = debugMode ? 'block' : 'none';
+        if (debugMode) {
+            updateDebug('JS', 'loaded ✓');
+            updateDebug('API', wsConnected ? 'connected ✓' : 'polling...');
+            updateDebug('WS', wsConnected ? 'live ✓' : 'not connected');
+        }
+    }
+}
 
 // =============================================================================
 // WEBSOCKET CONNECTION
@@ -100,27 +123,68 @@ function initWebSocket() {
 // =============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    initNavigation();
-    initWebSocket();
-    refreshData();
-    startAutoRefresh();
+    console.log('[Shellder] Initializing GUI...');
+    
+    try {
+        initNavigation();
+        console.log('[Shellder] Navigation initialized');
+    } catch (e) {
+        console.error('[Shellder] Navigation init failed:', e);
+    }
+    
+    try {
+        initWebSocket();
+        console.log('[Shellder] WebSocket initialized');
+    } catch (e) {
+        console.error('[Shellder] WebSocket init failed:', e);
+    }
+    
+    // Wrap API calls in try-catch so they don't break navigation
+    try {
+        refreshData();
+    } catch (e) {
+        console.error('[Shellder] Initial refresh failed:', e);
+        updateConnectionStatus(false);
+    }
+    
+    try {
+        startAutoRefresh();
+    } catch (e) {
+        console.error('[Shellder] Auto-refresh failed:', e);
+    }
     
     // Load Socket.IO library if not present
     if (typeof io === 'undefined') {
         const script = document.createElement('script');
         script.src = 'https://cdn.socket.io/4.6.0/socket.io.min.js';
         script.onload = initWebSocket;
+        script.onerror = () => console.log('[Shellder] Socket.IO CDN not reachable');
         document.head.appendChild(script);
     }
+    
+    console.log('[Shellder] GUI initialization complete');
 });
 
 function initNavigation() {
-    document.querySelectorAll('.nav-item').forEach(item => {
+    const navItems = document.querySelectorAll('.nav-item');
+    console.log(`[Shellder] Found ${navItems.length} nav items`);
+    
+    navItems.forEach(item => {
         item.addEventListener('click', (e) => {
             e.preventDefault();
             const page = item.dataset.page;
+            console.log(`[Shellder] Nav click: ${page}`);
             navigateTo(page);
         });
+    });
+    
+    // Also add global click handler as backup
+    document.addEventListener('click', (e) => {
+        const navItem = e.target.closest('.nav-item');
+        if (navItem && navItem.dataset.page) {
+            e.preventDefault();
+            navigateTo(navItem.dataset.page);
+        }
     });
 }
 
