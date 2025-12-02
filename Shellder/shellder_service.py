@@ -5210,12 +5210,17 @@ def index():
 
 @app.route('/static/<path:filename>')
 def static_files(filename):
-    """Serve static files with cache control for development"""
+    """Serve static files with aggressive cache busting for development"""
     response = send_from_directory(str(STATIC_DIR), filename)
-    # Force browsers to revalidate JS/CSS files to get updates quickly
+    # Force browsers to ALWAYS get fresh JS/CSS during development
     if filename.endswith(('.js', '.css')):
-        response.headers['Cache-Control'] = 'no-cache, must-revalidate'
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
         response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+        # Remove ETag to prevent 304 responses
+        response.headers.pop('ETag', None)
+        # Force response to not be conditional
+        response.status_code = 200
     return response
 
 @app.route('/api/metrics/history/<metric_name>')
@@ -5288,7 +5293,13 @@ def api_debug_client_logs():
     """Receive debug logs from client-side JavaScript and write to unified debuglog.txt"""
     global client_debug_logs
     try:
-        data = request.get_json()
+        # Handle both application/json and text/plain content types (old JS compatibility)
+        if request.is_json:
+            data = request.get_json()
+        else:
+            # Try to parse as JSON even if content-type is wrong
+            import json
+            data = json.loads(request.get_data(as_text=True))
         
         # Log to unified debug log
         log_client_logs(data)
