@@ -797,30 +797,33 @@ function updateDashboard(data) {
             showLocalModeNotice(data.message);
         }
         
-        // Stats
-        document.getElementById('containersRunning').textContent = data.containers.running;
-        document.getElementById('containersStopped').textContent = data.containers.stopped;
+        // Stats - use helper function to safely set text content
+        const setElementText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+            else SHELLDER_DEBUG.warn('DASHBOARD', `Element not found: ${id}`);
+        };
         
+        setElementText('containersRunning', data.containers?.running ?? '-');
+        setElementText('containersStopped', data.containers?.stopped ?? '-');
+
         // CPU
-        if (data.system.cpu_percent !== undefined) {
-            document.getElementById('cpuUsed').textContent = `${data.system.cpu_percent}%`;
+        if (data.system?.cpu_percent !== undefined) {
+            setElementText('cpuUsed', `${data.system.cpu_percent}%`);
         }
-        
-        if (data.system.memory) {
-            document.getElementById('memoryUsed').textContent = data.system.memory.percent || data.system.memory.used;
-            document.getElementById('memoryInfo').textContent = 
-                `${data.system.memory.used} / ${data.system.memory.total}`;
+
+        if (data.system?.memory) {
+            setElementText('memoryUsed', data.system.memory.percent || data.system.memory.used);
+            setElementText('memoryInfo', `${data.system.memory.used} / ${data.system.memory.total}`);
         }
-        
-        if (data.system.disk) {
-            document.getElementById('diskUsed').textContent = data.system.disk.percent;
-            document.getElementById('diskInfo').textContent = 
-                `${data.system.disk.used} / ${data.system.disk.total} (${data.system.disk.percent})`;
+
+        if (data.system?.disk) {
+            setElementText('diskUsed', data.system.disk.percent);
+            setElementText('diskInfo', `${data.system.disk.used} / ${data.system.disk.total} (${data.system.disk.percent})`);
         }
-        
-        document.getElementById('systemUptime').textContent = data.system.uptime || 'N/A';
-        document.getElementById('envStatus').textContent = 
-            data.env_configured ? '✓ Configured' : '✗ Not configured';
+
+        setElementText('systemUptime', data.system?.uptime || 'N/A');
+        setElementText('envStatus', data.env_configured ? '✓ Configured' : '✗ Not configured');
         
         // Container list
         updateContainerList(data.containers.list);
