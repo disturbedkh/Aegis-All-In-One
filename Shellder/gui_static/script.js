@@ -1485,8 +1485,8 @@ function updateContainerList(containers) {
                 <div class="container-state">${c.status || c.state}</div>
                 ${c.cpu_percent !== undefined ? `
                     <div class="container-stats">
-                        <span title="CPU">${c.cpu_percent}%</span>
-                        <span title="Memory">${c.memory_percent || 0}%</span>
+                        <span class="stat-label">CPU:</span><span>${c.cpu_percent}%</span>
+                        <span class="stat-label">MEM:</span><span>${c.memory_percent || 0}%</span>
                     </div>
                 ` : ''}
             </div>
@@ -1992,24 +1992,27 @@ let xilriwsAutoScroll = true;
 function updateXilriwsPage(data) {
     if (!data) return;
     
-    // Update stats
+    // Update stats with null checks
     const rate = data.success_rate || 0;
-    document.getElementById('xilSuccessRate').textContent = rate.toFixed(1) + '%';
-    document.getElementById('xilSuccessRate').className = 'stat-value ' + 
-        (rate > 80 ? 'text-success' : rate > 50 ? 'text-warning' : 'text-danger');
+    const rateEl = document.getElementById('xilSuccessRate');
+    if (rateEl) {
+        rateEl.textContent = rate.toFixed(1) + '%';
+        rateEl.className = 'stat-value ' + 
+            (rate > 80 ? 'text-success' : rate > 50 ? 'text-warning' : 'text-danger');
+    }
     
-    document.getElementById('xilSuccessful').textContent = data.successful || 0;
-    document.getElementById('xilFailed').textContent = data.failed || 0;
-    document.getElementById('xilTotal').textContent = data.total_requests || 0;
+    setElementText('xilSuccessful', data.successful || 0);
+    setElementText('xilFailed', data.failed || 0);
+    setElementText('xilTotal', data.total_requests || 0);
     
     // Update error breakdown
-    document.getElementById('xilAuthBanned').textContent = data.auth_banned || 0;
-    document.getElementById('xilCode15').textContent = data.code_15 || 0;
-    document.getElementById('xilRateLimited').textContent = data.rate_limited || 0;
-    document.getElementById('xilInvalidCreds').textContent = data.invalid_credentials || 0;
-    document.getElementById('xilTunnelErrors').textContent = data.tunneling_errors || 0;
-    document.getElementById('xilTimeouts').textContent = data.timeouts || 0;
-    document.getElementById('xilConnRefused').textContent = data.connection_refused || 0;
+    setElementText('xilAuthBanned', data.auth_banned || 0);
+    setElementText('xilCode15', data.code_15 || 0);
+    setElementText('xilRateLimited', data.rate_limited || 0);
+    setElementText('xilInvalidCreds', data.invalid_credentials || 0);
+    setElementText('xilTunnelErrors', data.tunneling_errors || 0);
+    setElementText('xilTimeouts', data.timeouts || 0);
+    setElementText('xilConnRefused', data.connection_refused || 0);
 }
 
 async function loadProxyInfo() {

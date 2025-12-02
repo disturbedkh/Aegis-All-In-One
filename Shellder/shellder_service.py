@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.12"  # 2025-12-02: Added live debug panel, fixed CPU, version tracking
-SHELLDER_BUILD = "20251202-1"  # Date-based build number
+SHELLDER_VERSION = "1.0.13"  # 2025-12-02: Fixed debug_logger imports, null checks for Xilriws
+SHELLDER_BUILD = "20251202-2"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -67,7 +67,7 @@ try:
     from debug_logger import (
         log, trace, debug, info, warn, error, fatal,
         logged, log_system_state, log_docker_state, log_client_logs,
-        get_recent_logs, get_log_path, clear_log
+        get_recent_logs, get_log_path, clear_log, track_websocket
     )
     DEBUG_LOGGING = True
     info('STARTUP', 'Debug logger loaded successfully')
@@ -89,6 +89,7 @@ except ImportError as e:
     def get_recent_logs(n=100): return []
     def get_log_path(): return ''
     def clear_log(): pass
+    def track_websocket(event, sid, data=None): pass
 
 # =============================================================================
 # THIRD-PARTY IMPORTS
@@ -5250,13 +5251,17 @@ def api_metrics_history(metric_name):
 @app.route('/api/metrics/sparklines')
 def api_metrics_sparklines():
     """Get sparkline data for all system metrics"""
-    points = request.args.get('points', 20, type=int)
-    
-    return jsonify({
-        'cpu': service_db.get_metric_sparkline('cpu_percent', points),
-        'memory': service_db.get_metric_sparkline('memory_percent', points),
-        'disk': service_db.get_metric_sparkline('disk_percent', points)
-    })
+    try:
+        points = request.args.get('points', 20, type=int)
+        
+        return jsonify({
+            'cpu': service_db.get_metric_sparkline('cpu_percent', points) if service_db else [],
+            'memory': service_db.get_metric_sparkline('memory_percent', points) if service_db else [],
+            'disk': service_db.get_metric_sparkline('disk_percent', points) if service_db else []
+        })
+    except Exception as e:
+        error('METRICS', f'Error getting sparklines: {e}')
+        return jsonify({'cpu': [], 'memory': [], 'disk': [], 'error': str(e)})
 
 @app.route('/api/metrics/current')
 def api_metrics_current():
@@ -7321,13 +7326,13 @@ if SOCKETIO_AVAILABLE:
     @socketio.on('connect')
     def handle_connect():
         """Client connected"""
-        debug_logger.track_websocket('connect', request.sid)
+        track_websocket('connect', request.sid)
         emit('connected', {'status': 'connected', 'timestamp': datetime.now().isoformat()})
 
     @socketio.on('disconnect')
     def handle_disconnect():
         """Client disconnected"""
-        debug_logger.track_websocket('disconnect', request.sid)
+        track_websocket('disconnect', request.sid)
 
     @socketio.on('subscribe')
     def handle_subscribe(data):
