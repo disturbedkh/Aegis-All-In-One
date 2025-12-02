@@ -824,34 +824,72 @@ function updateDashboard(data) {
 
         setElementText('systemUptime', data.system?.uptime || 'N/A');
         setElementText('envStatus', data.env_configured ? '✓ Configured' : '✗ Not configured');
-        
+
+        SHELLDER_DEBUG.info('DASHBOARD', 'setElementText calls complete, calling updateContainerList');
+
         // Container list
-        updateContainerList(data.containers.list);
-        
+        try {
+            updateContainerList(data.containers?.list || []);
+        } catch (e) {
+            SHELLDER_DEBUG.error('DASHBOARD', `updateContainerList failed: ${e.message}`);
+        }
+
+        SHELLDER_DEBUG.info('DASHBOARD', 'Container list done, checking xilriws');
+
         // Update Xilriws if available
         if (data.xilriws) {
-            updateXilriwsStats(data.xilriws);
+            try {
+                updateXilriwsStats(data.xilriws);
+            } catch (e) {
+                SHELLDER_DEBUG.error('DASHBOARD', `updateXilriwsStats failed: ${e.message}`);
+            }
         }
-        
+
+        SHELLDER_DEBUG.info('DASHBOARD', 'About to call loadSparklines');
+
         // Load sparklines (will be throttled automatically by RequestManager)
-        loadSparklines();
-        
+        try {
+            loadSparklines();
+        } catch (e) {
+            SHELLDER_DEBUG.error('DASHBOARD', `loadSparklines failed: ${e.message}`);
+        }
+
         SHELLDER_DEBUG.info('DASHBOARD', 'About to call loadSystemServices');
-        
+
         // Load system services status
-        loadSystemServices();
-        
+        try {
+            loadSystemServices();
+        } catch (e) {
+            SHELLDER_DEBUG.error('DASHBOARD', `loadSystemServices failed: ${e.message}`);
+        }
+
         SHELLDER_DEBUG.info('DASHBOARD', 'About to call checkSiteAvailability');
-        
+
         // Load site availability check
-        checkSiteAvailability();
-        
+        try {
+            checkSiteAvailability();
+        } catch (e) {
+            SHELLDER_DEBUG.error('DASHBOARD', `checkSiteAvailability failed: ${e.message}`);
+        }
+
+        SHELLDER_DEBUG.info('DASHBOARD', 'About to call loadContainerUpdates');
+
         // Check for container image updates (throttled - runs every 60s max)
-        loadContainerUpdates();
-        
+        try {
+            loadContainerUpdates();
+        } catch (e) {
+            SHELLDER_DEBUG.error('DASHBOARD', `loadContainerUpdates failed: ${e.message}`);
+        }
+
+        SHELLDER_DEBUG.info('DASHBOARD', 'About to check debugLogOutput');
+
         // Load debug panel if visible
         if (document.getElementById('debugLogOutput')) {
-            loadDebugPanel();
+            try {
+                loadDebugPanel();
+            } catch (e) {
+                SHELLDER_DEBUG.error('DASHBOARD', `loadDebugPanel failed: ${e.message}`);
+            }
         }
         
         SHELLDER_DEBUG.info('DASHBOARD', 'updateDashboard complete');
