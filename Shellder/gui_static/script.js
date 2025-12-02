@@ -4044,10 +4044,6 @@ async function debugGitPull() {
 }
 
 async function debugRestart() {
-    if (!confirm('Restart the Shellder service? The page will reload after a few seconds.')) {
-        return;
-    }
-    
     showToast('🔄 Restarting service...', 'info');
     
     try {
@@ -4065,11 +4061,7 @@ async function debugRestart() {
 }
 
 async function debugPullAndRestart() {
-    if (!confirm('Pull from GitHub and restart? The page will reload after a few seconds.')) {
-        return;
-    }
-    
-    showToast('🚀 Pulling and restarting...', 'info');
+    showToast('🚀 Pulling from GitHub and restarting...', 'info');
     
     try {
         const data = await fetchAPI('/api/debug/pull-and-restart', { method: 'POST' });
