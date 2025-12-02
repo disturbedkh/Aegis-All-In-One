@@ -789,63 +789,71 @@ function startAutoRefresh() {
 // =============================================================================
 
 function updateDashboard(data) {
-    // Check for local/demo mode and show notification
-    if (data.local_mode && data.message) {
-        showLocalModeNotice(data.message);
-    }
+    SHELLDER_DEBUG.info('DASHBOARD', 'updateDashboard called', { hasData: !!data });
     
-    // Stats
-    document.getElementById('containersRunning').textContent = data.containers.running;
-    document.getElementById('containersStopped').textContent = data.containers.stopped;
-    
-    // CPU
-    if (data.system.cpu_percent !== undefined) {
-        document.getElementById('cpuUsed').textContent = `${data.system.cpu_percent}%`;
-    }
-    
-    if (data.system.memory) {
-        document.getElementById('memoryUsed').textContent = data.system.memory.percent || data.system.memory.used;
-        document.getElementById('memoryInfo').textContent = 
-            `${data.system.memory.used} / ${data.system.memory.total}`;
-    }
-    
-    if (data.system.disk) {
-        document.getElementById('diskUsed').textContent = data.system.disk.percent;
-        document.getElementById('diskInfo').textContent = 
-            `${data.system.disk.used} / ${data.system.disk.total} (${data.system.disk.percent})`;
-    }
-    
-    document.getElementById('systemUptime').textContent = data.system.uptime || 'N/A';
-    document.getElementById('envStatus').textContent = 
-        data.env_configured ? '✓ Configured' : '✗ Not configured';
-    
-    // Container list
-    updateContainerList(data.containers.list);
-    
-    // Update Xilriws if available
-    if (data.xilriws) {
-        updateXilriwsStats(data.xilriws);
-    }
-    
-    // Load sparklines (will be throttled automatically by RequestManager)
-    loadSparklines();
-    
-    // Load system services status
-    console.log('[DASHBOARD] About to call loadSystemServices()');
-    loadSystemServices();
-    console.log('[DASHBOARD] loadSystemServices() called');
-    
-    // Load site availability check
-    console.log('[DASHBOARD] About to call checkSiteAvailability()');
-    checkSiteAvailability();
-    console.log('[DASHBOARD] checkSiteAvailability() called');
-    
-    // Check for container image updates (throttled - runs every 60s max)
-    loadContainerUpdates();
-    
-    // Load debug panel if visible
-    if (document.getElementById('debugLogOutput')) {
-        loadDebugPanel();
+    try {
+        // Check for local/demo mode and show notification
+        if (data.local_mode && data.message) {
+            showLocalModeNotice(data.message);
+        }
+        
+        // Stats
+        document.getElementById('containersRunning').textContent = data.containers.running;
+        document.getElementById('containersStopped').textContent = data.containers.stopped;
+        
+        // CPU
+        if (data.system.cpu_percent !== undefined) {
+            document.getElementById('cpuUsed').textContent = `${data.system.cpu_percent}%`;
+        }
+        
+        if (data.system.memory) {
+            document.getElementById('memoryUsed').textContent = data.system.memory.percent || data.system.memory.used;
+            document.getElementById('memoryInfo').textContent = 
+                `${data.system.memory.used} / ${data.system.memory.total}`;
+        }
+        
+        if (data.system.disk) {
+            document.getElementById('diskUsed').textContent = data.system.disk.percent;
+            document.getElementById('diskInfo').textContent = 
+                `${data.system.disk.used} / ${data.system.disk.total} (${data.system.disk.percent})`;
+        }
+        
+        document.getElementById('systemUptime').textContent = data.system.uptime || 'N/A';
+        document.getElementById('envStatus').textContent = 
+            data.env_configured ? '✓ Configured' : '✗ Not configured';
+        
+        // Container list
+        updateContainerList(data.containers.list);
+        
+        // Update Xilriws if available
+        if (data.xilriws) {
+            updateXilriwsStats(data.xilriws);
+        }
+        
+        // Load sparklines (will be throttled automatically by RequestManager)
+        loadSparklines();
+        
+        SHELLDER_DEBUG.info('DASHBOARD', 'About to call loadSystemServices');
+        
+        // Load system services status
+        loadSystemServices();
+        
+        SHELLDER_DEBUG.info('DASHBOARD', 'About to call checkSiteAvailability');
+        
+        // Load site availability check
+        checkSiteAvailability();
+        
+        // Check for container image updates (throttled - runs every 60s max)
+        loadContainerUpdates();
+        
+        // Load debug panel if visible
+        if (document.getElementById('debugLogOutput')) {
+            loadDebugPanel();
+        }
+        
+        SHELLDER_DEBUG.info('DASHBOARD', 'updateDashboard complete');
+    } catch (e) {
+        SHELLDER_DEBUG.error('DASHBOARD', 'Error in updateDashboard', { error: e.message, stack: e.stack });
     }
 }
 
