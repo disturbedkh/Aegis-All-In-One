@@ -5565,6 +5565,7 @@ def api_status():
         mem = system.get('memory', {})
         disk = system.get('disk', {})
         system_formatted = {
+            'cpu_percent': system.get('cpu_percent', 0),  # Include CPU!
             'memory': {
                 'total': format_bytes(mem.get('total', 0)),
                 'used': format_bytes(mem.get('used', 0)),
