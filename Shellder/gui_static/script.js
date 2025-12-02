@@ -16,6 +16,58 @@ let wsConnected = false;
 let debugMode = false;
 
 // =============================================================================
+// REQUEST DEDUPLICATION & THROTTLING
+// =============================================================================
+const RequestManager = {
+    inFlight: new Map(),     // Track in-flight requests
+    lastCall: new Map(),     // Track last call time per endpoint
+    throttleMs: {
+        '/api/status': 5000,        // Max once per 5s
+        '/api/metrics/sparklines': 10000,  // Max once per 10s
+        '/api/xilriws/stats': 5000   // Max once per 5s
+    },
+    callCounts: new Map(),   // Track call counts for logging
+    
+    // Check if request should be throttled
+    shouldThrottle(endpoint) {
+        const throttle = this.throttleMs[endpoint];
+        if (!throttle) return false;
+        
+        const lastTime = this.lastCall.get(endpoint) || 0;
+        const elapsed = Date.now() - lastTime;
+        return elapsed < throttle;
+    },
+    
+    // Check if request is already in-flight
+    isInFlight(endpoint) {
+        return this.inFlight.has(endpoint);
+    },
+    
+    // Register request start
+    start(endpoint, promise) {
+        this.inFlight.set(endpoint, promise);
+        this.lastCall.set(endpoint, Date.now());
+        
+        // Track call counts
+        const count = (this.callCounts.get(endpoint) || 0) + 1;
+        this.callCounts.set(endpoint, count);
+        
+        // Clean up when done
+        promise.finally(() => this.inFlight.delete(endpoint));
+    },
+    
+    // Get existing in-flight request
+    getInFlight(endpoint) {
+        return this.inFlight.get(endpoint);
+    },
+    
+    // Get call count for an endpoint
+    getCallCount(endpoint) {
+        return this.callCounts.get(endpoint) || 0;
+    }
+};
+
+// =============================================================================
 // COMPREHENSIVE DEBUG LOGGING SYSTEM (AI-FRIENDLY)
 // =============================================================================
 
@@ -214,59 +266,71 @@ const SHELLDER_DEBUG = {
         return false;
     },
     
-    // Auto-sync to server
-    startAutoSync(intervalMs = 30000) {
+    // Auto-sync to server (5 minutes during development)
+    startAutoSync(intervalMs = 300000) {
         if (this._autoSyncInterval) return;
         
         this._autoSyncInterval = setInterval(() => {
-            if (this.logs.length > 0) {
+            // Only sync if there are new logs since last sync
+            if (this.logs.length > 0 && this._lastSyncCount !== this.logs.length) {
+                this._lastSyncCount = this.logs.length;
                 this.sendToServer();
             }
         }, intervalMs);
         
-        // Also send on page unload
+        this._lastSyncCount = 0;
+        
+        // Only send on page unload if there are unsent logs
         window.addEventListener('beforeunload', () => {
-            navigator.sendBeacon('/api/debug/client-logs', this.export());
+            if (this.logs.length > this._lastSyncCount) {
+                // Compact export for beacon (limit size)
+                const compactData = JSON.stringify({
+                    t: new Date().toISOString(),
+                    errors: this.logs.filter(l => l.level === 'ERROR' || l.level === 'FATAL').slice(-20),
+                    recent: this.logs.slice(-50)
+                });
+                navigator.sendBeacon('/api/debug/client-logs', compactData);
+            }
         });
         
-        this.info('SYNC', 'Auto-sync started', { intervalMs });
+        this.info('SYNC', 'Auto-sync started', { intervalMs, note: 'Only syncs errors/unload for efficiency' });
     }
 };
 
-// Auto-start sync after a short delay
-setTimeout(() => SHELLDER_DEBUG.startAutoSync(), 5000);
+// Auto-start sync after 10 seconds (don't rush)
+setTimeout(() => SHELLDER_DEBUG.startAutoSync(), 10000);
 
 // Expose globally for console access
 window.SHELLDER_DEBUG = SHELLDER_DEBUG;
 window.SD = SHELLDER_DEBUG; // Short alias
 
-// Track all click events globally
+// Track meaningful click events only (buttons, links, nav items)
 document.addEventListener('click', (e) => {
     const target = e.target;
+    
+    // Only log clicks on interactive elements to reduce noise
+    const isInteractive = target.closest('button, a, .nav-item, .btn, [onclick], [data-action]');
+    if (!isInteractive) return;
+    
     const path = [];
     let el = target;
-    while (el && el !== document.body) {
+    while (el && el !== document.body && path.length < 3) {
         let selector = el.tagName.toLowerCase();
         if (el.id) selector += `#${el.id}`;
-        if (el.className && typeof el.className === 'string') selector += `.${el.className.split(' ').join('.')}`;
+        else if (el.className && typeof el.className === 'string') {
+            const classes = el.className.split(' ').filter(c => c && !c.startsWith('_')).slice(0, 2);
+            if (classes.length) selector += `.${classes.join('.')}`;
+        }
         path.push(selector);
         el = el.parentElement;
     }
     
-    SHELLDER_DEBUG.event('click', path.reverse().join(' > '), {
-        x: e.clientX, y: e.clientY,
-        button: e.button,
-        target: {
-            tag: target.tagName,
-            id: target.id,
-            class: target.className,
-            text: target.textContent?.slice(0, 50),
-            dataset: { ...target.dataset }
-        },
-        defaultPrevented: e.defaultPrevented,
-        propagationStopped: e._propagationStopped
+    // Compact logging
+    SHELLDER_DEBUG.debug('CLICK', path.reverse().join(' > '), {
+        id: target.id || undefined,
+        action: target.dataset?.action || target.dataset?.page || undefined
     });
-}, true); // Capture phase
+}, true);
 
 // Track errors
 window.addEventListener('error', (e) => {
@@ -614,51 +678,106 @@ function navigateTo(page) {
 async function fetchAPI(endpoint, options = {}) {
     const startTime = performance.now();
     const method = options.method || 'GET';
+    const cacheKey = `${method}:${endpoint}`;
     
-    SHELLDER_DEBUG.debug('API', `→ ${method} ${endpoint}`, { options });
-    
-    try {
-        const response = await fetch(`${API_BASE}${endpoint}`, {
-            ...options,
-            headers: {
-                'Content-Type': 'application/json',
-                ...options.headers
-            }
-        });
+    // For GET requests, check deduplication and throttling
+    if (method === 'GET') {
+        // If already in-flight, return existing promise
+        const existing = RequestManager.getInFlight(cacheKey);
+        if (existing) {
+            SHELLDER_DEBUG.trace('API', `⏳ Reusing in-flight: ${endpoint}`);
+            return existing;
+        }
         
-        const duration = Math.round(performance.now() - startTime);
-        const data = await response.json();
-        
-        SHELLDER_DEBUG.api(method, endpoint, response.status, duration, 
-            response.ok ? { keys: Object.keys(data) } : data);
-        
-        return data;
-    } catch (error) {
-        const duration = Math.round(performance.now() - startTime);
-        SHELLDER_DEBUG.api(method, endpoint, 0, duration, null, error.message);
-        throw error;
+        // Check throttle (skip if this is a forced refresh)
+        if (!options.force && RequestManager.shouldThrottle(endpoint)) {
+            SHELLDER_DEBUG.trace('API', `⏸ Throttled: ${endpoint}`);
+            return Promise.resolve({ _throttled: true });
+        }
     }
+    
+    // Only log first few calls, then every 10th call to reduce spam
+    const callCount = RequestManager.getCallCount(cacheKey);
+    const shouldLog = callCount < 3 || callCount % 10 === 0;
+    
+    if (shouldLog) {
+        SHELLDER_DEBUG.debug('API', `→ ${method} ${endpoint} (#${callCount + 1})`, 
+            { options: Object.keys(options).length ? options : undefined });
+    }
+    
+    const promise = (async () => {
+        try {
+            const response = await fetch(`${API_BASE}${endpoint}`, {
+                ...options,
+                headers: {
+                    'Content-Type': 'application/json',
+                    ...options.headers
+                }
+            });
+            
+            const duration = Math.round(performance.now() - startTime);
+            const data = await response.json();
+            
+            // Only log errors or slow requests, not every success
+            if (!response.ok || duration > 1000) {
+                SHELLDER_DEBUG.api(method, endpoint, response.status, duration, 
+                    response.ok ? { keys: Object.keys(data) } : data);
+            }
+            
+            return data;
+        } catch (error) {
+            const duration = Math.round(performance.now() - startTime);
+            SHELLDER_DEBUG.api(method, endpoint, 0, duration, null, error.message);
+            throw error;
+        }
+    })();
+    
+    // Track in-flight GET requests
+    if (method === 'GET') {
+        RequestManager.start(cacheKey, promise);
+    }
+    
+    return promise;
 }
 
 async function refreshData() {
     try {
         const data = await fetchAPI('/api/status');
+        
+        // Skip if throttled (no new data)
+        if (data._throttled) return;
+        
         updateDashboard(data);
         updateConnectionStatus(true, wsConnected ? 'live' : 'polling');
         updateLastUpdate();
         
-        // Also refresh Xilriws stats
-        loadXilriwsStats();
+        // Xilriws stats are already in /api/status response, no separate call needed
+        // loadXilriwsStats(); // REMOVED - causes duplicate API calls
     } catch (error) {
         updateConnectionStatus(false);
-        showToast('Failed to fetch status', 'error');
+        // Only show toast on first failure, not repeated failures
+        if (!this._lastFailure || Date.now() - this._lastFailure > 30000) {
+            showToast('Failed to fetch status', 'error');
+            this._lastFailure = Date.now();
+        }
     }
 }
 
 function startAutoRefresh() {
-    if (refreshInterval) clearInterval(refreshInterval);
-    // Use longer interval if WebSocket is connected
-    const interval = wsConnected ? 30000 : 10000;
+    // Always clear existing interval first
+    if (refreshInterval) {
+        clearInterval(refreshInterval);
+        refreshInterval = null;
+    }
+    
+    // Use longer interval if WebSocket is connected (less polling needed)
+    // Minimum 10s to prevent API spam
+    const interval = wsConnected ? 30000 : 15000;
+    
+    SHELLDER_DEBUG.info('REFRESH', `Auto-refresh started: ${interval / 1000}s interval`, {
+        wsConnected, interval
+    });
+    
     refreshInterval = setInterval(refreshData, interval);
 }
 
@@ -705,7 +824,7 @@ function updateDashboard(data) {
         updateXilriwsStats(data.xilriws);
     }
     
-    // Load sparklines
+    // Load sparklines (will be throttled automatically by RequestManager)
     loadSparklines();
 }
 
@@ -737,12 +856,15 @@ function updateContainerStats(containers) {
 async function loadSparklines() {
     try {
         const data = await fetchAPI('/api/metrics/sparklines');
+        
+        // Skip if throttled (no new data)
+        if (data._throttled) return;
+        
         renderSparkline('cpuSparkline', data.cpu || []);
         renderSparkline('memorySparkline', data.memory || []);
         renderSparkline('diskSparkline', data.disk || []);
     } catch (e) {
         // Sparklines are optional, don't show errors
-        console.log('Sparklines not available yet');
     }
 }
 
@@ -1132,9 +1254,10 @@ function escapeHtml(text) {
 async function loadXilriwsStats() {
     try {
         const data = await fetchAPI('/api/xilriws/stats');
+        if (data._throttled) return;
         updateXilriwsStats(data);
     } catch (error) {
-        console.error('Failed to load Xilriws stats:', error);
+        // Silent fail - Xilriws may not be configured
     }
 }
 
