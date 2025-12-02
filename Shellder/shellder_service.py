@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.17"  # 2025-12-02: Fixed chart axes, added 5m option
-SHELLDER_BUILD = "20251202-6"  # Date-based build number
+SHELLDER_VERSION = "1.0.18"  # 2025-12-02: Fixed fractional hours in API (5m option)
+SHELLDER_BUILD = "20251202-7"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -5234,7 +5234,7 @@ def static_files(filename):
 def api_metrics_history(metric_name):
     """Get historical data for a specific metric"""
     try:
-        hours = request.args.get('hours', 24, type=int)
+        hours = request.args.get('hours', 24, type=float)  # Support fractional hours (e.g. 0.0833 for 5 min)
         limit = request.args.get('limit', 500, type=int)
         
         # Validate metric name
