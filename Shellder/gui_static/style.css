@@ -469,6 +469,7 @@ html, body {
 .chart-bar.low { background: var(--success); }
 .chart-bar.medium { background: var(--warning); }
 .chart-bar.high { background: var(--danger); }
+.chart-bar.empty { background: var(--border-color); }
 
 .chart-x-axis {
     display: flex;

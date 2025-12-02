@@ -1112,17 +1112,24 @@ async function loadMetricHistory(metric, hours) {
         const actualPoints = data.data.length;
         
         // Calculate bar width as percentage of container, based on expected points
-        // Use expected points so bars are consistent size even with partial data
-        const barWidthPercent = Math.max(0.5, Math.min(4, 100 / expectedPoints));
+        const barWidthPercent = Math.max(0.5, Math.min(5, 100 / expectedPoints));
         
-        // Render chart as bar graph with proper axes - fixed width bars
-        const chartBars = data.data.map((d, i) => {
+        // Render actual data bars
+        const dataBars = data.data.map((d, i) => {
             const height = Math.max(2, (d.value / 100) * 100);
             let colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
             const time = new Date(d.time).toLocaleTimeString();
             return `<div class="chart-bar ${colorClass}" style="height: ${height}%; width: ${barWidthPercent}%; flex: none;" 
                         title="${d.value.toFixed(1)}% at ${time}"></div>`;
         }).join('');
+        
+        // Add empty placeholder bars for missing data points (show as empty slots)
+        const missingPoints = Math.max(0, expectedPoints - actualPoints);
+        const emptyBars = Array(missingPoints).fill(
+            `<div class="chart-bar empty" style="height: 2px; width: ${barWidthPercent}%; flex: none; opacity: 0.2;" title="No data"></div>`
+        ).join('');
+        
+        const chartBars = dataBars + emptyBars;
         
         // Format time period for display
         const periodLabel = hours < 1 ? `${Math.round(hours * 60)} minutes` : 

@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.22"  # 2025-12-02: Fixed bar width based on expected data points
-SHELLDER_BUILD = "20251202-11"  # Date-based build number
+SHELLDER_VERSION = "1.0.23"  # 2025-12-02: Add empty placeholder bars for missing data points
+SHELLDER_BUILD = "20251202-12"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
