@@ -3148,6 +3148,22 @@ class ShellderDB:
                 )
             """)
             
+            # System metrics history - for dashboard sparklines and detailed charts
+            cursor.execute("""
+                CREATE TABLE IF NOT EXISTS metrics_history (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    metric_name TEXT NOT NULL,
+                    metric_value REAL NOT NULL,
+                    recorded_at DATETIME DEFAULT CURRENT_TIMESTAMP
+                )
+            """)
+            
+            # Create index for fast queries
+            cursor.execute("""
+                CREATE INDEX IF NOT EXISTS idx_metrics_name_time 
+                ON metrics_history(metric_name, recorded_at DESC)
+            """)
+            
             conn.commit()
             return True
         except Exception as e:
@@ -3156,6 +3172,121 @@ class ShellderDB:
         finally:
             conn.close()
     
+    def record_metric(self, metric_name, metric_value):
+        """Record a single metric value to history"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                INSERT INTO metrics_history (metric_name, metric_value)
+                VALUES (?, ?)
+            """, (metric_name, metric_value))
+            conn.commit()
+        except Exception as e:
+            print(f"Error recording metric: {e}")
+        finally:
+            conn.close()
+    
+    def record_metrics_batch(self, metrics):
+        """Record multiple metrics at once: {name: value, ...}"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            for name, value in metrics.items():
+                if value is not None:
+                    cursor.execute("""
+                        INSERT INTO metrics_history (metric_name, metric_value)
+                        VALUES (?, ?)
+                    """, (name, float(value)))
+            conn.commit()
+        except Exception as e:
+            print(f"Error recording metrics batch: {e}")
+        finally:
+            conn.close()
+    
+    def get_metric_history(self, metric_name, hours=24, limit=500):
+        """Get historical values for a metric"""
+        conn = self._connect()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                SELECT metric_value, recorded_at
+                FROM metrics_history
+                WHERE metric_name = ?
+                  AND recorded_at >= datetime('now', ?)
+                ORDER BY recorded_at ASC
+                LIMIT ?
+            """, (metric_name, f'-{hours} hours', limit))
+            
+            return [{'value': row[0], 'time': row[1]} for row in cursor.fetchall()]
+        except Exception as e:
+            print(f"Error getting metric history: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def get_metric_sparkline(self, metric_name, points=20):
+        """Get recent values for sparkline display (last ~2 hours)"""
+        conn = self._connect()
+        if not conn:
+            return []
+        
+        try:
+            cursor = conn.cursor()
+            # Get recent metrics, spaced out for sparkline
+            cursor.execute("""
+                SELECT metric_value
+                FROM metrics_history
+                WHERE metric_name = ?
+                ORDER BY recorded_at DESC
+                LIMIT ?
+            """, (metric_name, points * 3))  # Get more, then downsample
+            
+            values = [row[0] for row in cursor.fetchall()]
+            values.reverse()  # Oldest first
+            
+            # Downsample if we have too many points
+            if len(values) > points:
+                step = len(values) // points
+                values = values[::step][:points]
+            
+            return values
+        except Exception as e:
+            print(f"Error getting sparkline: {e}")
+            return []
+        finally:
+            conn.close()
+    
+    def cleanup_old_metrics(self, days=7):
+        """Remove metrics older than specified days"""
+        conn = self._connect()
+        if not conn:
+            return
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM metrics_history
+                WHERE recorded_at < datetime('now', ?)
+            """, (f'-{days} days',))
+            deleted = cursor.rowcount
+            conn.commit()
+            if deleted > 0:
+                print(f"Cleaned up {deleted} old metric records")
+        except Exception as e:
+            print(f"Error cleaning up metrics: {e}")
+        finally:
+            conn.close()
+
     def persist_rotom_stats(self, stats):
         """Save Rotom stats to database"""
         conn = self._connect()
@@ -3761,6 +3892,9 @@ class StatsCollector:
         # System stats thread
         threading.Thread(target=self._collect_system_stats, daemon=True).start()
         
+        # Metrics cleanup thread (runs once per hour)
+        threading.Thread(target=self._cleanup_old_metrics, daemon=True).start()
+        
         # Xilriws log parser thread
         threading.Thread(target=self._parse_xilriws_logs, daemon=True).start()
         
@@ -3940,7 +4074,47 @@ class StatsCollector:
             if socketio and SOCKETIO_AVAILABLE:
                 socketio.emit('system_stats', stats)
             
+            # Record metrics to history database (every 30 seconds)
+            if hasattr(self, '_last_metric_record'):
+                if time.time() - self._last_metric_record >= 30:
+                    self._record_system_metrics(stats)
+                    self._last_metric_record = time.time()
+            else:
+                self._last_metric_record = time.time()
+                self._record_system_metrics(stats)
+            
             time.sleep(10)
+    
+    def _record_system_metrics(self, stats):
+        """Record system metrics to history database"""
+        try:
+            metrics = {}
+            
+            if 'cpu_percent' in stats:
+                metrics['cpu_percent'] = stats['cpu_percent']
+            
+            if 'memory' in stats:
+                metrics['memory_percent'] = stats['memory'].get('percent', 0)
+                metrics['memory_used'] = stats['memory'].get('used', 0) / (1024**3)  # GB
+            
+            if 'disk' in stats:
+                metrics['disk_percent'] = stats['disk'].get('percent', 0)
+            
+            if metrics:
+                service_db.record_metrics_batch(metrics)
+        except Exception as e:
+            print(f"Error recording system metrics: {e}")
+    
+    def _cleanup_old_metrics(self):
+        """Periodically clean up old metrics to prevent database bloat"""
+        while self.running:
+            try:
+                # Wait 1 hour between cleanups
+                time.sleep(3600)
+                # Keep 7 days of metrics
+                service_db.cleanup_old_metrics(days=7)
+            except Exception as e:
+                print(f"Error in metrics cleanup: {e}")
     
     def _parse_xilriws_logs(self):
         """
@@ -4989,6 +5163,63 @@ def static_files(filename):
     """Serve static files"""
     return send_from_directory(str(STATIC_DIR), filename)
 
+@app.route('/api/metrics/history/<metric_name>')
+def api_metrics_history(metric_name):
+    """Get historical data for a specific metric"""
+    hours = request.args.get('hours', 24, type=int)
+    limit = request.args.get('limit', 500, type=int)
+    
+    # Validate metric name
+    valid_metrics = ['cpu_percent', 'memory_percent', 'memory_used', 'disk_percent']
+    if metric_name not in valid_metrics:
+        return jsonify({'error': f'Invalid metric. Valid: {valid_metrics}'}), 400
+    
+    history = service_db.get_metric_history(metric_name, hours, limit)
+    return jsonify({
+        'metric': metric_name,
+        'hours': hours,
+        'data': history
+    })
+
+@app.route('/api/metrics/sparklines')
+def api_metrics_sparklines():
+    """Get sparkline data for all system metrics"""
+    points = request.args.get('points', 20, type=int)
+    
+    return jsonify({
+        'cpu': service_db.get_metric_sparkline('cpu_percent', points),
+        'memory': service_db.get_metric_sparkline('memory_percent', points),
+        'disk': service_db.get_metric_sparkline('disk_percent', points)
+    })
+
+@app.route('/api/metrics/current')
+def api_metrics_current():
+    """Get current system metrics with sparkline data"""
+    stats = stats_collector.get_all_stats()
+    system = stats.get('system', {})
+    
+    # Get sparklines
+    sparklines = {
+        'cpu': service_db.get_metric_sparkline('cpu_percent', 20),
+        'memory': service_db.get_metric_sparkline('memory_percent', 20),
+        'disk': service_db.get_metric_sparkline('disk_percent', 20)
+    }
+    
+    return jsonify({
+        'current': {
+            'cpu_percent': system.get('cpu_percent', 0),
+            'memory_percent': system.get('memory', {}).get('percent', 0),
+            'memory_used': format_bytes(system.get('memory', {}).get('used', 0)),
+            'memory_total': format_bytes(system.get('memory', {}).get('total', 0)),
+            'disk_percent': system.get('disk', {}).get('percent', 0),
+            'disk_used': format_bytes(system.get('disk', {}).get('used', 0)),
+            'disk_total': format_bytes(system.get('disk', {}).get('total', 0)),
+            'uptime': str(timedelta(seconds=int(system.get('uptime', 0))))
+        },
+        'sparklines': sparklines,
+        'timestamp': datetime.now().isoformat()
+    })
+
 @app.route('/api/health')
 def health():
     """Health check endpoint"""
@@ -5021,6 +5252,7 @@ def get_mock_status():
             'list': mock_containers
         },
         'system': {
+            'cpu_percent': 23.5,
             'memory': {'total': '32GB', 'used': '12.4GB', 'free': '19.6GB', 'percent': '39%'},
             'disk': {'total': '500GB', 'used': '125GB', 'free': '375GB', 'percent': '25%'},
             'uptime': '14 days, 6:32:15'

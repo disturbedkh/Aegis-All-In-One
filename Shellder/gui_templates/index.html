@@ -93,7 +93,7 @@
             
             <!-- Dashboard Page -->
             <div id="page-dashboard" class="page active">
-                <div class="stats-grid">
+                <div class="stats-grid stats-grid-5">
                     <div class="stat-card" title="Number of Docker containers currently running">
                         <div class="stat-icon running">🟢</div>
                         <div class="stat-info">
@@ -108,18 +108,28 @@
                             <div class="stat-label">Containers Stopped</div>
                         </div>
                     </div>
-                    <div class="stat-card" title="System RAM usage - how much memory your server is using">
+                    <div class="stat-card clickable" onclick="showMetricDetail('cpu')" title="CPU usage - click for history">
+                        <div class="stat-icon cpu">⚡</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="cpuUsed">-</div>
+                            <div class="stat-label">CPU Usage</div>
+                            <div class="stat-sparkline" id="cpuSparkline"></div>
+                        </div>
+                    </div>
+                    <div class="stat-card clickable" onclick="showMetricDetail('memory')" title="System RAM usage - click for history">
                         <div class="stat-icon memory">🧠</div>
                         <div class="stat-info">
                             <div class="stat-value" id="memoryUsed">-</div>
                             <div class="stat-label">RAM Usage</div>
+                            <div class="stat-sparkline" id="memorySparkline"></div>
                         </div>
                     </div>
-                    <div class="stat-card" title="Hard drive storage usage - how full your disk is">
+                    <div class="stat-card clickable" onclick="showMetricDetail('disk')" title="Hard drive storage usage - click for history">
                         <div class="stat-icon disk">💽</div>
                         <div class="stat-info">
                             <div class="stat-value" id="diskUsed">-</div>
                             <div class="stat-label">Disk Usage</div>
+                            <div class="stat-sparkline" id="diskSparkline"></div>
                         </div>
                     </div>
                 </div>

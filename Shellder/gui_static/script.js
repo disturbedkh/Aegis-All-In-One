@@ -219,8 +219,13 @@ function updateDashboard(data) {
     document.getElementById('containersRunning').textContent = data.containers.running;
     document.getElementById('containersStopped').textContent = data.containers.stopped;
     
+    // CPU
+    if (data.system.cpu_percent !== undefined) {
+        document.getElementById('cpuUsed').textContent = `${data.system.cpu_percent}%`;
+    }
+    
     if (data.system.memory) {
-        document.getElementById('memoryUsed').textContent = data.system.memory.used;
+        document.getElementById('memoryUsed').textContent = data.system.memory.percent || data.system.memory.used;
         document.getElementById('memoryInfo').textContent = 
             `${data.system.memory.used} / ${data.system.memory.total}`;
     }
@@ -242,6 +247,9 @@ function updateDashboard(data) {
     if (data.xilriws) {
         updateXilriwsStats(data.xilriws);
     }
+    
+    // Load sparklines
+    loadSparklines();
 }
 
 function updateContainerStats(containers) {
@@ -265,7 +273,149 @@ function updateContainerStats(containers) {
     }
 }
 
+// =============================================================================
+// SPARKLINES & METRICS HISTORY
+// =============================================================================
+
+async function loadSparklines() {
+    try {
+        const data = await fetchAPI('/api/metrics/sparklines');
+        renderSparkline('cpuSparkline', data.cpu || []);
+        renderSparkline('memorySparkline', data.memory || []);
+        renderSparkline('diskSparkline', data.disk || []);
+    } catch (e) {
+        // Sparklines are optional, don't show errors
+        console.log('Sparklines not available yet');
+    }
+}
+
+function renderSparkline(elementId, values) {
+    const el = document.getElementById(elementId);
+    if (!el || !values.length) return;
+    
+    const max = Math.max(...values, 1);
+    const bars = values.map(v => {
+        const height = Math.max(2, (v / max) * 100);
+        let colorClass = '';
+        if (v < 50) colorClass = 'low';
+        else if (v < 80) colorClass = 'medium';
+        else colorClass = 'high';
+        return `<div class="bar ${colorClass}" style="height: ${height}%"></div>`;
+    }).join('');
+    
+    el.innerHTML = bars;
+}
+
+async function showMetricDetail(metric) {
+    const titles = {
+        cpu: '⚡ CPU Usage History',
+        memory: '🧠 RAM Usage History',
+        disk: '💽 Disk Usage History'
+    };
+    
+    openModal(titles[metric] || 'Metric History', `
+        <div class="metric-detail-modal">
+            <div class="metric-time-controls">
+                <button class="btn btn-sm ${metric === 'cpu' ? 'active' : ''}" onclick="loadMetricHistory('${metric}', 1)">1h</button>
+                <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 6)">6h</button>
+                <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 24)">24h</button>
+                <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 168)">7d</button>
+            </div>
+            <div class="metric-chart" id="metricChart">
+                <div class="loading">Loading history...</div>
+            </div>
+            <div class="metric-stats" id="metricStats"></div>
+        </div>
+    `);
+    
+    loadMetricHistory(metric, 1);
+}
+
+async function loadMetricHistory(metric, hours) {
+    const chartEl = document.getElementById('metricChart');
+    const statsEl = document.getElementById('metricStats');
+    
+    try {
+        const metricName = metric === 'cpu' ? 'cpu_percent' : 
+                         metric === 'memory' ? 'memory_percent' : 'disk_percent';
+        
+        const data = await fetchAPI(`/api/metrics/history/${metricName}?hours=${hours}`);
+        
+        if (!data.data || data.data.length === 0) {
+            chartEl.innerHTML = '<div class="no-data">No data available yet. Metrics are recorded every 30 seconds.</div>';
+            statsEl.innerHTML = '';
+            return;
+        }
+        
+        // Calculate stats
+        const values = data.data.map(d => d.value);
+        const avg = values.reduce((a, b) => a + b, 0) / values.length;
+        const max = Math.max(...values);
+        const min = Math.min(...values);
+        const current = values[values.length - 1];
+        
+        // Render chart as bar graph
+        const chartMax = Math.max(max, 100);
+        const chartHtml = data.data.map((d, i) => {
+            const height = Math.max(2, (d.value / chartMax) * 100);
+            let colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
+            const time = new Date(d.time).toLocaleTimeString();
+            return `<div class="chart-bar ${colorClass}" style="height: ${height}%" 
+                        title="${d.value.toFixed(1)}% at ${time}"></div>`;
+        }).join('');
+        
+        chartEl.innerHTML = `
+            <div class="chart-container">
+                <div class="chart-bars">${chartHtml}</div>
+                <div class="chart-axis">
+                    <span>0%</span>
+                    <span>50%</span>
+                    <span>100%</span>
+                </div>
+            </div>
+        `;
+        
+        // Render stats
+        statsEl.innerHTML = `
+            <div class="metric-stat-grid">
+                <div class="metric-stat">
+                    <div class="metric-stat-value">${current.toFixed(1)}%</div>
+                    <div class="metric-stat-label">Current</div>
+                </div>
+                <div class="metric-stat">
+                    <div class="metric-stat-value">${avg.toFixed(1)}%</div>
+                    <div class="metric-stat-label">Average</div>
+                </div>
+                <div class="metric-stat">
+                    <div class="metric-stat-value">${min.toFixed(1)}%</div>
+                    <div class="metric-stat-label">Min</div>
+                </div>
+                <div class="metric-stat">
+                    <div class="metric-stat-value">${max.toFixed(1)}%</div>
+                    <div class="metric-stat-label">Max</div>
+                </div>
+            </div>
+            <div class="metric-stat-info">
+                <small>${data.data.length} data points over ${hours} hour(s)</small>
+            </div>
+        `;
+        
+        // Update active button
+        document.querySelectorAll('.metric-time-controls .btn').forEach(b => b.classList.remove('active'));
+        event.target?.classList?.add('active');
+        
+    } catch (e) {
+        chartEl.innerHTML = '<div class="text-danger">Failed to load history</div>';
+        statsEl.innerHTML = '';
+    }
+}
+
 function updateSystemStats(data) {
+    // Update CPU
+    if (data.cpu_percent !== undefined) {
+        document.getElementById('cpuUsed').textContent = `${data.cpu_percent}%`;
+    }
+    
     if (data.memory) {
         const memUsed = formatBytes(data.memory.used);
         const memTotal = formatBytes(data.memory.total);

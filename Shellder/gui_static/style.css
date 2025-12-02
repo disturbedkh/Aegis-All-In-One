@@ -298,20 +298,197 @@ html, body {
     margin-bottom: 24px;
 }
 
+.stats-grid-5 {
+    grid-template-columns: repeat(5, 1fr);
+}
+
+@media (max-width: 1200px) {
+    .stats-grid-5 {
+        grid-template-columns: repeat(3, 1fr);
+    }
+}
+
+@media (max-width: 768px) {
+    .stats-grid-5 {
+        grid-template-columns: repeat(2, 1fr);
+    }
+}
+
 .stat-card {
     background: var(--bg-card);
     border: 1px solid var(--border-color);
     border-radius: var(--radius-lg);
-    padding: 24px;
+    padding: 20px;
     display: flex;
-    align-items: center;
-    gap: 20px;
+    align-items: flex-start;
+    gap: 16px;
     transition: var(--transition-fast);
+    position: relative;
+    overflow: hidden;
 }
 
 .stat-card:hover {
     border-color: var(--accent-primary);
     box-shadow: 0 4px 20px rgba(0, 0, 0, 0.2);
+}
+
+.stat-card.clickable {
+    cursor: pointer;
+}
+
+.stat-card.clickable:hover {
+    background: var(--bg-secondary);
+    transform: translateY(-2px);
+}
+
+.stat-card.clickable::after {
+    content: '📊';
+    position: absolute;
+    top: 8px;
+    right: 8px;
+    font-size: 12px;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.stat-card.clickable:hover::after {
+    opacity: 0.6;
+}
+
+/* Sparkline mini-chart */
+.stat-sparkline {
+    height: 24px;
+    margin-top: 8px;
+    display: flex;
+    align-items: flex-end;
+    gap: 2px;
+}
+
+.stat-sparkline .bar {
+    flex: 1;
+    min-width: 3px;
+    max-width: 8px;
+    background: var(--accent-primary);
+    border-radius: 2px 2px 0 0;
+    opacity: 0.7;
+    transition: height 0.3s ease, opacity 0.2s;
+}
+
+.stat-sparkline .bar:last-child {
+    opacity: 1;
+    background: var(--accent-secondary);
+}
+
+.stat-sparkline:hover .bar {
+    opacity: 1;
+}
+
+/* Color coding for sparkline bars based on value */
+.stat-sparkline .bar.low { background: var(--success); }
+.stat-sparkline .bar.medium { background: var(--warning); }
+.stat-sparkline .bar.high { background: var(--danger); }
+
+/* Metric Detail Modal */
+.metric-detail-modal {
+    min-height: 300px;
+}
+
+.metric-time-controls {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.metric-time-controls .btn {
+    flex: 1;
+}
+
+.metric-time-controls .btn.active {
+    background: var(--accent-primary);
+    color: white;
+}
+
+.metric-chart {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 16px;
+    min-height: 150px;
+}
+
+.chart-container {
+    display: flex;
+    flex-direction: column;
+    height: 150px;
+}
+
+.chart-bars {
+    flex: 1;
+    display: flex;
+    align-items: flex-end;
+    gap: 1px;
+    padding-bottom: 8px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.chart-bar {
+    flex: 1;
+    min-width: 2px;
+    max-width: 20px;
+    border-radius: 2px 2px 0 0;
+    transition: opacity 0.2s;
+    cursor: crosshair;
+}
+
+.chart-bar:hover {
+    opacity: 0.8;
+}
+
+.chart-bar.low { background: var(--success); }
+.chart-bar.medium { background: var(--warning); }
+.chart-bar.high { background: var(--danger); }
+
+.chart-axis {
+    display: flex;
+    justify-content: space-between;
+    padding-top: 4px;
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.metric-stats {
+    margin-top: 16px;
+}
+
+.metric-stat-grid {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 12px;
+    margin-bottom: 12px;
+}
+
+.metric-stat {
+    text-align: center;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+}
+
+.metric-stat-value {
+    font-size: 1.5rem;
+    font-weight: 600;
+    color: var(--text-primary);
+}
+
+.metric-stat-label {
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.metric-stat-info {
+    text-align: center;
+    color: var(--text-muted);
 }
 
 .stat-icon {
