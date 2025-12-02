@@ -210,6 +210,11 @@ function startAutoRefresh() {
 // =============================================================================
 
 function updateDashboard(data) {
+    // Check for local/demo mode and show notification
+    if (data.local_mode && data.message) {
+        showLocalModeNotice(data.message);
+    }
+    
     // Stats
     document.getElementById('containersRunning').textContent = data.containers.running;
     document.getElementById('containersStopped').textContent = data.containers.stopped;
@@ -642,6 +647,9 @@ function updateConnectionStatus(connected, mode = '') {
         if (mode === 'live') {
             text.textContent = 'Live';
             dot.classList.add('live');
+        } else if (mode === 'demo') {
+            text.textContent = 'Demo Mode';
+            dot.classList.add('warning');
         } else {
             text.textContent = 'Connected';
         }
@@ -649,6 +657,52 @@ function updateConnectionStatus(connected, mode = '') {
         dot.className = 'status-dot error';
         text.textContent = 'Disconnected';
     }
+}
+
+let localModeNoticeShown = false;
+function showLocalModeNotice(message) {
+    // Only show once per session
+    if (localModeNoticeShown) return;
+    localModeNoticeShown = true;
+    
+    // Update connection status to show demo mode
+    updateConnectionStatus(true, 'demo');
+    
+    // Create notice banner
+    const notice = document.createElement('div');
+    notice.id = 'localModeBanner';
+    notice.style.cssText = `
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+        color: #1a1a2e;
+        padding: 10px 20px;
+        text-align: center;
+        font-weight: 600;
+        z-index: 9999;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+    `;
+    notice.innerHTML = `
+        <span>${message}</span>
+        <button onclick="this.parentElement.remove()" style="
+            background: rgba(0,0,0,0.2);
+            border: none;
+            color: inherit;
+            padding: 4px 12px;
+            border-radius: 4px;
+            cursor: pointer;
+            font-weight: 500;
+        ">Dismiss</button>
+    `;
+    document.body.prepend(notice);
+    
+    // Adjust main content to account for banner
+    document.querySelector('.main-content').style.marginTop = '50px';
 }
 
 function updateLastUpdate() {

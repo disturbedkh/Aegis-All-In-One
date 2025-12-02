@@ -96,6 +96,9 @@ except ImportError:
 SHELLDER_PORT = int(os.environ.get('SHELLDER_PORT', 5000))
 AEGIS_ROOT = Path(os.environ.get('AEGIS_ROOT', '/aegis'))
 
+# Local testing mode - provides mock data when Docker/stack not available
+LOCAL_MODE = os.environ.get('SHELLDER_LOCAL_MODE', '0') == '1'
+
 # When running locally, find the root directory
 if not AEGIS_ROOT.exists():
     SCRIPT_DIR = Path(__file__).parent
@@ -4997,9 +5000,57 @@ def health():
         'version': '1.0'
     })
 
+def get_mock_status():
+    """Return mock/demo data for local testing without Docker"""
+    mock_containers = [
+        {'name': 'rotom', 'status': 'running', 'cpu': '2.1%', 'memory': '156MB', 'uptime': '2d 14h'},
+        {'name': 'dragonite', 'status': 'running', 'cpu': '15.3%', 'memory': '512MB', 'uptime': '2d 14h'},
+        {'name': 'golbat', 'status': 'running', 'cpu': '8.7%', 'memory': '384MB', 'uptime': '2d 14h'},
+        {'name': 'reactmap', 'status': 'running', 'cpu': '3.2%', 'memory': '256MB', 'uptime': '2d 14h'},
+        {'name': 'koji', 'status': 'running', 'cpu': '1.8%', 'memory': '128MB', 'uptime': '2d 14h'},
+        {'name': 'database', 'status': 'running', 'cpu': '5.4%', 'memory': '1.2GB', 'uptime': '2d 14h'},
+        {'name': 'grafana', 'status': 'stopped', 'cpu': '0%', 'memory': '0MB', 'uptime': '-'},
+        {'name': 'xilriws', 'status': 'running', 'cpu': '0.5%', 'memory': '64MB', 'uptime': '2d 14h'},
+    ]
+    
+    return {
+        'containers': {
+            'total': len(mock_containers),
+            'running': sum(1 for c in mock_containers if c['status'] == 'running'),
+            'stopped': sum(1 for c in mock_containers if c['status'] != 'running'),
+            'list': mock_containers
+        },
+        'system': {
+            'memory': {'total': '32GB', 'used': '12.4GB', 'free': '19.6GB', 'percent': '39%'},
+            'disk': {'total': '500GB', 'used': '125GB', 'free': '375GB', 'percent': '25%'},
+            'uptime': '14 days, 6:32:15'
+        },
+        'env_configured': True,
+        'xilriws': {
+            'status': 'running',
+            'auth_requests': 1247,
+            'success_rate': '98.5%',
+            'active_sessions': 42
+        },
+        'ports': {
+            '5090': {'status': 'open', 'service': 'Rotom'},
+            '7070': {'status': 'open', 'service': 'Rotom WS'},
+            '6001': {'status': 'open', 'service': 'ReactMap'},
+            '6002': {'status': 'open', 'service': 'Koji'},
+        },
+        'services': {},
+        'timestamp': datetime.now().isoformat(),
+        'local_mode': True,
+        'message': '⚠️ Running in LOCAL MODE - showing demo data (Docker not connected)'
+    }
+
 @app.route('/api/status')
 def api_status():
     """Get overall system status"""
+    # Check if we should return mock data (local testing mode or Docker not available)
+    if LOCAL_MODE or docker_client is None:
+        return jsonify(get_mock_status())
+    
     stats = stats_collector.get_all_stats()
     
     containers = []
@@ -5053,6 +5104,10 @@ def api_status():
 @app.route('/api/containers')
 def api_containers():
     """Get detailed container status"""
+    # Return mock data in local mode
+    if LOCAL_MODE or docker_client is None:
+        return jsonify(get_mock_status()['containers']['list'])
+    
     stats = stats_collector.get_all_stats()
     return jsonify(list(stats.get('containers', {}).values()))
 
