@@ -57,6 +57,8 @@ _expected_endpoints = [
 ]
 _websocket_connections = {}  # sid -> connection info
 _client_sessions = {}  # IP -> session info
+_client_versions = {}  # IP -> detected JS version info
+_error_dedup = {}  # error_key -> {count, first_seen, last_seen}
 
 # =============================================================================
 # CORE LOGGING
@@ -319,34 +321,104 @@ def log_client_event(event_data):
     """Log event received from browser client"""
     info('CLIENT', 'Browser event received', event_data)
 
-def log_client_logs(log_bundle):
+def log_client_logs(log_bundle, client_ip=None):
     """
     Log a bundle of client-side logs received from browser.
     Writes each log entry with CLIENT prefix.
+    
+    Features for AI debugging:
+    - Detects client JS version from state
+    - Deduplicates repeated errors (shows count instead of spam)
+    - Warns about outdated client JS
     """
+    global _client_versions, _error_dedup
+    
     if not log_bundle:
         return
     
-    info('CLIENT', f'=== Received {len(log_bundle.get("allLogs", []))} client logs ===')
+    all_logs = log_bundle.get('allLogs', [])
+    info('CLIENT', f'=== Received {len(all_logs)} client logs ===')
     
-    # Log state snapshot from client
+    # Detect client JS version from state
     if 'state' in log_bundle:
-        debug('CLIENT', 'Client state snapshot', log_bundle['state'])
+        state = log_bundle['state']
+        debug('CLIENT', 'Client state snapshot', state)
+        
+        # Check if client reports endpoints it's calling
+        if client_ip and 'config' in state:
+            config = state['config']
+            # Track which endpoints the client thinks it should call
+            if 'apiBase' in config:
+                _client_versions[client_ip] = {
+                    'last_seen': time.time(),
+                    'has_services_call': '/api/services' in str(all_logs),
+                    'has_sparklines_call': '/api/metrics/sparklines' in str(all_logs),
+                    'user_agent': state.get('browser', {}).get('userAgent', 'unknown')
+                }
     
-    # Log individual entries
-    for entry in log_bundle.get('allLogs', [])[-100:]:  # Last 100
+    # Deduplicate and count errors
+    error_counts = {}
+    other_logs = []
+    
+    for entry in all_logs[-100:]:  # Last 100
+        level = entry.get('level', 'DEBUG')
+        msg = entry.get('msg', '')
+        
+        # Deduplicate errors and fatals
+        if level in ('ERROR', 'FATAL'):
+            # Create a key from the error message (first 100 chars)
+            error_key = f"{level}:{msg[:100]}"
+            error_counts[error_key] = error_counts.get(error_key, 0) + 1
+        else:
+            other_logs.append(entry)
+    
+    # Log deduplicated errors first (summarized)
+    if error_counts:
+        for error_key, count in error_counts.items():
+            level, msg = error_key.split(':', 1)
+            if count > 1:
+                warn('CLI/ERROR', f'[x{count}] {msg}', {'repeated_count': count})
+            else:
+                log(level, 'CLI/ERROR', msg)
+    
+    # Log other entries
+    for entry in other_logs:
         level = entry.get('level', 'DEBUG')
         cat = f"CLI/{entry.get('cat', 'UNK')}"
         msg = entry.get('msg', '')
         data = entry.get('data')
         
         log(level, cat[:12], msg, data)
+    
+    # Check if client is calling expected endpoints (detect old JS)
+    all_logs_str = str(all_logs)
+    missing_calls = []
+    if '/api/status' in all_logs_str:  # Client is calling something
+        if '/api/services' not in all_logs_str:
+            missing_calls.append('/api/services')
+        if '/api/metrics' not in all_logs_str:
+            missing_calls.append('/api/metrics/sparklines')
+    
+    if missing_calls:
+        warn('CLIENT', f'⚠️ Client NOT calling expected endpoints (OLD JS?)', {
+            'missing': missing_calls,
+            'advice': 'Client may have old cached JavaScript. User needs Ctrl+F5.',
+            'client_ip': client_ip
+        })
 
 # =============================================================================
 # HTTP REQUEST/RESPONSE LOGGING
 # =============================================================================
 
 _request_start_times = {}
+_error_counts = {}  # Track error frequencies to reduce spam
+_last_error_log = {}  # Timestamp of last log for each error type
+
+# Expected static file sizes (for cache debugging)
+EXPECTED_STATIC_FILES = {
+    'script.js': {'min_size': 145000, 'description': 'Main JavaScript'},
+    'style.css': {'min_size': 60000, 'description': 'Main stylesheet'}
+}
 
 def log_http_request(request):
     """Log incoming HTTP request - call from Flask before_request"""
@@ -360,6 +432,15 @@ def log_http_request(request):
     if request.path.startswith('/api/'):
         track_api_call(request.path, request.remote_addr)
     
+    # Log cache-related headers for static files (helps debug 304 issues)
+    cache_headers = {}
+    if request.path.startswith('/static/'):
+        cache_headers = {
+            'if_none_match': request.headers.get('If-None-Match'),
+            'if_modified_since': request.headers.get('If-Modified-Since'),
+            'cache_control': request.headers.get('Cache-Control')
+        }
+    
     info('HTTP_REQ', f'{request.method} {request.path}', {
         'method': request.method,
         'path': request.path,
@@ -367,7 +448,8 @@ def log_http_request(request):
         'remote_addr': request.remote_addr,
         'user_agent': request.headers.get('User-Agent', '')[:100],
         'content_type': request.content_type,
-        'content_length': request.content_length
+        'content_length': request.content_length,
+        **cache_headers
     })
 
 def log_http_response(response, request):
@@ -381,12 +463,40 @@ def log_http_response(response, request):
     
     level = 'DEBUG' if response.status_code < 400 else 'WARN' if response.status_code < 500 else 'ERROR'
     
+    extra_data = {}
+    
+    # Special handling for static files - detect caching issues
+    if request.path.startswith('/static/'):
+        filename = request.path.split('/')[-1]
+        
+        # Check for 304 responses (cached) - this is often a problem!
+        if response.status_code == 304:
+            warn('CACHE', f'⚠️ 304 NOT MODIFIED for {filename} - client using cached version!', {
+                'file': filename,
+                'client_has_etag': request.headers.get('If-None-Match'),
+                'advice': 'Client may have old JS. User should Ctrl+F5 to force refresh.'
+            })
+        
+        # Check if served file size matches expected
+        if filename in EXPECTED_STATIC_FILES and response.content_length:
+            expected = EXPECTED_STATIC_FILES[filename]
+            if response.content_length < expected['min_size']:
+                warn('CACHE', f'⚠️ {filename} smaller than expected ({response.content_length} < {expected["min_size"]})', {
+                    'file': filename,
+                    'actual_size': response.content_length,
+                    'expected_min': expected['min_size']
+                })
+        
+        extra_data['etag'] = response.headers.get('ETag')
+        extra_data['cache_control'] = response.headers.get('Cache-Control')
+    
     log(level, 'HTTP_RES', f'{request.method} {request.path} → {response.status_code} [{duration_ms:.1f}ms]', {
         'status': response.status_code,
         'status_text': response.status,
         'duration_ms': round(duration_ms, 2),
         'content_type': response.content_type,
-        'content_length': response.content_length
+        'content_length': response.content_length,
+        **extra_data
     })
     
     return response
@@ -605,6 +715,24 @@ def log_summary():
     
     # Log WebSocket status
     info('WEBSOCKET', f'{len(_websocket_connections)} active WebSocket connection(s)')
+    
+    # Log client version status (helps detect old cached JS)
+    if _client_versions:
+        outdated_clients = []
+        for ip, info_data in _client_versions.items():
+            if not info_data.get('has_services_call'):
+                outdated_clients.append(ip)
+        
+        if outdated_clients:
+            warn('CACHE', f'⚠️ {len(outdated_clients)} client(s) may have outdated JS', {
+                'outdated_ips': outdated_clients,
+                'advice': 'These clients are not calling /api/services - likely old cached JS'
+            })
+    
+    # Log any cache-related warnings from recent logs
+    cache_warnings = sum(1 for entry in recent if '[CACHE' in entry and 'WARN' in entry)
+    if cache_warnings:
+        warn('CACHE', f'⚠️ {cache_warnings} cache-related warnings in last {len(recent)} entries')
 
 def get_recent_logs(count=100):
     """Get recent log entries from memory buffer"""

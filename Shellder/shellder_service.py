@@ -5301,8 +5301,8 @@ def api_debug_client_logs():
             import json
             data = json.loads(request.get_data(as_text=True))
         
-        # Log to unified debug log
-        log_client_logs(data)
+        # Log to unified debug log (with client IP for version tracking)
+        log_client_logs(data, client_ip=request.remote_addr)
         
         client_debug_logs.append({
             'received_at': datetime.now().isoformat(),
