@@ -174,6 +174,26 @@ app = Flask(__name__,
 app.config['SECRET_KEY'] = os.environ.get('SECRET_KEY', 'shellder-secret-key')
 CORS(app)
 
+# =============================================================================
+# HTTP REQUEST/RESPONSE LOGGING
+# =============================================================================
+try:
+    from debug_logger import log_http_request, log_http_response, log_http_error
+    
+    @app.before_request
+    def before_request_logging():
+        """Log all incoming HTTP requests"""
+        log_http_request(request)
+    
+    @app.after_request
+    def after_request_logging(response):
+        """Log all HTTP responses"""
+        return log_http_response(response, request)
+    
+    info('FLASK', 'HTTP request/response logging enabled')
+except ImportError:
+    pass  # Debug logger not available
+
 if SOCKETIO_AVAILABLE:
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)
 else:

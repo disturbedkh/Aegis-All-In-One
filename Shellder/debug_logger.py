@@ -33,6 +33,9 @@ ENABLED = True  # Always on for debugging phase
 LOG_FUNCTION_ARGS = True  # Log function arguments
 LOG_FUNCTION_RESULTS = True  # Log function return values
 LOG_SYSTEM_STATE_INTERVAL = 60  # Seconds between system state snapshots
+LOG_HTTP_REQUESTS = True  # Log all HTTP requests
+LOG_HTTP_RESPONSES = True  # Log HTTP response summaries
+MAX_DATA_LEN = 1000  # Increase truncation limit for data
 
 # In-memory buffer for recent logs (for quick access)
 _log_buffer = deque(maxlen=5000)
@@ -49,8 +52,10 @@ def _format_timestamp():
     elapsed = time.time() - _start_time
     return f"{now.strftime('%Y-%m-%d %H:%M:%S.%f')[:-3]} [+{elapsed:>10.3f}s]"
 
-def _safe_repr(obj, max_len=500):
+def _safe_repr(obj, max_len=None):
     """Safely convert object to string representation"""
+    if max_len is None:
+        max_len = MAX_DATA_LEN
     try:
         if obj is None:
             return 'None'
@@ -61,7 +66,7 @@ def _safe_repr(obj, max_len=500):
         elif isinstance(obj, dict):
             s = json.dumps(obj, default=str, ensure_ascii=False)
         elif isinstance(obj, (list, tuple)):
-            s = json.dumps(list(obj)[:20], default=str) + (f"... ({len(obj)} items)" if len(obj) > 20 else "")
+            s = json.dumps(list(obj)[:50], default=str) + (f"... ({len(obj)} items)" if len(obj) > 50 else "")
         else:
             s = repr(obj)
         
@@ -322,6 +327,66 @@ def log_client_logs(log_bundle):
         log(level, cat[:12], msg, data)
 
 # =============================================================================
+# HTTP REQUEST/RESPONSE LOGGING
+# =============================================================================
+
+_request_start_times = {}
+
+def log_http_request(request):
+    """Log incoming HTTP request - call from Flask before_request"""
+    if not LOG_HTTP_REQUESTS:
+        return
+    
+    request_id = id(request)
+    _request_start_times[request_id] = time.time()
+    
+    info('HTTP_REQ', f'{request.method} {request.path}', {
+        'method': request.method,
+        'path': request.path,
+        'query': request.query_string.decode('utf-8', errors='ignore')[:200] if request.query_string else None,
+        'remote_addr': request.remote_addr,
+        'user_agent': request.headers.get('User-Agent', '')[:100],
+        'content_type': request.content_type,
+        'content_length': request.content_length
+    })
+
+def log_http_response(response, request):
+    """Log HTTP response - call from Flask after_request"""
+    if not LOG_HTTP_RESPONSES:
+        return response
+    
+    request_id = id(request)
+    start_time = _request_start_times.pop(request_id, None)
+    duration_ms = (time.time() - start_time) * 1000 if start_time else 0
+    
+    level = 'DEBUG' if response.status_code < 400 else 'WARN' if response.status_code < 500 else 'ERROR'
+    
+    log(level, 'HTTP_RES', f'{request.method} {request.path} → {response.status_code} [{duration_ms:.1f}ms]', {
+        'status': response.status_code,
+        'status_text': response.status,
+        'duration_ms': round(duration_ms, 2),
+        'content_type': response.content_type,
+        'content_length': response.content_length
+    })
+    
+    return response
+
+def log_http_error(error, request):
+    """Log HTTP error - call from Flask error handlers"""
+    request_id = id(request)
+    start_time = _request_start_times.pop(request_id, None)
+    duration_ms = (time.time() - start_time) * 1000 if start_time else 0
+    
+    error_code = getattr(error, 'code', 500)
+    error('HTTP_ERR', f'{request.method} {request.path} → {error_code} [{duration_ms:.1f}ms]', {
+        'error_type': type(error).__name__,
+        'error_msg': str(error),
+        'duration_ms': round(duration_ms, 2),
+        'path': request.path,
+        'remote_addr': request.remote_addr
+    }, exc_info=True)
+
+# =============================================================================
 # STARTUP
 # =============================================================================
 
@@ -347,20 +412,56 @@ Platform: {platform.platform()}
         'log_path': str(DEBUG_LOG_PATH),
         'max_size_mb': MAX_LOG_SIZE_MB,
         'log_args': LOG_FUNCTION_ARGS,
-        'log_results': LOG_FUNCTION_RESULTS
+        'log_results': LOG_FUNCTION_RESULTS,
+        'log_http': LOG_HTTP_REQUESTS
     })
     
     # Start periodic system state logging
     def _periodic_state():
+        iteration = 0
         while True:
             time.sleep(LOG_SYSTEM_STATE_INTERVAL)
             try:
+                iteration += 1
                 log_system_state()
+                
+                # Every 5 minutes, log a summary
+                if iteration % 5 == 0:
+                    log_summary()
             except Exception as e:
                 error('LOGGER', f'Periodic state log failed: {e}')
     
     thread = threading.Thread(target=_periodic_state, daemon=True, name='DebugLogger-State')
     thread.start()
+
+def log_summary():
+    """Log a summary of recent activity"""
+    with _lock:
+        recent = list(_log_buffer)[-500:]
+    
+    # Count by level
+    level_counts = {}
+    category_counts = {}
+    for entry in recent:
+        # Parse level and category from log entry
+        if '[INFO ]' in entry: level_counts['INFO'] = level_counts.get('INFO', 0) + 1
+        elif '[DEBUG]' in entry: level_counts['DEBUG'] = level_counts.get('DEBUG', 0) + 1
+        elif '[WARN ]' in entry: level_counts['WARN'] = level_counts.get('WARN', 0) + 1
+        elif '[ERROR]' in entry: level_counts['ERROR'] = level_counts.get('ERROR', 0) + 1
+        elif '[TRACE]' in entry: level_counts['TRACE'] = level_counts.get('TRACE', 0) + 1
+        
+        # Extract category
+        if '[HTTP_REQ' in entry: category_counts['HTTP'] = category_counts.get('HTTP', 0) + 1
+        elif '[API' in entry: category_counts['API'] = category_counts.get('API', 0) + 1
+        elif '[CLIENT' in entry: category_counts['CLIENT'] = category_counts.get('CLIENT', 0) + 1
+    
+    info('SUMMARY', f'Last {len(recent)} log entries summary', {
+        'by_level': level_counts,
+        'by_category': category_counts,
+        'total_entries': len(_log_buffer),
+        'log_file_exists': DEBUG_LOG_PATH.exists(),
+        'log_file_size_kb': round(DEBUG_LOG_PATH.stat().st_size / 1024, 1) if DEBUG_LOG_PATH.exists() else 0
+    })
 
 def get_recent_logs(count=100):
     """Get recent log entries from memory buffer"""
