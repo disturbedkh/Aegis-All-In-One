@@ -15,7 +15,277 @@ let socket = null;
 let wsConnected = false;
 let debugMode = false;
 
-// Debug helper
+// =============================================================================
+// COMPREHENSIVE DEBUG LOGGING SYSTEM (AI-FRIENDLY)
+// =============================================================================
+
+const SHELLDER_DEBUG = {
+    enabled: true,
+    logs: [],
+    maxLogs: 5000,
+    startTime: Date.now(),
+    
+    // Log levels
+    LEVEL: { TRACE: 0, DEBUG: 1, INFO: 2, WARN: 3, ERROR: 4, FATAL: 5 },
+    levelNames: ['TRACE', 'DEBUG', 'INFO', 'WARN', 'ERROR', 'FATAL'],
+    
+    // Core logging function
+    log(level, category, message, data = null) {
+        if (!this.enabled) return;
+        
+        const entry = {
+            ts: Date.now(),
+            elapsed: Date.now() - this.startTime,
+            level: this.levelNames[level] || 'UNKNOWN',
+            cat: category,
+            msg: message,
+            data: data,
+            stack: level >= this.LEVEL.ERROR ? new Error().stack : null,
+            url: window.location.href,
+            page: currentPage,
+            wsConnected: wsConnected
+        };
+        
+        this.logs.push(entry);
+        if (this.logs.length > this.maxLogs) this.logs.shift();
+        
+        // Also console log with color
+        const colors = { TRACE: 'gray', DEBUG: 'blue', INFO: 'green', WARN: 'orange', ERROR: 'red', FATAL: 'darkred' };
+        console.log(
+            `%c[${entry.level}] %c[${category}] %c${message}`,
+            `color: ${colors[entry.level]}; font-weight: bold`,
+            'color: purple',
+            'color: inherit',
+            data || ''
+        );
+        
+        return entry;
+    },
+    
+    // Convenience methods
+    trace(cat, msg, data) { return this.log(this.LEVEL.TRACE, cat, msg, data); },
+    debug(cat, msg, data) { return this.log(this.LEVEL.DEBUG, cat, msg, data); },
+    info(cat, msg, data) { return this.log(this.LEVEL.INFO, cat, msg, data); },
+    warn(cat, msg, data) { return this.log(this.LEVEL.WARN, cat, msg, data); },
+    error(cat, msg, data) { return this.log(this.LEVEL.ERROR, cat, msg, data); },
+    fatal(cat, msg, data) { return this.log(this.LEVEL.FATAL, cat, msg, data); },
+    
+    // Function call tracer
+    fn(name, args = {}) {
+        const startTime = performance.now();
+        this.trace('FN_CALL', `→ ${name}()`, { args, startTime });
+        return {
+            end: (result = null) => {
+                const duration = performance.now() - startTime;
+                this.trace('FN_RETURN', `← ${name}() [${duration.toFixed(2)}ms]`, { result, duration });
+                return result;
+            },
+            error: (err) => {
+                const duration = performance.now() - startTime;
+                this.error('FN_ERROR', `✗ ${name}() failed [${duration.toFixed(2)}ms]`, { error: err.message, stack: err.stack, duration });
+                throw err;
+            }
+        };
+    },
+    
+    // Event logger
+    event(type, target, details = {}) {
+        this.debug('EVENT', `${type} on ${target}`, {
+            type, target, details,
+            timestamp: Date.now()
+        });
+    },
+    
+    // State change logger
+    state(name, oldVal, newVal) {
+        this.info('STATE', `${name}: ${JSON.stringify(oldVal)} → ${JSON.stringify(newVal)}`, {
+            name, oldVal, newVal, timestamp: Date.now()
+        });
+    },
+    
+    // API call logger
+    api(method, endpoint, status, duration, response = null, error = null) {
+        const level = error ? this.LEVEL.ERROR : (status >= 400 ? this.LEVEL.WARN : this.LEVEL.DEBUG);
+        this.log(level, 'API', `${method} ${endpoint} → ${status} [${duration}ms]`, {
+            method, endpoint, status, duration, response, error
+        });
+    },
+    
+    // DOM state snapshot
+    domSnapshot() {
+        return {
+            navItems: Array.from(document.querySelectorAll('.nav-item')).map(el => ({
+                page: el.dataset.page,
+                active: el.classList.contains('active'),
+                visible: el.offsetParent !== null,
+                onclick: el.onclick ? 'set' : 'null',
+                listeners: el._listeners || 'unknown'
+            })),
+            pages: Array.from(document.querySelectorAll('.page')).map(el => ({
+                id: el.id,
+                active: el.classList.contains('active'),
+                visible: el.offsetParent !== null
+            })),
+            modals: Array.from(document.querySelectorAll('.modal')).map(el => ({
+                id: el.id,
+                active: el.classList.contains('active'),
+                display: getComputedStyle(el).display
+            })),
+            body: {
+                overflow: document.body.style.overflow,
+                pointerEvents: getComputedStyle(document.body).pointerEvents
+            }
+        };
+    },
+    
+    // Full system state dump
+    getState() {
+        return {
+            timestamp: Date.now(),
+            elapsed: Date.now() - this.startTime,
+            config: {
+                apiBase: API_BASE,
+                currentPage,
+                wsConnected,
+                debugMode,
+                refreshInterval: refreshInterval ? 'active' : 'inactive'
+            },
+            browser: {
+                userAgent: navigator.userAgent,
+                url: window.location.href,
+                viewport: { w: window.innerWidth, h: window.innerHeight },
+                online: navigator.onLine
+            },
+            dom: this.domSnapshot(),
+            logs: this.logs.slice(-100), // Last 100 logs
+            errors: this.logs.filter(l => l.level === 'ERROR' || l.level === 'FATAL')
+        };
+    },
+    
+    // Export all logs as JSON
+    export() {
+        const data = {
+            exportTime: new Date().toISOString(),
+            totalLogs: this.logs.length,
+            state: this.getState(),
+            allLogs: this.logs
+        };
+        return JSON.stringify(data, null, 2);
+    },
+    
+    // Copy to clipboard
+    copyToClipboard() {
+        const json = this.export();
+        navigator.clipboard.writeText(json).then(() => {
+            this.info('EXPORT', 'Logs copied to clipboard', { size: json.length });
+            alert('Debug logs copied to clipboard!');
+        });
+    },
+    
+    // Download as file
+    download() {
+        const json = this.export();
+        const blob = new Blob([json], { type: 'application/json' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `shellder-debug-${Date.now()}.json`;
+        a.click();
+        URL.revokeObjectURL(url);
+        this.info('EXPORT', 'Logs downloaded', { size: json.length });
+    },
+    
+    // Send to server
+    async sendToServer() {
+        try {
+            const response = await fetch('/api/debug/client-logs', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: this.export()
+            });
+            if (response.ok) {
+                this.info('EXPORT', 'Logs sent to server');
+                return true;
+            }
+        } catch (e) {
+            // Silent fail - server might not be ready
+            console.warn('Failed to send logs to server:', e.message);
+        }
+        return false;
+    },
+    
+    // Auto-sync to server
+    startAutoSync(intervalMs = 30000) {
+        if (this._autoSyncInterval) return;
+        
+        this._autoSyncInterval = setInterval(() => {
+            if (this.logs.length > 0) {
+                this.sendToServer();
+            }
+        }, intervalMs);
+        
+        // Also send on page unload
+        window.addEventListener('beforeunload', () => {
+            navigator.sendBeacon('/api/debug/client-logs', this.export());
+        });
+        
+        this.info('SYNC', 'Auto-sync started', { intervalMs });
+    }
+};
+
+// Auto-start sync after a short delay
+setTimeout(() => SHELLDER_DEBUG.startAutoSync(), 5000);
+
+// Expose globally for console access
+window.SHELLDER_DEBUG = SHELLDER_DEBUG;
+window.SD = SHELLDER_DEBUG; // Short alias
+
+// Track all click events globally
+document.addEventListener('click', (e) => {
+    const target = e.target;
+    const path = [];
+    let el = target;
+    while (el && el !== document.body) {
+        let selector = el.tagName.toLowerCase();
+        if (el.id) selector += `#${el.id}`;
+        if (el.className && typeof el.className === 'string') selector += `.${el.className.split(' ').join('.')}`;
+        path.push(selector);
+        el = el.parentElement;
+    }
+    
+    SHELLDER_DEBUG.event('click', path.reverse().join(' > '), {
+        x: e.clientX, y: e.clientY,
+        button: e.button,
+        target: {
+            tag: target.tagName,
+            id: target.id,
+            class: target.className,
+            text: target.textContent?.slice(0, 50),
+            dataset: { ...target.dataset }
+        },
+        defaultPrevented: e.defaultPrevented,
+        propagationStopped: e._propagationStopped
+    });
+}, true); // Capture phase
+
+// Track errors
+window.addEventListener('error', (e) => {
+    SHELLDER_DEBUG.fatal('JS_ERROR', e.message, {
+        filename: e.filename,
+        lineno: e.lineno,
+        colno: e.colno,
+        error: e.error?.stack
+    });
+});
+
+window.addEventListener('unhandledrejection', (e) => {
+    SHELLDER_DEBUG.fatal('PROMISE_REJECT', 'Unhandled promise rejection', {
+        reason: e.reason?.message || e.reason,
+        stack: e.reason?.stack
+    });
+});
+
+// Debug helper (existing)
 function updateDebug(key, value, isError = false) {
     const el = document.getElementById(`debug${key}`);
     if (el) {
@@ -33,7 +303,60 @@ function toggleDebugPanel() {
             updateDebug('JS', 'loaded ✓');
             updateDebug('API', wsConnected ? 'connected ✓' : 'polling...');
             updateDebug('WS', wsConnected ? 'live ✓' : 'not connected');
+            updateDebug('LogCount', SHELLDER_DEBUG.logs.length);
         }
+    }
+    SHELLDER_DEBUG.state('debugMode', !debugMode, debugMode);
+}
+
+// Download the server-side unified debug log
+async function downloadServerDebugLog() {
+    SHELLDER_DEBUG.info('DEBUG', 'Downloading server debug log');
+    window.location.href = '/api/debug/debuglog/download';
+}
+
+// View the server debug log in a modal
+async function viewDebugLog() {
+    SHELLDER_DEBUG.info('DEBUG', 'Viewing server debug log');
+    openModal('🔧 Server Debug Log (debuglog.txt)', '<div class="loading">Loading debug log...</div>');
+    
+    try {
+        const response = await fetch('/api/debug/debuglog?lines=300&format=json');
+        const data = await response.json();
+        
+        if (data.error) {
+            document.getElementById('modalBody').innerHTML = `<div class="text-danger">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        document.getElementById('modalBody').innerHTML = `
+            <div style="margin-bottom: 10px; font-size: 12px; color: var(--text-muted);">
+                File: ${data.path}<br>
+                Total lines: ${data.total_lines} | Showing: ${data.returned_lines} | Size: ${(data.size_bytes/1024).toFixed(1)}KB
+            </div>
+            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
+                <button class="btn btn-sm" onclick="downloadServerDebugLog()">📥 Download Full</button>
+                <button class="btn btn-sm" onclick="viewDebugLog()">🔄 Refresh</button>
+                <button class="btn btn-sm" onclick="clearServerDebugLog()">🗑️ Clear</button>
+            </div>
+            <pre class="log-viewer" style="max-height: 400px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(data.lines.join('\n'))}</pre>
+        `;
+    } catch (e) {
+        document.getElementById('modalBody').innerHTML = `<div class="text-danger">Failed to load debug log: ${e.message}</div>`;
+        SHELLDER_DEBUG.error('DEBUG', 'Failed to load debug log', { error: e.message });
+    }
+}
+
+// Clear server debug log
+async function clearServerDebugLog() {
+    if (!confirm('Clear the server debug log?')) return;
+    
+    try {
+        await fetch('/api/debug/clear', { method: 'POST' });
+        viewDebugLog(); // Refresh
+        SHELLDER_DEBUG.info('DEBUG', 'Server debug log cleared');
+    } catch (e) {
+        alert('Failed to clear: ' + e.message);
     }
 }
 
@@ -123,86 +446,142 @@ function initWebSocket() {
 // =============================================================================
 
 document.addEventListener('DOMContentLoaded', () => {
-    console.log('[Shellder] Initializing GUI...');
+    const trace = SHELLDER_DEBUG.fn('DOMContentLoaded');
+    SHELLDER_DEBUG.info('INIT', 'DOM loaded, starting initialization', {
+        readyState: document.readyState,
+        url: window.location.href
+    });
+    
+    // Log initial DOM state
+    SHELLDER_DEBUG.debug('INIT', 'Initial DOM snapshot', SHELLDER_DEBUG.domSnapshot());
     
     try {
         initNavigation();
-        console.log('[Shellder] Navigation initialized');
+        SHELLDER_DEBUG.info('INIT', 'Navigation initialized successfully');
     } catch (e) {
-        console.error('[Shellder] Navigation init failed:', e);
+        SHELLDER_DEBUG.fatal('INIT', 'Navigation init FAILED', { error: e.message, stack: e.stack });
     }
     
     try {
         initWebSocket();
-        console.log('[Shellder] WebSocket initialized');
+        SHELLDER_DEBUG.info('INIT', 'WebSocket initialized');
     } catch (e) {
-        console.error('[Shellder] WebSocket init failed:', e);
+        SHELLDER_DEBUG.error('INIT', 'WebSocket init failed (non-fatal)', { error: e.message });
     }
     
     // Wrap API calls in try-catch so they don't break navigation
     try {
         refreshData();
+        SHELLDER_DEBUG.info('INIT', 'Initial data refresh started');
     } catch (e) {
-        console.error('[Shellder] Initial refresh failed:', e);
+        SHELLDER_DEBUG.error('INIT', 'Initial refresh failed', { error: e.message });
         updateConnectionStatus(false);
     }
     
     try {
         startAutoRefresh();
+        SHELLDER_DEBUG.info('INIT', 'Auto-refresh started');
     } catch (e) {
-        console.error('[Shellder] Auto-refresh failed:', e);
+        SHELLDER_DEBUG.error('INIT', 'Auto-refresh setup failed', { error: e.message });
     }
     
     // Load Socket.IO library if not present
     if (typeof io === 'undefined') {
+        SHELLDER_DEBUG.debug('INIT', 'Socket.IO not loaded, fetching from CDN');
         const script = document.createElement('script');
         script.src = 'https://cdn.socket.io/4.6.0/socket.io.min.js';
-        script.onload = initWebSocket;
-        script.onerror = () => console.log('[Shellder] Socket.IO CDN not reachable');
+        script.onload = () => {
+            SHELLDER_DEBUG.info('INIT', 'Socket.IO loaded from CDN');
+            initWebSocket();
+        };
+        script.onerror = () => SHELLDER_DEBUG.warn('INIT', 'Socket.IO CDN not reachable');
         document.head.appendChild(script);
     }
     
-    console.log('[Shellder] GUI initialization complete');
+    // Final DOM state
+    SHELLDER_DEBUG.debug('INIT', 'Post-init DOM snapshot', SHELLDER_DEBUG.domSnapshot());
+    SHELLDER_DEBUG.info('INIT', '=== GUI INITIALIZATION COMPLETE ===');
+    trace.end();
 });
 
 function initNavigation() {
-    const navItems = document.querySelectorAll('.nav-item');
-    console.log(`[Shellder] Found ${navItems.length} nav items`);
+    const trace = SHELLDER_DEBUG.fn('initNavigation');
     
-    navItems.forEach(item => {
-        item.addEventListener('click', (e) => {
+    const navItems = document.querySelectorAll('.nav-item');
+    SHELLDER_DEBUG.debug('NAV', `Found ${navItems.length} nav items`, {
+        items: Array.from(navItems).map(el => ({
+            page: el.dataset.page,
+            text: el.textContent.trim(),
+            hasOnclick: !!el.onclick
+        }))
+    });
+    
+    let listenersAttached = 0;
+    navItems.forEach((item, index) => {
+        // Track that we're adding listener
+        item._listeners = item._listeners || [];
+        
+        const handler = (e) => {
+            SHELLDER_DEBUG.debug('NAV', `Click handler fired for nav item #${index}`, {
+                page: item.dataset.page,
+                eventType: e.type,
+                eventTarget: e.target.tagName,
+                prevented: e.defaultPrevented
+            });
             e.preventDefault();
             const page = item.dataset.page;
-            console.log(`[Shellder] Nav click: ${page}`);
             navigateTo(page);
-        });
+        };
+        
+        item.addEventListener('click', handler);
+        item._listeners.push('click');
+        listenersAttached++;
+        
+        SHELLDER_DEBUG.trace('NAV', `Attached click listener to nav item #${index}`, { page: item.dataset.page });
     });
+    
+    SHELLDER_DEBUG.info('NAV', `Attached ${listenersAttached} click listeners`);
     
     // Also add global click handler as backup
     document.addEventListener('click', (e) => {
         const navItem = e.target.closest('.nav-item');
         if (navItem && navItem.dataset.page) {
+            SHELLDER_DEBUG.debug('NAV', 'Global click handler caught nav click', { page: navItem.dataset.page });
             e.preventDefault();
             navigateTo(navItem.dataset.page);
         }
     });
+    
+    SHELLDER_DEBUG.debug('NAV', 'Global backup click handler attached');
+    trace.end();
 }
 
 function navigateTo(page) {
+    const trace = SHELLDER_DEBUG.fn('navigateTo', { page });
+    const oldPage = currentPage;
+    
+    SHELLDER_DEBUG.info('NAV', `Navigating: ${oldPage} → ${page}`);
+    
     // Update nav
     document.querySelectorAll('.nav-item').forEach(item => {
-        item.classList.toggle('active', item.dataset.page === page);
+        const isActive = item.dataset.page === page;
+        item.classList.toggle('active', isActive);
+        SHELLDER_DEBUG.trace('NAV', `Nav item ${item.dataset.page}: active=${isActive}`);
     });
     
     // Update pages
     document.querySelectorAll('.page').forEach(p => {
-        p.classList.toggle('active', p.id === `page-${page}`);
+        const isActive = p.id === `page-${page}`;
+        p.classList.toggle('active', isActive);
+        SHELLDER_DEBUG.trace('NAV', `Page ${p.id}: active=${isActive}`);
     });
     
     // Update title
     const titles = {
         'dashboard': 'Dashboard',
         'containers': 'Containers',
+        'devices': 'Devices',
+        'stack': 'Stack Data',
         'xilriws': 'Xilriws Auth Proxy',
         'stats': 'Statistics',
         'files': 'File Manager',
@@ -212,6 +591,7 @@ function navigateTo(page) {
     };
     document.getElementById('pageTitle').textContent = titles[page] || page;
     
+    SHELLDER_DEBUG.state('currentPage', oldPage, page);
     currentPage = page;
     
     // Load page-specific data
@@ -232,6 +612,11 @@ function navigateTo(page) {
 // =============================================================================
 
 async function fetchAPI(endpoint, options = {}) {
+    const startTime = performance.now();
+    const method = options.method || 'GET';
+    
+    SHELLDER_DEBUG.debug('API', `→ ${method} ${endpoint}`, { options });
+    
     try {
         const response = await fetch(`${API_BASE}${endpoint}`, {
             ...options,
@@ -240,9 +625,17 @@ async function fetchAPI(endpoint, options = {}) {
                 ...options.headers
             }
         });
-        return await response.json();
+        
+        const duration = Math.round(performance.now() - startTime);
+        const data = await response.json();
+        
+        SHELLDER_DEBUG.api(method, endpoint, response.status, duration, 
+            response.ok ? { keys: Object.keys(data) } : data);
+        
+        return data;
     } catch (error) {
-        console.error('API Error:', error);
+        const duration = Math.round(performance.now() - startTime);
+        SHELLDER_DEBUG.api(method, endpoint, 0, duration, null, error.message);
         throw error;
     }
 }

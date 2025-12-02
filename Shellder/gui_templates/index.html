@@ -74,14 +74,30 @@
             </div>
             
             <div class="sidebar-footer">
-                <div class="status-indicator" onclick="toggleDebugPanel()" style="cursor: pointer;" title="Click to toggle debug info">
+                <div class="status-indicator" onclick="toggleDebugPanel()" style="cursor: pointer;" title="Click to toggle debug panel">
                     <span class="status-dot" id="connectionStatus"></span>
                     <span id="connectionText">Connecting...</span>
                 </div>
-                <div id="debugPanel" style="display: none; font-size: 10px; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.3); border-radius: 4px;">
+                <div id="debugPanel" style="display: none; font-size: 10px; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; max-height: 300px; overflow-y: auto;">
+                    <div style="margin-bottom: 6px; font-weight: bold; color: #f59e0b;">🔧 Debug Panel (AI-Friendly)</div>
                     <div>JS: <span id="debugJS">checking...</span></div>
                     <div>API: <span id="debugAPI">checking...</span></div>
                     <div>WS: <span id="debugWS">checking...</span></div>
+                    <div>Client Logs: <span id="debugLogCount">0</span></div>
+                    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
+                        <button onclick="SHELLDER_DEBUG.copyToClipboard()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">📋 Copy Client Logs</button>
+                        <button onclick="SHELLDER_DEBUG.download()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">💾 Download Client</button>
+                        <button onclick="SHELLDER_DEBUG.sendToServer()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">📤 Send to Server</button>
+                        <button onclick="downloadServerDebugLog()" style="font-size: 10px; padding: 4px 8px; cursor: pointer; background: #f59e0b; color: black;">📥 Download debuglog.txt</button>
+                        <button onclick="viewDebugLog()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">👁️ View Server Log</button>
+                    </div>
+                    <div style="margin-top: 6px; font-size: 9px; color: #888;">
+                        <b>For AI debugging:</b><br>
+                        • debuglog.txt in Shellder/<br>
+                        • Contains ALL server + client logs<br>
+                        • Auto-synced every 30s<br>
+                        • Console: SD.export()
+                    </div>
                 </div>
             </div>
         </nav>

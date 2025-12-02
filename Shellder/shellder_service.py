@@ -55,6 +55,36 @@ from collections import defaultdict
 from functools import wraps
 
 # =============================================================================
+# DEBUG LOGGER - MUST BE EARLY
+# =============================================================================
+try:
+    from debug_logger import (
+        log, trace, debug, info, warn, error, fatal,
+        logged, log_system_state, log_docker_state, log_client_logs,
+        get_recent_logs, get_log_path, clear_log
+    )
+    DEBUG_LOGGING = True
+    info('STARTUP', 'Debug logger loaded successfully')
+except ImportError as e:
+    DEBUG_LOGGING = False
+    print(f"Warning: debug_logger not available: {e}")
+    # Stub functions
+    def log(*args, **kwargs): pass
+    def trace(*args, **kwargs): pass
+    def debug(*args, **kwargs): pass
+    def info(*args, **kwargs): pass
+    def warn(*args, **kwargs): pass
+    def error(*args, **kwargs): pass
+    def fatal(*args, **kwargs): pass
+    def logged(cat=None): return lambda f: f
+    def log_system_state(): pass
+    def log_docker_state(): pass
+    def log_client_logs(d): pass
+    def get_recent_logs(n=100): return []
+    def get_log_path(): return ''
+    def clear_log(): pass
+
+# =============================================================================
 # THIRD-PARTY IMPORTS
 # =============================================================================
 
@@ -5220,6 +5250,195 @@ def api_metrics_current():
         'timestamp': datetime.now().isoformat()
     })
 
+# =============================================================================
+# DEBUG ENDPOINTS (AI-FRIENDLY COMPREHENSIVE LOGGING)
+# =============================================================================
+
+# Store client-side debug logs
+client_debug_logs = []
+MAX_CLIENT_LOGS = 100
+
+@app.route('/api/debug/client-logs', methods=['POST'])
+def api_debug_client_logs():
+    """Receive debug logs from client-side JavaScript and write to unified debuglog.txt"""
+    global client_debug_logs
+    try:
+        data = request.get_json()
+        
+        # Log to unified debug log
+        log_client_logs(data)
+        
+        client_debug_logs.append({
+            'received_at': datetime.now().isoformat(),
+            'client_ip': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent', 'unknown'),
+            'data': data
+        })
+        # Keep only last N logs
+        if len(client_debug_logs) > MAX_CLIENT_LOGS:
+            client_debug_logs = client_debug_logs[-MAX_CLIENT_LOGS:]
+        
+        info('API', f'Received {len(data.get("allLogs", []))} client logs', {
+            'client_ip': request.remote_addr
+        })
+        
+        return jsonify({'success': True, 'logged': len(client_debug_logs)})
+    except Exception as e:
+        error('API', f'Failed to receive client logs: {e}', exc_info=True)
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/debug/client-logs', methods=['GET'])
+def api_debug_get_client_logs():
+    """Retrieve stored client debug logs"""
+    return jsonify({
+        'count': len(client_debug_logs),
+        'logs': client_debug_logs
+    })
+
+@app.route('/api/debug/server-state')
+def api_debug_server_state():
+    """Get comprehensive server state for debugging"""
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'config': {
+            'SHELLDER_PORT': SHELLDER_PORT,
+            'AEGIS_ROOT': str(AEGIS_ROOT),
+            'SHELLDER_DIR': str(SHELLDER_DIR),
+            'DATA_DIR': str(DATA_DIR),
+            'LOG_DIR': str(LOG_DIR),
+            'LOCAL_MODE': LOCAL_MODE,
+            'DOCKER_AVAILABLE': DOCKER_AVAILABLE,
+            'PSUTIL_AVAILABLE': PSUTIL_AVAILABLE,
+            'SOCKETIO_AVAILABLE': SOCKETIO_AVAILABLE,
+            'ASYNC_MODE': ASYNC_MODE
+        },
+        'docker': {
+            'client_connected': docker_client is not None,
+            'version': docker_client.version() if docker_client else None
+        },
+        'paths': {
+            'aegis_root_exists': AEGIS_ROOT.exists(),
+            'shellder_dir_exists': SHELLDER_DIR.exists(),
+            'data_dir_exists': DATA_DIR.exists(),
+            'log_dir_exists': LOG_DIR.exists(),
+            'templates_dir_exists': TEMPLATES_DIR.exists(),
+            'static_dir_exists': STATIC_DIR.exists(),
+            'shellder_db_exists': SHELLDER_DB.exists()
+        },
+        'stats_collector': {
+            'running': stats_collector.running if stats_collector else False,
+            'container_count': len(stats_collector.container_stats) if stats_collector else 0,
+            'system_stats_keys': list(stats_collector.system_stats.keys()) if stats_collector else []
+        },
+        'device_monitor': {
+            'running': device_monitor.running if device_monitor else False,
+            'device_count': len(device_monitor.devices) if device_monitor else 0
+        } if device_monitor else None,
+        'flask': {
+            'debug': app.debug,
+            'testing': app.testing,
+            'env': app.env if hasattr(app, 'env') else 'unknown'
+        },
+        'request_info': {
+            'remote_addr': request.remote_addr,
+            'user_agent': request.headers.get('User-Agent'),
+            'host': request.host
+        }
+    })
+
+@app.route('/api/debug/logs')
+def api_debug_logs():
+    """Get server-side logs"""
+    lines = request.args.get('lines', 200, type=int)
+    
+    logs = {}
+    
+    # Main debug log (unified)
+    debug_log = SHELLDER_DIR / 'debuglog.txt'
+    if debug_log.exists():
+        with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+            logs['debuglog'] = f.read().split('\n')[-lines:]
+    
+    # Shellder log
+    if SHELLDER_LOG.exists():
+        with open(SHELLDER_LOG, 'r') as f:
+            logs['shellder'] = f.read().split('\n')[-lines:]
+    
+    return jsonify(logs)
+
+@app.route('/api/debug/debuglog')
+def api_debug_debuglog():
+    """Get the unified debuglog.txt content - main debug log for AI analysis"""
+    lines = request.args.get('lines', 500, type=int)
+    format_type = request.args.get('format', 'text')  # 'text' or 'json'
+    
+    debug_log = SHELLDER_DIR / 'debuglog.txt'
+    
+    if not debug_log.exists():
+        return jsonify({'error': 'debuglog.txt not found', 'path': str(debug_log)}), 404
+    
+    try:
+        with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+            content = f.read()
+        
+        log_lines = content.split('\n')
+        
+        if format_type == 'json':
+            return jsonify({
+                'path': str(debug_log),
+                'total_lines': len(log_lines),
+                'returned_lines': min(lines, len(log_lines)),
+                'size_bytes': len(content),
+                'lines': log_lines[-lines:]
+            })
+        else:
+            # Return as plain text
+            return Response(
+                '\n'.join(log_lines[-lines:]),
+                mimetype='text/plain'
+            )
+    except Exception as e:
+        error('API', f'Failed to read debuglog: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/debug/debuglog/download')
+def api_debug_debuglog_download():
+    """Download the full debuglog.txt file"""
+    debug_log = SHELLDER_DIR / 'debuglog.txt'
+    
+    if not debug_log.exists():
+        return jsonify({'error': 'debuglog.txt not found'}), 404
+    
+    info('API', 'Debug log download requested', {'client': request.remote_addr})
+    return send_from_directory(
+        SHELLDER_DIR,
+        'debuglog.txt',
+        as_attachment=True,
+        download_name=f'shellder-debug-{datetime.now().strftime("%Y%m%d-%H%M%S")}.txt'
+    )
+
+@app.route('/api/debug/recent')
+def api_debug_recent():
+    """Get recent logs from memory buffer (fast, no file read)"""
+    count = request.args.get('count', 100, type=int)
+    return jsonify({
+        'count': count,
+        'logs': get_recent_logs(count)
+    })
+
+@app.route('/api/debug/clear', methods=['POST'])
+def api_debug_clear():
+    """Clear debug logs"""
+    global client_debug_logs
+    client_debug_logs = []
+    
+    # Clear client debug log file
+    client_log = LOG_DIR / 'client_debug.json'
+    if client_log.exists():
+        client_log.unlink()
+    
+    return jsonify({'success': True, 'message': 'Debug logs cleared'})
+
 @app.route('/api/health')
 def health():
     """Health check endpoint"""
@@ -5279,8 +5498,15 @@ def get_mock_status():
 @app.route('/api/status')
 def api_status():
     """Get overall system status"""
+    debug('API', '/api/status called', {
+        'local_mode': LOCAL_MODE,
+        'docker_client': docker_client is not None,
+        'remote_addr': request.remote_addr
+    })
+    
     # Check if we should return mock data (local testing mode or Docker not available)
     if LOCAL_MODE or docker_client is None:
+        debug('API', 'Returning mock status (LOCAL_MODE or no Docker)')
         return jsonify(get_mock_status())
     
     stats = stats_collector.get_all_stats()
@@ -6175,6 +6401,45 @@ if SOCKETIO_AVAILABLE:
 # =============================================================================
 
 def main():
+    # Log startup
+    info('STARTUP', '='*60)
+    info('STARTUP', 'SHELLDER SERVICE STARTING')
+    info('STARTUP', '='*60)
+    
+    startup_config = {
+        'SHELLDER_PORT': SHELLDER_PORT,
+        'AEGIS_ROOT': str(AEGIS_ROOT),
+        'SHELLDER_DIR': str(SHELLDER_DIR),
+        'TEMPLATES_DIR': str(TEMPLATES_DIR),
+        'STATIC_DIR': str(STATIC_DIR),
+        'DATA_DIR': str(DATA_DIR),
+        'LOG_DIR': str(LOG_DIR),
+        'SHELLDER_DB': str(SHELLDER_DB),
+        'LOCAL_MODE': LOCAL_MODE,
+        'DOCKER_AVAILABLE': DOCKER_AVAILABLE,
+        'docker_client': 'connected' if docker_client else 'not connected',
+        'SOCKETIO_AVAILABLE': SOCKETIO_AVAILABLE,
+        'ASYNC_MODE': ASYNC_MODE,
+        'PSUTIL_AVAILABLE': PSUTIL_AVAILABLE,
+        'DEBUG_LOGGING': DEBUG_LOGGING
+    }
+    info('STARTUP', 'Configuration', startup_config)
+    
+    path_checks = {
+        'aegis_root_exists': AEGIS_ROOT.exists(),
+        'shellder_dir_exists': SHELLDER_DIR.exists(),
+        'templates_dir_exists': TEMPLATES_DIR.exists(),
+        'static_dir_exists': STATIC_DIR.exists(),
+        'data_dir_exists': DATA_DIR.exists(),
+        'log_dir_exists': LOG_DIR.exists(),
+        'shellder_db_exists': SHELLDER_DB.exists()
+    }
+    info('STARTUP', 'Path checks', path_checks)
+    
+    # Log Docker state if available
+    if DOCKER_AVAILABLE and docker_client:
+        log_docker_state()
+    
     print(f"""
 ╔═══════════════════════════════════════════════════════════════╗
 ║                 SHELLDER SERVICE v1.0                          ║
@@ -6184,6 +6449,7 @@ def main():
 ║  Dashboard:    http://localhost:{SHELLDER_PORT}                            ║
 ║  API:          http://localhost:{SHELLDER_PORT}/api/                       ║
 ║  WebSocket:    ws://localhost:{SHELLDER_PORT}/socket.io/                   ║
+║  Debug Log:    Shellder/debuglog.txt                            ║
 ║                                                                 ║
 ║  Features:                                                      ║
 ║    • Real-time container monitoring                             ║
@@ -6194,6 +6460,7 @@ def main():
 ║    • SQLite database access                                     ║
 ║    • File browser                                               ║
 ║    • WebSocket for live updates                                 ║
+║    • COMPREHENSIVE DEBUG LOGGING (debuglog.txt)                 ║
 ╚═══════════════════════════════════════════════════════════════╝
     """)
     
@@ -6203,6 +6470,7 @@ def main():
     print(f"Docker client: {'connected' if docker_client else 'not connected'}")
     print(f"WebSocket: {SOCKETIO_AVAILABLE} (mode: {ASYNC_MODE})")
     print(f"psutil: {PSUTIL_AVAILABLE}")
+    print(f"Debug Log: {get_log_path()}")
     print()
     
     # Start stats collector
