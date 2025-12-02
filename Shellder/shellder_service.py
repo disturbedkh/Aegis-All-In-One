@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.13"  # 2025-12-02: Fixed debug_logger imports, null checks for Xilriws
-SHELLDER_BUILD = "20251202-2"  # Date-based build number
+SHELLDER_VERSION = "1.0.14"  # 2025-12-02: Fixed metrics history API error handling
+SHELLDER_BUILD = "20251202-3"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -5233,20 +5233,38 @@ def static_files(filename):
 @app.route('/api/metrics/history/<metric_name>')
 def api_metrics_history(metric_name):
     """Get historical data for a specific metric"""
-    hours = request.args.get('hours', 24, type=int)
-    limit = request.args.get('limit', 500, type=int)
-    
-    # Validate metric name
-    valid_metrics = ['cpu_percent', 'memory_percent', 'memory_used', 'disk_percent']
-    if metric_name not in valid_metrics:
-        return jsonify({'error': f'Invalid metric. Valid: {valid_metrics}'}), 400
-    
-    history = service_db.get_metric_history(metric_name, hours, limit)
-    return jsonify({
-        'metric': metric_name,
-        'hours': hours,
-        'data': history
-    })
+    try:
+        hours = request.args.get('hours', 24, type=int)
+        limit = request.args.get('limit', 500, type=int)
+        
+        # Validate metric name
+        valid_metrics = ['cpu_percent', 'memory_percent', 'memory_used', 'disk_percent']
+        if metric_name not in valid_metrics:
+            return jsonify({'error': f'Invalid metric. Valid: {valid_metrics}'}), 400
+        
+        # Check if service_db is available
+        if not service_db:
+            return jsonify({
+                'metric': metric_name,
+                'hours': hours,
+                'data': [],
+                'error': 'Database not available'
+            })
+        
+        history = service_db.get_metric_history(metric_name, hours, limit)
+        return jsonify({
+            'metric': metric_name,
+            'hours': hours,
+            'data': history if history else []
+        })
+    except Exception as e:
+        error('METRICS', f'Error getting metric history for {metric_name}: {e}')
+        return jsonify({
+            'metric': metric_name,
+            'hours': hours if 'hours' in dir() else 24,
+            'data': [],
+            'error': str(e)
+        })
 
 @app.route('/api/metrics/sparklines')
 def api_metrics_sparklines():

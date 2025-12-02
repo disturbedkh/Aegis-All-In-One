@@ -1070,6 +1070,12 @@ async function loadMetricHistory(metric, hours) {
         
         const data = await fetchAPI(`/api/metrics/history/${metricName}?hours=${hours}`);
         
+        if (data.error) {
+            chartEl.innerHTML = `<div class="no-data">${data.error}<br><small>Metrics are recorded every 30 seconds.</small></div>`;
+            statsEl.innerHTML = '';
+            return;
+        }
+        
         if (!data.data || data.data.length === 0) {
             chartEl.innerHTML = '<div class="no-data">No data available yet. Metrics are recorded every 30 seconds.</div>';
             statsEl.innerHTML = '';
@@ -1134,7 +1140,8 @@ async function loadMetricHistory(metric, hours) {
         event.target?.classList?.add('active');
         
     } catch (e) {
-        chartEl.innerHTML = '<div class="text-danger">Failed to load history</div>';
+        SHELLDER_DEBUG.error('METRICS', `Failed to load history for ${metric}: ${e.message}`);
+        chartEl.innerHTML = `<div class="text-danger">Failed to load history<br><small>Metrics are collected every 30 seconds. If you just started the server, please wait.</small></div>`;
         statsEl.innerHTML = '';
     }
 }
