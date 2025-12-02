@@ -25,7 +25,7 @@ Aegis All-in-One provides a **pre-configured Docker stack** that brings together
 | **Poracle** | Discord & Telegram alert notifications | 6007 |
 | **Grafana** | Performance monitoring & statistics | 6006 |
 | **MariaDB** | Database for all services | 3306 |
-| **Shellder** | 🆕 Web dashboard, live monitoring & management | 5000 |
+| **Shellder** | 🆕 Web dashboard, metrics, device monitor & management | 5000 |
 
 ---
 

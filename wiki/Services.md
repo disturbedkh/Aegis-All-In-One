@@ -88,13 +88,33 @@ See [[Xilriws]] for detailed management.
 
 ### Shellder (Port 5000)
 
-Web dashboard and management service:
-- Live container stats
-- Xilriws monitoring
-- Log aggregation
-- Container control
+Web dashboard and management service providing a unified control center:
+
+| Feature | Description |
+|---------|-------------|
+| **Live Dashboard** | Real-time CPU, RAM, Disk metrics with sparkline graphs |
+| **Container Control** | Start/stop/restart containers with status indicators |
+| **System Services** | Monitor Docker, MariaDB, Nginx, Python status |
+| **Site Availability** | HTTP health checks for all configured sites |
+| **Xilriws Stats** | Live proxy success rates and error tracking |
+| **Metric History** | 10m/1h/6h/24h/7d historical charts |
+| **Log Viewer** | Aggregated logs with search capability |
+| **AI Debug Panel** | Live debug logs, Pull & Restart controls |
+
+![Shellder Dashboard](images/shellder-dashboard.png)
 
 See [[Shellder]] for full documentation.
+
+### Device Monitor (Built into Shellder)
+
+Real-time monitoring integrated into the Shellder dashboard:
+
+| Feature | Description |
+|---------|-------------|
+| **Live Events** | Stream device activity from Rotom/Dragonite |
+| **Crash Detection** | Automatic crash logging with context |
+| **Memory Tracking** | Device memory reports from Rotom |
+| **Cross-Reference** | Correlate events across logs and database |
 
 ---
 

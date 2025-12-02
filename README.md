@@ -69,12 +69,17 @@ Visit **http://localhost:6001** for ReactMap when ready!
 
 | Feature | Description |
 |---------|-------------|
-| 📊 **Live Dashboard** | Real-time container status |
-| 🐳 **Container Control** | Start/stop/restart services |
-| 📈 **Resource Monitoring** | CPU, memory, disk usage |
-| 📋 **Log Viewer** | View and search logs |
-| 📡 **Xilriws Stats** | Live proxy statistics |
-| 🔌 **WebSocket** | Real-time updates |
+| 📊 **Live Dashboard** | Real-time system stats with sparkline graphs |
+| 🐳 **Container Control** | Start/stop/restart with CPU/MEM usage per container |
+| 📈 **Metric History** | Click CPU/RAM/Disk for 10m/1h/6h/24h/7d charts |
+| 🔧 **System Services** | Docker, MariaDB, Nginx, Python status monitoring |
+| 🌐 **Site Availability** | HTTP health checks for all configured sites |
+| 📡 **Xilriws Dashboard** | Live proxy stats, success rates, error tracking |
+| 📱 **Device Monitor** | Real-time device activity with crash tracking |
+| 📁 **File Browser** | View and edit configuration files |
+| 📋 **Log Viewer** | Aggregated logs with search capability |
+| 🔌 **WebSocket** | Instant updates without page refresh |
+| 🤖 **AI Debug Panel** | Live logs, Pull & Restart, version tracking |
 
 ### Starting the Dashboard
 

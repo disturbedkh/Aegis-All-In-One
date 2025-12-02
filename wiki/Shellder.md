@@ -20,12 +20,17 @@ The Shellder service runs as a Docker container providing live monitoring:
 
 | Feature | Description |
 |---------|-------------|
-| **Web Dashboard** | Modern UI at `http://localhost:5000` |
+| **Web Dashboard** | Modern dark-themed UI at `http://localhost:5000` |
 | **Live Container Stats** | Real-time CPU, memory, status for all containers |
+| **System Metrics** | CPU, RAM, Disk usage with historical sparkline graphs |
+| **Metric History Charts** | Click any metric for detailed 10m/1h/6h/24h/7d history |
 | **Xilriws Monitoring** | Live proxy statistics and error tracking |
+| **System Services** | Docker, MariaDB, Nginx, Python status monitoring |
+| **Site Availability** | HTTP health checks for all configured sites |
 | **Log Streaming** | Real-time log aggregation from all services |
 | **WebSocket Updates** | Instant updates without page refresh |
 | **Remote Management** | Start/stop/restart containers from browser |
+| **AI Debug Panel** | Live debug logs, version info, Pull & Restart controls |
 
 ### Starting the Dashboard
 
@@ -46,6 +51,94 @@ sudo bash shellder.sh
 ```
 
 **Access at:** `http://localhost:5000` or `http://<your-ip>:5000`
+
+### Web Dashboard Sections
+
+| Section | Features |
+|---------|----------|
+| **Dashboard** | Overview stats, quick actions, container status, system services |
+| **Containers** | Detailed container management, logs, restart controls |
+| **Devices** | Connected device monitoring (when stack is running) |
+| **Stack Data** | Database statistics and management |
+| **Xilriws** | Proxy statistics, success rates, error tracking |
+| **Statistics** | Historical metrics and performance data |
+| **Nginx & Sites** | Site configuration and availability monitoring |
+| **Files** | Configuration file browser and editor |
+| **Scripts** | Quick access to Shellder shell scripts |
+| **Logs** | Aggregated log viewer with search |
+| **Updates** | Git pull and container image updates |
+
+### Metric History Charts
+
+Click on CPU, RAM, or Disk Usage cards to view detailed history:
+
+- **10m** - Last 10 minutes (20 data points at 30s intervals)
+- **1h** - Last hour
+- **6h** - Last 6 hours
+- **24h** - Last 24 hours
+- **7d** - Last 7 days
+
+Charts show:
+- Current, Average, Min, Max values
+- Interactive bar graph with time axis
+- Local timezone-adjusted timestamps
+
+### AI Debug Panel
+
+The bottom-right panel provides developer tools:
+
+- **Version & Git Commit** - Current Shellder version (e.g., v1.0.24)
+- **Pull & Restart** - One-click update from GitHub and service restart
+- **Git Pull** - Pull latest changes without restart
+- **Restart** - Restart service only
+- **Live Debug Log** - Real-time server logs with auto-refresh toggle
+- **Uptime & PID** - Service health indicators
+
+---
+
+## Device Monitor
+
+Real-time monitoring of connected scanning devices:
+
+| Feature | Description |
+|---------|-------------|
+| **Live Activity** | Stream device events from Rotom/Dragonite logs |
+| **Crash Tracking** | Automatic detection and logging of device crashes |
+| **Cross-Reference** | Correlate crashes with database and log entries |
+| **Memory Tracking** | Monitor device memory usage from Rotom reports |
+
+The Device Monitor parses logs from:
+- **Rotom** - Device connections, disconnections, memory reports
+- **Dragonite** - Scan tasks, completions, errors
+- **Database** - Device registration and status
+
+---
+
+## Recent Updates (v1.0.x)
+
+### Version 1.0.24
+- Fixed chart bar distribution for all time ranges
+- Improved metric history visualization
+
+### Version 1.0.17-1.0.23
+- Added 10-minute quick view for metrics
+- Fixed chart axes (Y=percentage, X=time)
+- Added proper UTC timezone handling
+- Fixed sparkline scaling (100% max for percentages)
+
+### Version 1.0.13-1.0.16
+- Added System Services monitoring (Docker, MariaDB, Nginx, Python)
+- Added Site Availability HTTP health checks
+- Improved error handling and null checks
+- Added parallel service checks with shorter timeouts
+
+### Earlier Versions
+- Added AI Debug Panel with Pull & Restart
+- Added CPU monitoring with sparklines
+- Added Xilriws dashboard with live stats
+- Added File browser and editor
+- Added Device Monitor with crash tracking
+- Comprehensive debug logging system
 
 ---
 
