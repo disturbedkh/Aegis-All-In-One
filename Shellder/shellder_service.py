@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.19"  # 2025-12-02: Fixed SQLite minutes calc, UTC timezone in API
-SHELLDER_BUILD = "20251202-8"  # Date-based build number
+SHELLDER_VERSION = "1.0.20"  # 2025-12-02: Fixed int->round for 5m (4.998->5 not 4)
+SHELLDER_BUILD = "20251202-9"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -3276,7 +3276,8 @@ class ShellderDB:
         try:
             cursor = conn.cursor()
             # Convert to minutes for better SQLite compatibility with fractional values
-            minutes = int(hours * 60)
+            # Use round() to avoid truncation (0.0833 * 60 = 4.998, should be 5 not 4)
+            minutes = round(hours * 60)
             cursor.execute("""
                 SELECT metric_value, recorded_at
                 FROM metrics_history
