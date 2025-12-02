@@ -1046,7 +1046,7 @@ async function showMetricDetail(metric) {
     openModal(titles[metric] || 'Metric History', `
         <div class="metric-detail-modal">
             <div class="metric-time-controls">
-                <button class="btn btn-sm active" onclick="loadMetricHistory('${metric}', 0.0834)">5m</button>
+                <button class="btn btn-sm active" onclick="loadMetricHistory('${metric}', 0.167)">10m</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 1)">1h</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 6)">6h</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 24)">24h</button>
@@ -1059,8 +1059,8 @@ async function showMetricDetail(metric) {
         </div>
     `);
     
-    // Default to 5 minutes for quick feedback
-    loadMetricHistory(metric, 0.0834);
+    // Default to 10 minutes for quick feedback
+    loadMetricHistory(metric, 0.167);
 }
 
 async function loadMetricHistory(metric, hours) {
@@ -1167,8 +1167,8 @@ async function loadMetricHistory(metric, hours) {
         document.querySelectorAll('.metric-time-controls .btn').forEach(b => {
             b.classList.remove('active');
             // Match button by its label
-            const hoursMap = {'5m': 0.0834, '1h': 1, '6h': 6, '24h': 24, '7d': 168};
-            if (Math.abs(hoursMap[b.textContent] - hours) < 0.01) {
+            const hoursMap = {'10m': 0.167, '1h': 1, '6h': 6, '24h': 24, '7d': 168};
+            if (Math.abs(hoursMap[b.textContent] - hours) < 0.02) {
                 b.classList.add('active');
             }
         });

@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.20"  # 2025-12-02: Fixed int->round for 5m (4.998->5 not 4)
-SHELLDER_BUILD = "20251202-9"  # Date-based build number
+SHELLDER_VERSION = "1.0.21"  # 2025-12-02: Changed 5m to 10m for better chart display
+SHELLDER_BUILD = "20251202-10"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
