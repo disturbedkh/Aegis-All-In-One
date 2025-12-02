@@ -7157,13 +7157,13 @@ if SOCKETIO_AVAILABLE:
     @socketio.on('connect')
     def handle_connect():
         """Client connected"""
-        print(f"Client connected: {request.sid}")
+        debug_logger.track_websocket('connect', request.sid)
         emit('connected', {'status': 'connected', 'timestamp': datetime.now().isoformat()})
 
     @socketio.on('disconnect')
     def handle_disconnect():
         """Client disconnected"""
-        print(f"Client disconnected: {request.sid}")
+        debug_logger.track_websocket('disconnect', request.sid)
 
     @socketio.on('subscribe')
     def handle_subscribe(data):

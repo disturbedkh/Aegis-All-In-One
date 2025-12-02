@@ -43,6 +43,22 @@ _lock = threading.Lock()
 _start_time = time.time()
 
 # =============================================================================
+# API ENDPOINT TRACKING (for detecting missing calls)
+# =============================================================================
+
+_api_call_counts = {}  # endpoint -> count
+_api_last_called = {}  # endpoint -> timestamp
+_expected_endpoints = [
+    '/api/status',
+    '/api/services', 
+    '/api/metrics/sparklines',
+    '/api/containers/updates',
+    '/api/sites/check'
+]
+_websocket_connections = {}  # sid -> connection info
+_client_sessions = {}  # IP -> session info
+
+# =============================================================================
 # CORE LOGGING
 # =============================================================================
 
@@ -340,6 +356,10 @@ def log_http_request(request):
     request_id = id(request)
     _request_start_times[request_id] = time.time()
     
+    # Track API calls for statistics (only /api/ paths)
+    if request.path.startswith('/api/'):
+        track_api_call(request.path, request.remote_addr)
+    
     info('HTTP_REQ', f'{request.method} {request.path}', {
         'method': request.method,
         'path': request.path,
@@ -455,8 +475,84 @@ Session: {'FRESH START' if fresh_start else 'CONTINUING'}
     thread = threading.Thread(target=_periodic_state, daemon=True, name='DebugLogger-State')
     thread.start()
 
+def track_api_call(endpoint, remote_addr=None):
+    """Track an API endpoint call for statistics"""
+    global _api_call_counts, _api_last_called, _client_sessions
+    
+    now = time.time()
+    _api_call_counts[endpoint] = _api_call_counts.get(endpoint, 0) + 1
+    _api_last_called[endpoint] = now
+    
+    # Track client sessions
+    if remote_addr:
+        if remote_addr not in _client_sessions:
+            _client_sessions[remote_addr] = {
+                'first_seen': now,
+                'request_count': 0,
+                'endpoints': set()
+            }
+        _client_sessions[remote_addr]['request_count'] += 1
+        _client_sessions[remote_addr]['last_seen'] = now
+        _client_sessions[remote_addr]['endpoints'].add(endpoint)
+
+def track_websocket(event, sid, data=None):
+    """Track WebSocket connection events"""
+    global _websocket_connections
+    
+    now = time.time()
+    if event == 'connect':
+        _websocket_connections[sid] = {
+            'connected_at': now,
+            'messages_sent': 0,
+            'messages_received': 0
+        }
+        info('WEBSOCKET', f'Client connected: {sid}', {'total_connections': len(_websocket_connections)})
+    elif event == 'disconnect':
+        if sid in _websocket_connections:
+            duration = now - _websocket_connections[sid]['connected_at']
+            info('WEBSOCKET', f'Client disconnected: {sid}', {
+                'duration_s': round(duration, 1),
+                'messages_sent': _websocket_connections[sid]['messages_sent'],
+                'messages_received': _websocket_connections[sid]['messages_received']
+            })
+            del _websocket_connections[sid]
+    elif event == 'message':
+        if sid in _websocket_connections:
+            _websocket_connections[sid]['messages_received'] += 1
+
+def get_missing_endpoints():
+    """Check which expected endpoints haven't been called recently"""
+    now = time.time()
+    missing = []
+    stale = []  # Called but not recently (>5 minutes)
+    
+    for endpoint in _expected_endpoints:
+        if endpoint not in _api_last_called:
+            missing.append(endpoint)
+        elif now - _api_last_called[endpoint] > 300:  # 5 minutes
+            stale.append({
+                'endpoint': endpoint,
+                'last_called_ago_s': round(now - _api_last_called[endpoint], 1)
+            })
+    
+    return {'never_called': missing, 'stale': stale}
+
+def get_client_summary():
+    """Get summary of connected clients"""
+    now = time.time()
+    active = []
+    for ip, session in _client_sessions.items():
+        if now - session.get('last_seen', 0) < 60:  # Active in last minute
+            active.append({
+                'ip': ip,
+                'requests': session['request_count'],
+                'endpoints': list(session['endpoints'])[:5],
+                'session_duration_s': round(now - session['first_seen'], 1)
+            })
+    return active
+
 def log_summary():
-    """Log a summary of recent activity"""
+    """Log a comprehensive summary of recent activity"""
     with _lock:
         recent = list(_log_buffer)[-500:]
     
@@ -476,13 +572,39 @@ def log_summary():
         elif '[API' in entry: category_counts['API'] = category_counts.get('API', 0) + 1
         elif '[CLIENT' in entry: category_counts['CLIENT'] = category_counts.get('CLIENT', 0) + 1
     
-    info('SUMMARY', f'Last {len(recent)} log entries summary', {
+    # Check for missing endpoints
+    missing = get_missing_endpoints()
+    
+    # Get client summary
+    clients = get_client_summary()
+    
+    # Top endpoints by call count
+    top_endpoints = sorted(_api_call_counts.items(), key=lambda x: x[1], reverse=True)[:10]
+    
+    info('SUMMARY', f'=== PERIODIC SUMMARY ({len(recent)} recent entries) ===', {
         'by_level': level_counts,
         'by_category': category_counts,
-        'total_entries': len(_log_buffer),
-        'log_file_exists': DEBUG_LOG_PATH.exists(),
-        'log_file_size_kb': round(DEBUG_LOG_PATH.stat().st_size / 1024, 1) if DEBUG_LOG_PATH.exists() else 0
+        'total_buffer_entries': len(_log_buffer),
+        'log_file_size_kb': round(DEBUG_LOG_PATH.stat().st_size / 1024, 1) if DEBUG_LOG_PATH.exists() else 0,
+        'uptime_minutes': round((time.time() - _start_time) / 60, 1)
     })
+    
+    # Log endpoint stats
+    info('ENDPOINTS', 'API endpoint call counts', {
+        'top_10': dict(top_endpoints),
+        'total_unique': len(_api_call_counts)
+    })
+    
+    # Log missing/stale endpoints (important for debugging!)
+    if missing['never_called'] or missing['stale']:
+        warn('ENDPOINTS', '⚠️ Expected endpoints not called', missing)
+    
+    # Log active clients
+    if clients:
+        info('CLIENTS', f'{len(clients)} active client(s)', {'clients': clients})
+    
+    # Log WebSocket status
+    info('WEBSOCKET', f'{len(_websocket_connections)} active WebSocket connection(s)')
 
 def get_recent_logs(count=100):
     """Get recent log entries from memory buffer"""
