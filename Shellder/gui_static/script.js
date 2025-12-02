@@ -853,7 +853,8 @@ function updateDashboard(data) {
         
         SHELLDER_DEBUG.info('DASHBOARD', 'updateDashboard complete');
     } catch (e) {
-        SHELLDER_DEBUG.error('DASHBOARD', 'Error in updateDashboard', { error: e.message, stack: e.stack });
+        SHELLDER_DEBUG.error('DASHBOARD', `Error in updateDashboard: ${e.message}`, { stack: e.stack });
+        console.error('[DASHBOARD ERROR]', e);
     }
 }
 
