@@ -2124,7 +2124,7 @@ showPage = function(page) {
 // =============================================================================
 
 let currentCrashId = null;
-let currentLogContainer = null;
+// Note: currentLogContainer is declared above in CONTAINER LOG STREAMING section
 let currentLogLine = null;
 
 async function loadDevicesPage() {
