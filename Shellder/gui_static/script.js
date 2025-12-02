@@ -25,7 +25,8 @@ const RequestManager = {
         '/api/status': 5000,        // Max once per 5s
         '/api/metrics/sparklines': 10000,  // Max once per 10s
         '/api/xilriws/stats': 5000,  // Max once per 5s
-        '/api/services': 30000       // Max once per 30s (services rarely change)
+        '/api/services': 30000,      // Max once per 30s (services rarely change)
+        '/api/containers/updates': 60000  // Max once per 60s (image updates are slow to check)
     },
     callCounts: new Map(),   // Track call counts for logging
     
@@ -830,6 +831,9 @@ function updateDashboard(data) {
     
     // Load system services status
     loadSystemServices();
+    
+    // Check for container image updates (throttled - runs every 60s max)
+    loadContainerUpdates();
 }
 
 // =============================================================================
@@ -1371,6 +1375,9 @@ function updateServiceStatus(services) {
     `).join('');
 }
 
+// Store container update info globally
+let containerUpdates = {};
+
 function updateContainerList(containers) {
     const listEl = document.getElementById('containerList');
     
@@ -1379,19 +1386,60 @@ function updateContainerList(containers) {
         return;
     }
     
-    listEl.innerHTML = containers.map(c => `
-        <div class="container-item">
-            <div class="container-status ${c.status || c.state}"></div>
-            <div class="container-name">${c.name}</div>
-            <div class="container-state">${c.status || c.state}</div>
-            ${c.cpu_percent !== undefined ? `
-                <div class="container-stats">
-                    <span title="CPU">${c.cpu_percent}%</span>
-                    <span title="Memory">${c.memory_percent || 0}%</span>
-                </div>
-            ` : ''}
-        </div>
-    `).join('');
+    listEl.innerHTML = containers.map(c => {
+        const updateInfo = containerUpdates[c.name];
+        const hasUpdate = updateInfo?.update_available || updateInfo?.may_have_update;
+        const updateBadge = hasUpdate ? 
+            `<span class="update-badge" title="${updateInfo?.note || 'Update may be available'}">⬆️</span>` : '';
+        
+        return `
+            <div class="container-item ${hasUpdate ? 'has-update' : ''}">
+                <div class="container-status ${c.status || c.state}"></div>
+                <div class="container-name">${c.name} ${updateBadge}</div>
+                <div class="container-state">${c.status || c.state}</div>
+                ${c.cpu_percent !== undefined ? `
+                    <div class="container-stats">
+                        <span title="CPU">${c.cpu_percent}%</span>
+                        <span title="Memory">${c.memory_percent || 0}%</span>
+                    </div>
+                ` : ''}
+            </div>
+        `;
+    }).join('');
+}
+
+async function loadContainerUpdates() {
+    try {
+        const data = await fetchAPI('/api/containers/updates');
+        if (data._throttled || data.error) return;
+        
+        containerUpdates = data.updates || {};
+        
+        // Update the badge on the Docker Containers header
+        const available = data.available || 0;
+        const headerEl = document.querySelector('#page-dashboard .card-header h2');
+        if (headerEl && headerEl.textContent.includes('Docker')) {
+            // Remove old badge if exists
+            const oldBadge = headerEl.querySelector('.update-count');
+            if (oldBadge) oldBadge.remove();
+            
+            if (available > 0) {
+                const badge = document.createElement('span');
+                badge.className = 'update-count';
+                badge.title = `${available} container(s) may have updates available`;
+                badge.textContent = `${available} ⬆️`;
+                headerEl.appendChild(badge);
+            }
+        }
+        
+        // Re-render container list with update info
+        const statusData = await fetchAPI('/api/status', { force: true });
+        if (statusData && statusData.containers) {
+            updateContainerList(statusData.containers.list);
+        }
+    } catch (e) {
+        // Updates check is optional, don't show errors
+    }
 }
 
 function updateContainerDetailList(containers) {
@@ -1403,29 +1451,63 @@ function updateContainerDetailList(containers) {
         return;
     }
     
-    listEl.innerHTML = containers.map(c => `
-        <div class="container-detail">
-            <div class="container-status ${c.status || c.state}"></div>
-            <div class="container-info">
-                <div class="container-name">${c.name}</div>
-                <div class="container-status-text">${c.status || c.state}</div>
-                ${c.cpu_percent !== undefined ? `
-                    <div class="container-metrics">
-                        CPU: ${c.cpu_percent}% | Memory: ${c.memory_percent || 0}%
-                    </div>
-                ` : ''}
+    listEl.innerHTML = containers.map(c => {
+        const updateInfo = containerUpdates[c.name];
+        const hasUpdate = updateInfo?.update_available || updateInfo?.may_have_update;
+        const imageInfo = c.image ? `<span class="container-image" title="${c.image}">${c.image.split(':')[0].split('/').pop()}</span>` : '';
+        const updateBadge = hasUpdate ? 
+            `<span class="update-available" title="${updateInfo?.note || 'Update may be available'}">⬆️ Update</span>` : '';
+        
+        return `
+            <div class="container-detail ${hasUpdate ? 'has-update' : ''}">
+                <div class="container-status ${c.status || c.state}"></div>
+                <div class="container-info">
+                    <div class="container-name">${c.name} ${updateBadge}</div>
+                    <div class="container-status-text">${c.status || c.state} ${imageInfo}</div>
+                    ${c.cpu_percent !== undefined ? `
+                        <div class="container-metrics">
+                            CPU: ${c.cpu_percent}% | Memory: ${c.memory_percent || 0}%
+                        </div>
+                    ` : ''}
+                </div>
+                <div class="container-actions">
+                    ${(c.status || c.state) === 'running' ? `
+                        <button class="btn btn-sm" onclick="containerAction('${c.name}', 'restart')" title="Restart">🔄</button>
+                        <button class="btn btn-sm btn-danger" onclick="containerAction('${c.name}', 'stop')" title="Stop">⏹️</button>
+                    ` : `
+                        <button class="btn btn-sm btn-success" onclick="containerAction('${c.name}', 'start')" title="Start">▶️</button>
+                    `}
+                    <button class="btn btn-sm" onclick="viewContainerLogs('${c.name}')" title="View Logs">📋</button>
+                    <button class="btn btn-sm" onclick="checkContainerUpdate('${c.name}')" title="Check for Updates">⬆️</button>
+                </div>
             </div>
-            <div class="container-actions">
-                ${(c.status || c.state) === 'running' ? `
-                    <button class="btn btn-sm" onclick="containerAction('${c.name}', 'restart')">🔄</button>
-                    <button class="btn btn-sm btn-danger" onclick="containerAction('${c.name}', 'stop')">⏹️</button>
-                ` : `
-                    <button class="btn btn-sm btn-success" onclick="containerAction('${c.name}', 'start')">▶️</button>
-                `}
-                <button class="btn btn-sm" onclick="viewContainerLogs('${c.name}')">📋</button>
-            </div>
-        </div>
-    `).join('');
+        `;
+    }).join('');
+}
+
+async function checkContainerUpdate(name) {
+    showToast(`Checking for updates: ${name}...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/containers/check-update/${name}`, { 
+            method: 'POST',
+            force: true 
+        });
+        
+        if (result.success) {
+            if (result.update_available) {
+                showToast(`✨ New image available for ${name}! Restart container to apply.`, 'success');
+            } else {
+                showToast(`✓ ${name} is up to date`, 'success');
+            }
+            // Refresh update info
+            await loadContainerUpdates();
+        } else {
+            showToast(`Failed to check: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error checking updates: ${e.message}`, 'error');
+    }
 }
 
 function updateConnectionStatus(connected, mode = '') {

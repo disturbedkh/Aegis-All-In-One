@@ -628,6 +628,27 @@ html, body {
     border-color: var(--accent-primary);
 }
 
+.container-item.has-update {
+    border-color: var(--warning);
+    background: linear-gradient(135deg, var(--bg-tertiary) 0%, rgba(245, 158, 11, 0.1) 100%);
+}
+
+.update-badge {
+    font-size: 12px;
+    margin-left: 6px;
+    animation: pulse 2s ease-in-out infinite;
+}
+
+.update-count {
+    margin-left: 10px;
+    padding: 2px 8px;
+    background: var(--warning);
+    color: #000;
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    font-weight: 600;
+}
+
 .container-status {
     width: 10px;
     height: 10px;
@@ -685,6 +706,31 @@ html, body {
 .container-detail .container-status-text {
     font-size: 13px;
     color: var(--text-muted);
+}
+
+.container-detail.has-update {
+    border-color: var(--warning);
+    background: linear-gradient(135deg, var(--bg-tertiary) 0%, rgba(245, 158, 11, 0.08) 100%);
+}
+
+.container-image {
+    margin-left: 8px;
+    padding: 2px 6px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 11px;
+}
+
+.update-available {
+    margin-left: 8px;
+    padding: 2px 8px;
+    background: var(--warning);
+    color: #000;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+    animation: pulse 2s ease-in-out infinite;
 }
 
 .container-actions {

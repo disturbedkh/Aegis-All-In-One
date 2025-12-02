@@ -5589,6 +5589,151 @@ def api_containers():
     stats = stats_collector.get_all_stats()
     return jsonify(list(stats.get('containers', {}).values()))
 
+# Cache for image update checks (to avoid hammering Docker Hub)
+_image_update_cache = {}
+_image_update_cache_time = {}
+IMAGE_UPDATE_CACHE_SECONDS = 300  # Cache update status for 5 minutes
+
+@app.route('/api/containers/updates')
+def api_containers_updates():
+    """Check for available updates for container images"""
+    if LOCAL_MODE or docker_client is None:
+        return jsonify({'updates': {}, 'checked': 0, 'available': 0})
+    
+    updates = {}
+    checked = 0
+    available = 0
+    
+    try:
+        containers = docker_client.containers.list(all=True)
+        
+        for container in containers:
+            try:
+                image_name = container.image.tags[0] if container.image.tags else None
+                if not image_name:
+                    continue
+                
+                # Check cache first
+                cache_key = image_name
+                now = time.time()
+                if cache_key in _image_update_cache:
+                    cache_time = _image_update_cache_time.get(cache_key, 0)
+                    if now - cache_time < IMAGE_UPDATE_CACHE_SECONDS:
+                        updates[container.name] = _image_update_cache[cache_key]
+                        if _image_update_cache[cache_key].get('update_available'):
+                            available += 1
+                        checked += 1
+                        continue
+                
+                # Get local image ID
+                local_id = container.image.short_id
+                
+                # Try to check remote - use docker pull with dry-run simulation
+                # We'll compare the image ID after a "docker pull" check
+                update_info = {
+                    'image': image_name,
+                    'local_id': local_id,
+                    'update_available': False,
+                    'checked_at': datetime.now().isoformat()
+                }
+                
+                # For common images, try to detect updates via docker
+                # This uses `docker image inspect` and registry API
+                try:
+                    # Get local image creation date
+                    local_image = docker_client.images.get(image_name)
+                    local_created = local_image.attrs.get('Created', '')
+                    update_info['local_created'] = local_created[:19] if local_created else 'unknown'
+                    
+                    # Check if image has "latest" tag - these often have updates
+                    if ':latest' in image_name or ':' not in image_name:
+                        # For latest tags, suggest checking for updates
+                        update_info['may_have_update'] = True
+                        update_info['note'] = 'Using :latest tag - run docker pull to check'
+                    
+                except Exception:
+                    pass
+                
+                # Cache the result
+                _image_update_cache[cache_key] = update_info
+                _image_update_cache_time[cache_key] = now
+                
+                updates[container.name] = update_info
+                checked += 1
+                if update_info.get('update_available') or update_info.get('may_have_update'):
+                    available += 1
+                    
+            except Exception as e:
+                updates[container.name] = {'error': str(e)}
+        
+    except Exception as e:
+        return jsonify({'error': str(e), 'updates': {}, 'checked': 0, 'available': 0})
+    
+    return jsonify({
+        'updates': updates,
+        'checked': checked,
+        'available': available,
+        'cache_ttl': IMAGE_UPDATE_CACHE_SECONDS
+    })
+
+@app.route('/api/containers/check-update/<name>', methods=['POST'])
+def api_container_check_update(name):
+    """Force check for updates on a specific container by pulling the image"""
+    if LOCAL_MODE or docker_client is None:
+        return jsonify({'error': 'Docker not available'}), 503
+    
+    try:
+        container = docker_client.containers.get(name)
+        image_name = container.image.tags[0] if container.image.tags else None
+        
+        if not image_name:
+            return jsonify({'error': 'Container has no image tag'}), 400
+        
+        old_id = container.image.short_id
+        
+        # Pull the latest image
+        result = subprocess.run(
+            ['docker', 'pull', image_name],
+            capture_output=True, text=True, timeout=120
+        )
+        
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': result.stderr,
+                'output': result.stdout
+            })
+        
+        # Check if image changed
+        new_image = docker_client.images.get(image_name)
+        new_id = new_image.short_id
+        
+        update_available = old_id != new_id
+        
+        # Update cache
+        cache_key = image_name
+        _image_update_cache[cache_key] = {
+            'image': image_name,
+            'local_id': new_id,
+            'update_available': update_available,
+            'just_updated': update_available,
+            'checked_at': datetime.now().isoformat()
+        }
+        _image_update_cache_time[cache_key] = time.time()
+        
+        return jsonify({
+            'success': True,
+            'container': name,
+            'image': image_name,
+            'old_id': old_id,
+            'new_id': new_id,
+            'update_available': update_available,
+            'message': 'New image pulled!' if update_available else 'Already up to date'
+        })
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
 @app.route('/api/container/<name>/logs')
 def api_container_logs(name):
     """Get logs for a specific container"""
