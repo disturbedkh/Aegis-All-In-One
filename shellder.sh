@@ -763,6 +763,19 @@ shellder_gui_menu() {
         case $choice in
             1)
                 echo ""
+                # First, stop any local instance that might be using port 5000
+                print_info "Checking for existing Shellder processes..."
+                if command -v fuser &>/dev/null; then
+                    fuser -k 5000/tcp 2>/dev/null && print_warning "Killed existing process on port 5000"
+                elif command -v lsof &>/dev/null; then
+                    local pids=$(lsof -t -i:5000 2>/dev/null)
+                    if [ -n "$pids" ]; then
+                        echo "$pids" | xargs -r kill -9 2>/dev/null
+                        print_warning "Killed existing process on port 5000"
+                    fi
+                fi
+                sleep 1
+                
                 print_info "Starting Shellder via Docker..."
                 docker compose up -d shellder
                 if [ $? -eq 0 ]; then
@@ -771,6 +784,7 @@ shellder_gui_menu() {
                     echo -e "  Access at: ${CYAN}http://localhost:5000${NC}"
                 else
                     print_error "Failed to start Shellder container"
+                    print_info "Try: ./shellderGUI.sh --stop  then try again"
                 fi
                 press_enter
                 ;;

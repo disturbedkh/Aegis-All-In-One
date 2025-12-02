@@ -340,7 +340,7 @@ stop_server() {
         stop_docker
     fi
     
-    # Stop local process if running
+    # Stop local process if running via PID file
     if [ -f "$PID_FILE" ]; then
         local pid=$(cat "$PID_FILE")
         if ps -p "$pid" > /dev/null 2>&1; then
@@ -349,17 +349,43 @@ stop_server() {
             if ps -p "$pid" > /dev/null 2>&1; then
                 kill -9 "$pid" 2>/dev/null
             fi
-            echo -e "${GREEN}✓ Local server stopped${NC}"
+            echo -e "${GREEN}✓ Local server stopped (PID: $pid)${NC}"
         fi
         rm -f "$PID_FILE"
     fi
     
-    # Also try to kill by port
-    if command -v fuser &> /dev/null; then
-        fuser -k $PORT/tcp 2>/dev/null
-    fi
+    # Kill ANY process using port 5000 (catches orphaned processes)
+    kill_port_process
     
     echo -e "${GREEN}✓ Shellder stopped${NC}"
+}
+
+kill_port_process() {
+    # Try multiple methods to kill anything on the port
+    
+    # Method 1: fuser (most reliable on Linux)
+    if command -v fuser &> /dev/null; then
+        fuser -k $PORT/tcp 2>/dev/null && echo -e "${DIM}  Killed process via fuser${NC}"
+    fi
+    
+    # Method 2: lsof + kill (backup)
+    if command -v lsof &> /dev/null; then
+        local pids=$(lsof -t -i:$PORT 2>/dev/null)
+        if [ -n "$pids" ]; then
+            echo "$pids" | xargs -r kill -9 2>/dev/null && echo -e "${DIM}  Killed process via lsof${NC}"
+        fi
+    fi
+    
+    # Method 3: ss + kill (another backup)
+    if command -v ss &> /dev/null; then
+        local pid=$(ss -tlnp 2>/dev/null | grep ":$PORT " | grep -oP 'pid=\K\d+' | head -1)
+        if [ -n "$pid" ]; then
+            kill -9 "$pid" 2>/dev/null && echo -e "${DIM}  Killed process via ss${NC}"
+        fi
+    fi
+    
+    # Small delay to let OS release the port
+    sleep 0.5
 }
 
 show_status() {
