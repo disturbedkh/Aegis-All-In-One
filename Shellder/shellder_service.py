@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.14"  # 2025-12-02: Fixed metrics history API error handling
-SHELLDER_BUILD = "20251202-3"  # Date-based build number
+SHELLDER_VERSION = "1.0.15"  # 2025-12-02: Fixed service_db -> shellder_db variable name
+SHELLDER_BUILD = "20251202-4"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -4158,7 +4158,7 @@ class StatsCollector:
                 metrics['disk_percent'] = stats['disk'].get('percent', 0)
             
             if metrics:
-                service_db.record_metrics_batch(metrics)
+                shellder_db.record_metrics_batch(metrics)
         except Exception as e:
             print(f"Error recording system metrics: {e}")
     
@@ -4169,7 +4169,7 @@ class StatsCollector:
                 # Wait 1 hour between cleanups
                 time.sleep(3600)
                 # Keep 7 days of metrics
-                service_db.cleanup_old_metrics(days=7)
+                shellder_db.cleanup_old_metrics(days=7)
             except Exception as e:
                 print(f"Error in metrics cleanup: {e}")
     
@@ -5242,8 +5242,8 @@ def api_metrics_history(metric_name):
         if metric_name not in valid_metrics:
             return jsonify({'error': f'Invalid metric. Valid: {valid_metrics}'}), 400
         
-        # Check if service_db is available
-        if not service_db:
+        # Check if shellder_db is available
+        if not shellder_db:
             return jsonify({
                 'metric': metric_name,
                 'hours': hours,
@@ -5251,7 +5251,7 @@ def api_metrics_history(metric_name):
                 'error': 'Database not available'
             })
         
-        history = service_db.get_metric_history(metric_name, hours, limit)
+        history = shellder_db.get_metric_history(metric_name, hours, limit)
         return jsonify({
             'metric': metric_name,
             'hours': hours,
@@ -5273,9 +5273,9 @@ def api_metrics_sparklines():
         points = request.args.get('points', 20, type=int)
         
         return jsonify({
-            'cpu': service_db.get_metric_sparkline('cpu_percent', points) if service_db else [],
-            'memory': service_db.get_metric_sparkline('memory_percent', points) if service_db else [],
-            'disk': service_db.get_metric_sparkline('disk_percent', points) if service_db else []
+            'cpu': shellder_db.get_metric_sparkline('cpu_percent', points) if shellder_db else [],
+            'memory': shellder_db.get_metric_sparkline('memory_percent', points) if shellder_db else [],
+            'disk': shellder_db.get_metric_sparkline('disk_percent', points) if shellder_db else []
         })
     except Exception as e:
         error('METRICS', f'Error getting sparklines: {e}')
@@ -5289,9 +5289,9 @@ def api_metrics_current():
     
     # Get sparklines
     sparklines = {
-        'cpu': service_db.get_metric_sparkline('cpu_percent', 20),
-        'memory': service_db.get_metric_sparkline('memory_percent', 20),
-        'disk': service_db.get_metric_sparkline('disk_percent', 20)
+        'cpu': shellder_db.get_metric_sparkline('cpu_percent', 20),
+        'memory': shellder_db.get_metric_sparkline('memory_percent', 20),
+        'disk': shellder_db.get_metric_sparkline('disk_percent', 20)
     }
     
     return jsonify({
