@@ -5831,22 +5831,545 @@ def api_xilriws_live():
 @app.route('/api/xilriws/proxies')
 def api_xilriws_proxies():
     """Get proxy list info"""
-    proxy_file = AEGIS_ROOT / 'unown' / 'proxies.txt'
-    if not proxy_file.exists():
-        return jsonify({'exists': False, 'count': 0, 'proxies': []})
+    # Check multiple possible locations for proxy file
+    proxy_locations = [
+        AEGIS_ROOT / 'xilriws' / 'proxies.txt',
+        AEGIS_ROOT / 'unown' / 'proxies.txt',
+    ]
+    
+    proxy_file = None
+    for loc in proxy_locations:
+        if loc.exists():
+            proxy_file = loc
+            break
+    
+    if not proxy_file:
+        return jsonify({'exists': False, 'count': 0, 'proxies': [], 'content': '', 'file': str(proxy_locations[0])})
     
     try:
         with open(proxy_file, 'r') as f:
-            lines = [l.strip() for l in f.readlines() if l.strip() and not l.startswith('#')]
+            content = f.read()
+            lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('#')]
         
         return jsonify({
             'exists': True,
             'count': len(lines),
-            'sample': lines[:10] if len(lines) > 10 else lines,
+            'proxies': lines,
+            'content': content,
             'file': str(proxy_file)
         })
     except Exception as e:
         return jsonify({'exists': False, 'error': str(e)})
+
+@app.route('/api/xilriws/proxies', methods=['POST'])
+def api_xilriws_proxies_save():
+    """Save proxy list"""
+    data = request.get_json()
+    content = data.get('content', '')
+    
+    # Check for proxy file location
+    proxy_file = AEGIS_ROOT / 'xilriws' / 'proxies.txt'
+    if not proxy_file.parent.exists():
+        proxy_file = AEGIS_ROOT / 'unown' / 'proxies.txt'
+    
+    try:
+        with open(proxy_file, 'w') as f:
+            f.write(content)
+        
+        lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('#')]
+        return jsonify({
+            'success': True,
+            'count': len(lines),
+            'file': str(proxy_file)
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/xilriws/container/<action>', methods=['POST'])
+def api_xilriws_container_action(action):
+    """Control Xilriws container"""
+    if action not in ['start', 'stop', 'restart']:
+        return jsonify({'success': False, 'error': 'Invalid action'})
+    
+    try:
+        if docker_client:
+            container = docker_client.containers.get('xilriws')
+            if action == 'start':
+                container.start()
+            elif action == 'stop':
+                container.stop()
+            elif action == 'restart':
+                container.restart()
+            return jsonify({'success': True, 'action': action})
+        else:
+            # Fallback to subprocess
+            result = subprocess.run(
+                ['docker', action, 'xilriws'],
+                capture_output=True, text=True, timeout=60
+            )
+            return jsonify({
+                'success': result.returncode == 0,
+                'output': result.stdout + result.stderr
+            })
+    except docker.errors.NotFound:
+        return jsonify({'success': False, 'error': 'Xilriws container not found'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/xilriws/status')
+def api_xilriws_container_status():
+    """Get Xilriws container status"""
+    try:
+        if docker_client:
+            container = docker_client.containers.get('xilriws')
+            return jsonify({
+                'running': container.status == 'running',
+                'status': container.status,
+                'name': container.name
+            })
+        else:
+            result = subprocess.run(
+                ['docker', 'inspect', '-f', '{{.State.Status}}', 'xilriws'],
+                capture_output=True, text=True, timeout=10
+            )
+            status = result.stdout.strip()
+            return jsonify({
+                'running': status == 'running',
+                'status': status or 'not found'
+            })
+    except docker.errors.NotFound:
+        return jsonify({'running': False, 'status': 'not found'})
+    except Exception as e:
+        return jsonify({'running': False, 'status': 'error', 'error': str(e)})
+
+# =============================================================================
+# NGINX MANAGEMENT ENDPOINTS
+# =============================================================================
+
+@app.route('/api/nginx/status')
+def api_nginx_status():
+    """Get Nginx service status"""
+    try:
+        result = subprocess.run(
+            ['systemctl', 'is-active', 'nginx'],
+            capture_output=True, text=True, timeout=10
+        )
+        status = result.stdout.strip()
+        
+        # Get additional info
+        version_result = subprocess.run(
+            ['nginx', '-v'],
+            capture_output=True, text=True, timeout=5
+        )
+        version = version_result.stderr.strip() if version_result.returncode == 0 else 'Unknown'
+        
+        return jsonify({
+            'running': status == 'active',
+            'status': status,
+            'version': version
+        })
+    except Exception as e:
+        return jsonify({'running': False, 'status': 'error', 'error': str(e)})
+
+@app.route('/api/nginx/<action>', methods=['POST'])
+def api_nginx_action(action):
+    """Control Nginx service"""
+    action_map = {
+        'start': ['sudo', 'systemctl', 'start', 'nginx'],
+        'stop': ['sudo', 'systemctl', 'stop', 'nginx'],
+        'restart': ['sudo', 'systemctl', 'restart', 'nginx'],
+        'reload': ['sudo', 'systemctl', 'reload', 'nginx'],
+        'test': ['sudo', 'nginx', '-t']
+    }
+    
+    if action not in action_map:
+        return jsonify({'success': False, 'error': 'Invalid action'})
+    
+    try:
+        result = subprocess.run(
+            action_map[action],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/nginx/sites')
+def api_nginx_sites():
+    """Get list of nginx sites"""
+    sites_enabled = Path('/etc/nginx/sites-enabled')
+    sites_available = Path('/etc/nginx/sites-available')
+    
+    enabled = []
+    available = []
+    
+    try:
+        if sites_enabled.exists():
+            for site in sites_enabled.iterdir():
+                if site.name != 'default' or True:  # Include all
+                    enabled.append({
+                        'name': site.name,
+                        'is_symlink': site.is_symlink(),
+                        'target': str(site.resolve()) if site.is_symlink() else None
+                    })
+        
+        if sites_available.exists():
+            enabled_names = {s['name'] for s in enabled}
+            for site in sites_available.iterdir():
+                available.append({
+                    'name': site.name,
+                    'enabled': site.name in enabled_names
+                })
+        
+        # Count SSL certs
+        ssl_certs = 0
+        letsencrypt = Path('/etc/letsencrypt/live')
+        if letsencrypt.exists():
+            ssl_certs = len([d for d in letsencrypt.iterdir() if d.is_dir()])
+        
+        return jsonify({
+            'enabled': enabled,
+            'available': available,
+            'enabled_count': len(enabled),
+            'available_count': len(available),
+            'ssl_certs': ssl_certs
+        })
+    except Exception as e:
+        return jsonify({'error': str(e), 'enabled': [], 'available': []})
+
+@app.route('/api/nginx/site/<name>')
+def api_nginx_site_config(name):
+    """Get site configuration"""
+    # Try sites-enabled first, then sites-available
+    for path in [Path('/etc/nginx/sites-enabled') / name, Path('/etc/nginx/sites-available') / name]:
+        if path.exists():
+            try:
+                # Resolve symlinks
+                actual_path = path.resolve()
+                with open(actual_path, 'r') as f:
+                    return jsonify({
+                        'name': name,
+                        'content': f.read(),
+                        'path': str(actual_path),
+                        'enabled': 'sites-enabled' in str(path)
+                    })
+            except Exception as e:
+                return jsonify({'error': str(e)})
+    
+    return jsonify({'error': 'Site not found'})
+
+@app.route('/api/nginx/site/<name>', methods=['POST'])
+def api_nginx_site_save(name):
+    """Save site configuration"""
+    data = request.get_json()
+    content = data.get('content', '')
+    
+    site_path = Path('/etc/nginx/sites-available') / name
+    
+    try:
+        # Use sudo to write file
+        result = subprocess.run(
+            ['sudo', 'tee', str(site_path)],
+            input=content,
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'success': False, 'error': result.stderr})
+        
+        return jsonify({'success': True, 'path': str(site_path)})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/nginx/site/<name>/enable', methods=['POST'])
+def api_nginx_site_enable(name):
+    """Enable a site (create symlink)"""
+    available = Path('/etc/nginx/sites-available') / name
+    enabled = Path('/etc/nginx/sites-enabled') / name
+    
+    if not available.exists():
+        return jsonify({'success': False, 'error': 'Site not found in sites-available'})
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'ln', '-sf', str(available), str(enabled)],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({'success': result.returncode == 0, 'output': result.stderr})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/nginx/site/<name>/disable', methods=['POST'])
+def api_nginx_site_disable(name):
+    """Disable a site (remove symlink)"""
+    enabled = Path('/etc/nginx/sites-enabled') / name
+    
+    if not enabled.exists():
+        return jsonify({'success': False, 'error': 'Site not enabled'})
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'rm', str(enabled)],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({'success': result.returncode == 0, 'output': result.stderr})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/nginx/logs')
+def api_nginx_logs():
+    """Get nginx error logs"""
+    lines = request.args.get('lines', 100, type=int)
+    log_path = Path('/var/log/nginx/error.log')
+    
+    if not log_path.exists():
+        return jsonify({'logs': 'Nginx error log not found', 'lines': 0})
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'tail', '-n', str(lines), str(log_path)],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({'logs': result.stdout, 'lines': lines})
+    except Exception as e:
+        return jsonify({'logs': f'Error reading logs: {e}', 'lines': 0})
+
+@app.route('/api/nginx/setup', methods=['POST'])
+def api_nginx_setup():
+    """Run nginx setup for a domain"""
+    data = request.get_json()
+    domain = data.get('domain')
+    email = data.get('email')
+    service = data.get('service', 'reactmap:6001')
+    custom_port = data.get('custom_port')
+    
+    if not domain:
+        return jsonify({'success': False, 'error': 'Domain is required'})
+    
+    # Parse service
+    if service == 'custom' and custom_port:
+        port = custom_port
+    else:
+        port = service.split(':')[-1] if ':' in service else '6001'
+    
+    # Generate nginx config
+    config = f"""server {{
+    listen 80;
+    server_name {domain};
+    
+    location / {{
+        proxy_pass http://localhost:{port};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }}
+}}
+"""
+    
+    try:
+        # Save config
+        site_path = f'/etc/nginx/sites-available/{domain}'
+        result = subprocess.run(
+            ['sudo', 'tee', site_path],
+            input=config,
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'success': False, 'error': f'Failed to save config: {result.stderr}'})
+        
+        # Enable site
+        subprocess.run(
+            ['sudo', 'ln', '-sf', site_path, f'/etc/nginx/sites-enabled/{domain}'],
+            capture_output=True, timeout=10
+        )
+        
+        # Test config
+        test_result = subprocess.run(
+            ['sudo', 'nginx', '-t'],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if test_result.returncode != 0:
+            return jsonify({
+                'success': False, 
+                'error': f'Nginx config test failed: {test_result.stderr}',
+                'stage': 'test'
+            })
+        
+        # Reload nginx
+        subprocess.run(['sudo', 'systemctl', 'reload', 'nginx'], timeout=10)
+        
+        # Try to get SSL cert if email provided
+        ssl_output = ''
+        if email:
+            ssl_result = subprocess.run(
+                ['sudo', 'certbot', '--nginx', '-d', domain, '--non-interactive', 
+                 '--agree-tos', '-m', email, '--redirect'],
+                capture_output=True, text=True, timeout=120
+            )
+            ssl_output = ssl_result.stdout + ssl_result.stderr
+            if ssl_result.returncode != 0:
+                return jsonify({
+                    'success': True,
+                    'warning': 'Site configured but SSL failed',
+                    'ssl_output': ssl_output
+                })
+        
+        return jsonify({
+            'success': True,
+            'domain': domain,
+            'port': port,
+            'ssl': bool(email),
+            'ssl_output': ssl_output
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+# =============================================================================
+# SITE AVAILABILITY CHECK
+# =============================================================================
+
+@app.route('/api/sites/check')
+def api_sites_check():
+    """Check availability of configured sites"""
+    import urllib.request
+    import urllib.error
+    import ssl
+    
+    sites_to_check = []
+    
+    # Get configured sites from nginx
+    sites_enabled = Path('/etc/nginx/sites-enabled')
+    if sites_enabled.exists():
+        for site in sites_enabled.iterdir():
+            if site.name != 'default':
+                sites_to_check.append(site.name)
+    
+    # Also check local services
+    local_services = [
+        {'name': 'ReactMap', 'url': 'http://localhost:6001', 'port': 6001},
+        {'name': 'Koji', 'url': 'http://localhost:6002', 'port': 6002},
+        {'name': 'Dragonite', 'url': 'http://localhost:7272', 'port': 7272},
+        {'name': 'Rotom', 'url': 'http://localhost:7070', 'port': 7070},
+        {'name': 'Golbat', 'url': 'http://localhost:9001', 'port': 9001},
+        {'name': 'Shellder', 'url': 'http://localhost:5000', 'port': 5000},
+    ]
+    
+    results = []
+    healthy = 0
+    total = 0
+    
+    # Check local services
+    ctx = ssl.create_default_context()
+    ctx.check_hostname = False
+    ctx.verify_mode = ssl.CERT_NONE
+    
+    for svc in local_services:
+        total += 1
+        try:
+            req = urllib.request.Request(svc['url'], method='HEAD')
+            req.add_header('User-Agent', 'Shellder-Health-Check')
+            response = urllib.request.urlopen(req, timeout=5, context=ctx)
+            status = response.getcode()
+            results.append({
+                'name': svc['name'],
+                'url': svc['url'],
+                'status': status,
+                'healthy': 200 <= status < 400,
+                'type': 'local'
+            })
+            if 200 <= status < 400:
+                healthy += 1
+        except urllib.error.HTTPError as e:
+            results.append({
+                'name': svc['name'],
+                'url': svc['url'],
+                'status': e.code,
+                'healthy': False,
+                'error': str(e.reason),
+                'type': 'local'
+            })
+        except Exception as e:
+            results.append({
+                'name': svc['name'],
+                'url': svc['url'],
+                'status': 0,
+                'healthy': False,
+                'error': 'Connection failed',
+                'type': 'local'
+            })
+    
+    # Check external sites
+    for site_name in sites_to_check:
+        total += 1
+        url = f'https://{site_name}'
+        try:
+            req = urllib.request.Request(url, method='HEAD')
+            req.add_header('User-Agent', 'Shellder-Health-Check')
+            response = urllib.request.urlopen(req, timeout=10, context=ctx)
+            status = response.getcode()
+            results.append({
+                'name': site_name,
+                'url': url,
+                'status': status,
+                'healthy': 200 <= status < 400,
+                'type': 'external'
+            })
+            if 200 <= status < 400:
+                healthy += 1
+        except urllib.error.HTTPError as e:
+            results.append({
+                'name': site_name,
+                'url': url,
+                'status': e.code,
+                'healthy': e.code < 500,
+                'error': str(e.reason),
+                'type': 'external'
+            })
+            if e.code < 500:
+                healthy += 1
+        except Exception as e:
+            # Try HTTP if HTTPS fails
+            try:
+                url = f'http://{site_name}'
+                req = urllib.request.Request(url, method='HEAD')
+                response = urllib.request.urlopen(req, timeout=10)
+                status = response.getcode()
+                results.append({
+                    'name': site_name,
+                    'url': url,
+                    'status': status,
+                    'healthy': 200 <= status < 400,
+                    'type': 'external',
+                    'note': 'HTTP only'
+                })
+                if 200 <= status < 400:
+                    healthy += 1
+            except:
+                results.append({
+                    'name': site_name,
+                    'url': f'https://{site_name}',
+                    'status': 0,
+                    'healthy': False,
+                    'error': 'Connection failed',
+                    'type': 'external'
+                })
+    
+    return jsonify({
+        'sites': results,
+        'healthy': healthy,
+        'total': total,
+        'summary': f'{healthy}/{total}'
+    })
 
 # =============================================================================
 # ROTOM ENDPOINTS

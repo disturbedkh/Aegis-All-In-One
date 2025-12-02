@@ -2758,3 +2758,317 @@ select:focus {
     }
 }
 
+/* =============================================================================
+   CONTROL BAR (Container/Service Controls)
+   ============================================================================= */
+
+.control-bar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 20px;
+    background: var(--bg-card);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    margin-bottom: 1rem;
+}
+
+.control-bar-left {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.control-bar-right {
+    display: flex;
+    gap: 8px;
+}
+
+.control-label {
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.container-status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    background: var(--bg-tertiary);
+    font-size: 13px;
+    font-weight: 500;
+}
+
+.container-status-badge.running {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+.container-status-badge.stopped {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
+.container-status-badge .status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+}
+
+.container-status-badge .status-dot.running {
+    background: var(--success);
+    box-shadow: 0 0 8px var(--success-glow);
+}
+
+.container-status-badge .status-dot.stopped {
+    background: var(--danger);
+}
+
+/* =============================================================================
+   PROXY MANAGER
+   ============================================================================= */
+
+.proxy-manager {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.proxy-info {
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.proxy-info code {
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.proxy-editor {
+    width: 100%;
+    min-height: 200px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.proxy-editor:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.proxy-actions {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* =============================================================================
+   NGINX & SITES MANAGER
+   ============================================================================= */
+
+.nginx-grid {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.sites-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    max-height: 300px;
+    overflow-y: auto;
+}
+
+.site-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.site-item.enabled {
+    border-left: 3px solid var(--success);
+}
+
+.site-item.disabled {
+    opacity: 0.7;
+}
+
+.site-icon {
+    font-size: 1.2rem;
+}
+
+.site-name {
+    flex: 1;
+    font-family: var(--font-mono);
+    font-size: 13px;
+}
+
+.site-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.config-editor {
+    width: 100%;
+    min-height: 300px;
+    padding: 12px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 13px;
+    line-height: 1.6;
+    resize: vertical;
+}
+
+.config-editor:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.nginx-setup-form {
+    display: grid;
+    gap: 16px;
+}
+
+.form-group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.form-group label {
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--text-secondary);
+}
+
+.form-input {
+    padding: 10px 14px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.form-input:focus {
+    outline: none;
+    border-color: var(--accent-primary);
+}
+
+.form-actions {
+    display: flex;
+    gap: 12px;
+    flex-wrap: wrap;
+}
+
+.setup-output {
+    margin-top: 16px;
+    padding: 16px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.setup-output pre {
+    margin: 0;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+}
+
+/* =============================================================================
+   SITE AVAILABILITY CHECK
+   ============================================================================= */
+
+.site-availability-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.site-check-item {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 13px;
+}
+
+.site-check-item.healthy {
+    border-left: 3px solid var(--success);
+}
+
+.site-check-item.unhealthy {
+    border-left: 3px solid var(--danger);
+}
+
+.site-check-icon {
+    font-size: 1rem;
+}
+
+.site-check-name {
+    flex: 1;
+    font-weight: 500;
+}
+
+.site-check-status {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 2px 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+}
+
+.site-check-error {
+    font-size: 11px;
+    color: var(--danger);
+}
+
+/* Button variants */
+.btn-success {
+    background: var(--success);
+    color: #000;
+}
+
+.btn-success:hover {
+    background: #0ea472;
+}
+
+.btn-warning {
+    background: var(--warning);
+    color: #000;
+}
+
+.btn-warning:hover {
+    background: #e09009;
+}
+
+.btn-primary {
+    background: var(--accent-primary);
+    color: #fff;
+}
+
+.btn-primary:hover {
+    background: var(--accent-secondary);
+}
+

@@ -3446,3 +3446,479 @@ function formatTime(isoString) {
     if (diff < 86400) return `${Math.floor(diff/3600)}h ago`;
     return d.toLocaleDateString();
 }
+
+// =============================================================================
+// XILRIWS CONTAINER CONTROL
+// =============================================================================
+
+async function xilriwsAction(action) {
+    showToast(`${action}ing Xilriws...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/xilriws/container/${action}`, { 
+            method: 'POST',
+            force: true 
+        });
+        
+        if (result.success) {
+            showToast(`Xilriws ${action}ed successfully`, 'success');
+            updateXilriwsContainerStatus();
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function updateXilriwsContainerStatus() {
+    const badge = document.getElementById('xilriwsContainerStatus');
+    if (!badge) return;
+    
+    try {
+        const data = await fetchAPI('/api/xilriws/status', { force: true });
+        const dot = badge.querySelector('.status-dot');
+        const text = badge.querySelector('.status-text');
+        
+        if (data.running) {
+            dot.className = 'status-dot running';
+            text.textContent = 'Running';
+            badge.className = 'container-status-badge running';
+        } else {
+            dot.className = 'status-dot stopped';
+            text.textContent = data.status || 'Stopped';
+            badge.className = 'container-status-badge stopped';
+        }
+    } catch (e) {
+        const text = badge.querySelector('.status-text');
+        if (text) text.textContent = 'Error';
+    }
+}
+
+// =============================================================================
+// PROXY MANAGER
+// =============================================================================
+
+async function loadProxyFile() {
+    const editor = document.getElementById('proxyEditor');
+    const countEl = document.getElementById('proxyCount');
+    const pathEl = document.getElementById('proxyFilePath');
+    
+    if (!editor) return;
+    
+    try {
+        const data = await fetchAPI('/api/xilriws/proxies', { force: true });
+        
+        if (data.exists) {
+            editor.value = data.content || '';
+            if (countEl) countEl.textContent = data.count;
+            if (pathEl) pathEl.textContent = data.file;
+        } else {
+            editor.value = '# Add proxies here, one per line\n# Format: host:port or user:pass@host:port\n';
+            if (countEl) countEl.textContent = '0';
+        }
+    } catch (e) {
+        editor.value = '# Error loading proxies: ' + e.message;
+    }
+}
+
+async function saveProxies() {
+    const editor = document.getElementById('proxyEditor');
+    const content = editor.value;
+    
+    try {
+        const result = await fetchAPI('/api/xilriws/proxies', {
+            method: 'POST',
+            body: JSON.stringify({ content }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`Saved ${result.count} proxies`, 'success');
+            document.getElementById('proxyCount').textContent = result.count;
+        } else {
+            showToast(`Save failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function saveAndRestartXilriws() {
+    await saveProxies();
+    await xilriwsAction('restart');
+}
+
+function validateProxies() {
+    const editor = document.getElementById('proxyEditor');
+    const lines = editor.value.split('\n');
+    const proxyRegex = /^(?:[\w.-]+:[\w.-]+@)?[\w.-]+:\d+$/;
+    
+    let valid = 0, invalid = 0;
+    const invalidLines = [];
+    
+    lines.forEach((line, i) => {
+        line = line.trim();
+        if (!line || line.startsWith('#')) return;
+        
+        if (proxyRegex.test(line)) {
+            valid++;
+        } else {
+            invalid++;
+            invalidLines.push(i + 1);
+        }
+    });
+    
+    if (invalid === 0) {
+        showToast(`✓ All ${valid} proxies have valid format`, 'success');
+    } else {
+        showToast(`⚠ ${invalid} invalid proxies on lines: ${invalidLines.slice(0, 5).join(', ')}${invalidLines.length > 5 ? '...' : ''}`, 'warning');
+    }
+}
+
+function clearProxies() {
+    if (confirm('Clear all proxies? This cannot be undone.')) {
+        document.getElementById('proxyEditor').value = '';
+        showToast('Proxies cleared (remember to save)', 'info');
+    }
+}
+
+// =============================================================================
+// NGINX MANAGEMENT
+// =============================================================================
+
+async function loadNginxStatus() {
+    const badge = document.getElementById('nginxStatus');
+    if (!badge) return;
+    
+    try {
+        const data = await fetchAPI('/api/nginx/status');
+        const dot = badge.querySelector('.status-dot');
+        const text = badge.querySelector('.status-text');
+        
+        if (data.running) {
+            dot.className = 'status-dot running';
+            text.textContent = 'Running';
+            badge.className = 'container-status-badge running';
+        } else {
+            dot.className = 'status-dot stopped';
+            text.textContent = data.status || 'Stopped';
+            badge.className = 'container-status-badge stopped';
+        }
+    } catch (e) {
+        console.log('Nginx status check failed:', e);
+    }
+}
+
+async function nginxAction(action) {
+    showToast(`${action}ing Nginx...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/nginx/${action}`, { 
+            method: 'POST',
+            force: true 
+        });
+        
+        if (result.success) {
+            showToast(`Nginx ${action} successful`, 'success');
+            if (result.output) {
+                console.log('Nginx output:', result.output);
+            }
+            loadNginxStatus();
+        } else {
+            showToast(`Failed: ${result.error || result.output}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function loadNginxSites() {
+    const enabledEl = document.getElementById('sitesEnabledList');
+    const availableEl = document.getElementById('sitesAvailableList');
+    const selectorEl = document.getElementById('siteSelector');
+    
+    try {
+        const data = await fetchAPI('/api/nginx/sites');
+        
+        // Update counts
+        document.getElementById('sitesEnabled').textContent = data.enabled_count || 0;
+        document.getElementById('sitesAvailable').textContent = data.available_count || 0;
+        document.getElementById('sslCerts').textContent = data.ssl_certs || 0;
+        
+        // Render enabled sites
+        if (enabledEl) {
+            if (data.enabled && data.enabled.length > 0) {
+                enabledEl.innerHTML = data.enabled.map(site => `
+                    <div class="site-item enabled">
+                        <span class="site-icon">🌐</span>
+                        <span class="site-name">${site.name}</span>
+                        <div class="site-actions">
+                            <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
+                            <button class="btn btn-sm btn-warning" onclick="disableSite('${site.name}')" title="Disable">⏸️</button>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                enabledEl.innerHTML = '<div class="no-data">No sites enabled</div>';
+            }
+        }
+        
+        // Render available (disabled) sites
+        if (availableEl) {
+            const disabled = data.available?.filter(s => !s.enabled) || [];
+            if (disabled.length > 0) {
+                availableEl.innerHTML = disabled.map(site => `
+                    <div class="site-item disabled">
+                        <span class="site-icon">📁</span>
+                        <span class="site-name">${site.name}</span>
+                        <div class="site-actions">
+                            <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
+                            <button class="btn btn-sm btn-success" onclick="enableSite('${site.name}')" title="Enable">▶️</button>
+                        </div>
+                    </div>
+                `).join('');
+            } else {
+                availableEl.innerHTML = '<div class="no-data">All sites are enabled</div>';
+            }
+        }
+        
+        // Populate selector
+        if (selectorEl) {
+            const allSites = [...(data.enabled || []), ...(data.available || [])];
+            const uniqueSites = [...new Set(allSites.map(s => s.name))];
+            selectorEl.innerHTML = '<option value="">Select a site to edit...</option>' +
+                uniqueSites.map(name => `<option value="${name}">${name}</option>`).join('');
+        }
+        
+    } catch (e) {
+        if (enabledEl) enabledEl.innerHTML = '<div class="error-msg">Failed to load sites</div>';
+    }
+}
+
+async function loadSiteConfig(name) {
+    if (!name) return;
+    
+    const editor = document.getElementById('siteConfigEditor');
+    const selector = document.getElementById('siteSelector');
+    
+    if (selector) selector.value = name;
+    if (editor) editor.value = 'Loading...';
+    
+    try {
+        const data = await fetchAPI(`/api/nginx/site/${name}`);
+        
+        if (data.content) {
+            editor.value = data.content;
+        } else {
+            editor.value = `# Error: ${data.error || 'Could not load configuration'}`;
+        }
+    } catch (e) {
+        editor.value = `# Error: ${e.message}`;
+    }
+}
+
+async function saveSiteConfig() {
+    const selector = document.getElementById('siteSelector');
+    const editor = document.getElementById('siteConfigEditor');
+    const name = selector.value;
+    
+    if (!name) {
+        showToast('Select a site first', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI(`/api/nginx/site/${name}`, {
+            method: 'POST',
+            body: JSON.stringify({ content: editor.value }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Configuration saved', 'success');
+            // Test config
+            const testResult = await fetchAPI('/api/nginx/test', { method: 'POST', force: true });
+            if (testResult.success) {
+                showToast('Config test passed - reload nginx to apply', 'info');
+            } else {
+                showToast('Warning: Config test failed', 'warning');
+            }
+        } else {
+            showToast(`Save failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function enableSite(name) {
+    try {
+        const result = await fetchAPI(`/api/nginx/site/${name}/enable`, { method: 'POST', force: true });
+        if (result.success) {
+            showToast(`${name} enabled`, 'success');
+            loadNginxSites();
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function disableSite(name) {
+    if (!confirm(`Disable site ${name}? It will be moved to sites-available.`)) return;
+    
+    try {
+        const result = await fetchAPI(`/api/nginx/site/${name}/disable`, { method: 'POST', force: true });
+        if (result.success) {
+            showToast(`${name} disabled`, 'success');
+            loadNginxSites();
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function loadNginxLogs() {
+    const logEl = document.getElementById('nginxLogContent');
+    if (!logEl) return;
+    
+    try {
+        const data = await fetchAPI('/api/nginx/logs?lines=100');
+        logEl.textContent = data.logs || 'No logs available';
+    } catch (e) {
+        logEl.textContent = 'Failed to load logs: ' + e.message;
+    }
+}
+
+async function runNginxSetup() {
+    const domain = document.getElementById('setupDomain').value.trim();
+    const email = document.getElementById('setupEmail').value.trim();
+    const service = document.getElementById('setupService').value;
+    const customPort = document.getElementById('setupCustomPort').value;
+    
+    if (!domain) {
+        showToast('Domain is required', 'warning');
+        return;
+    }
+    
+    const outputEl = document.getElementById('nginxSetupOutput');
+    const preEl = outputEl.querySelector('pre');
+    outputEl.style.display = 'block';
+    preEl.textContent = 'Setting up site...';
+    
+    try {
+        const result = await fetchAPI('/api/nginx/setup', {
+            method: 'POST',
+            body: JSON.stringify({ domain, email, service, custom_port: customPort }),
+            force: true
+        });
+        
+        if (result.success) {
+            preEl.textContent = `✓ Site ${domain} configured successfully!\n\n`;
+            if (result.ssl_output) {
+                preEl.textContent += `SSL Output:\n${result.ssl_output}`;
+            }
+            showToast('Site configured successfully!', 'success');
+            loadNginxSites();
+        } else {
+            preEl.textContent = `✗ Setup failed: ${result.error}\n\n`;
+            if (result.ssl_output) {
+                preEl.textContent += result.ssl_output;
+            }
+        }
+    } catch (e) {
+        preEl.textContent = `Error: ${e.message}`;
+    }
+}
+
+function generateConfigPreview() {
+    const domain = document.getElementById('setupDomain').value.trim();
+    const service = document.getElementById('setupService').value;
+    const customPort = document.getElementById('setupCustomPort').value;
+    
+    const port = service === 'custom' ? customPort : service.split(':')[1];
+    
+    const config = `server {
+    listen 80;
+    server_name ${domain || 'example.com'};
+    
+    location / {
+        proxy_pass http://localhost:${port || '6001'};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}`;
+    
+    document.getElementById('siteConfigEditor').value = config;
+    showToast('Preview generated - edit and save as needed', 'info');
+}
+
+// Handle custom port visibility
+document.getElementById('setupService')?.addEventListener('change', function() {
+    const customGroup = document.getElementById('customPortGroup');
+    if (customGroup) {
+        customGroup.style.display = this.value === 'custom' ? 'block' : 'none';
+    }
+});
+
+// =============================================================================
+// SITE AVAILABILITY CHECK
+// =============================================================================
+
+async function checkSiteAvailability() {
+    const container = document.getElementById('siteAvailability');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading">Checking sites...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/sites/check', { force: true });
+        
+        // Update dashboard card
+        const healthEl = document.getElementById('siteHealth');
+        const iconEl = document.getElementById('siteHealthIcon');
+        if (healthEl) healthEl.textContent = data.summary;
+        if (iconEl) iconEl.textContent = data.healthy === data.total ? '✅' : '⚠️';
+        
+        // Render site list
+        if (data.sites && data.sites.length > 0) {
+            container.innerHTML = data.sites.map(site => `
+                <div class="site-check-item ${site.healthy ? 'healthy' : 'unhealthy'}">
+                    <span class="site-check-icon">${site.healthy ? '✅' : '❌'}</span>
+                    <span class="site-check-name">${site.name}</span>
+                    <span class="site-check-status">${site.status || 'N/A'}</span>
+                    ${site.error ? `<span class="site-check-error">${site.error}</span>` : ''}
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="no-data">No sites to check</div>';
+        }
+    } catch (e) {
+        container.innerHTML = '<div class="error-msg">Failed to check sites</div>';
+    }
+}
+
+// Auto-load on page navigation
+const originalNavigateTo = window.navigateTo || navigateTo;
+window.navigateTo = function(page) {
+    originalNavigateTo(page);
+    
+    // Page-specific initialization
+    if (page === 'xilriws') {
+        updateXilriwsContainerStatus();
+        loadProxyFile();
+    } else if (page === 'nginx') {
+        loadNginxStatus();
+        loadNginxSites();
+        loadNginxLogs();
+    }
+};

@@ -55,6 +55,10 @@
             
             <div class="nav-section">
                 <div class="nav-label">Management</div>
+                <a href="#" class="nav-item" data-page="nginx" onclick="navigateTo('nginx'); return false;">
+                    <span class="nav-icon">🌐</span>
+                    <span>Nginx & Sites</span>
+                </a>
                 <a href="#" class="nav-item" data-page="files" onclick="navigateTo('files'); return false;">
                     <span class="nav-icon">📁</span>
                     <span>Files</span>
@@ -236,16 +240,32 @@
                     </div>
                 </div>
                 
-                <div class="card" style="margin-top: 1rem;">
-                    <div class="card-header">
-                        <h2 title="System services required for the Aegis stack to function">🔌 System Services</h2>
-                        <div class="card-actions">
-                            <span id="servicesStatus" class="badge badge-info">Loading...</span>
+                <div class="dashboard-grid" style="margin-top: 1rem;">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 title="System services required for the Aegis stack to function">🔌 System Services</h2>
+                            <div class="card-actions">
+                                <span id="servicesStatus" class="badge badge-info">Loading...</span>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="servicesList" class="services-grid">
+                                <div class="loading">Checking system services...</div>
+                            </div>
                         </div>
                     </div>
-                    <div class="card-body">
-                        <div id="servicesList" class="services-grid">
-                            <div class="loading">Checking system services...</div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2 title="Web service availability - checks if your sites are responding">🌐 Site Availability</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-sm" onclick="checkSiteAvailability()">🔄 Check</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="siteAvailability" class="site-availability-grid">
+                                <div class="loading">Checking site availability...</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -372,6 +392,156 @@
                         <div id="updateOutput" class="update-output" style="display: none;">
                             <pre></pre>
                         </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Nginx & Sites Page -->
+            <div id="page-nginx" class="page">
+                <!-- Nginx Status Bar -->
+                <div class="control-bar">
+                    <div class="control-bar-left">
+                        <span class="control-label">Nginx Status:</span>
+                        <span class="container-status-badge" id="nginxStatus">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Checking...</span>
+                        </span>
+                    </div>
+                    <div class="control-bar-right">
+                        <button class="btn btn-success btn-sm" onclick="nginxAction('start')">▶️ Start</button>
+                        <button class="btn btn-warning btn-sm" onclick="nginxAction('reload')">🔄 Reload</button>
+                        <button class="btn btn-danger btn-sm" onclick="nginxAction('stop')">⏹️ Stop</button>
+                        <button class="btn btn-sm" onclick="nginxAction('test')">✓ Test Config</button>
+                    </div>
+                </div>
+                
+                <div class="stats-grid nginx-stats-grid">
+                    <div class="stat-card">
+                        <div class="stat-icon success">🌐</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="sitesEnabled">-</div>
+                            <div class="stat-label">Sites Enabled</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📁</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="sitesAvailable">-</div>
+                            <div class="stat-label">Sites Available</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success">🔒</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="sslCerts">-</div>
+                            <div class="stat-label">SSL Certificates</div>
+                        </div>
+                    </div>
+                    <div class="stat-card clickable" onclick="testAllSites()">
+                        <div class="stat-icon" id="siteHealthIcon">🔍</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="siteHealth">--</div>
+                            <div class="stat-label">Sites Healthy</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid nginx-grid">
+                    <!-- Sites Enabled -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>✅ Sites Enabled</h2>
+                            <span class="text-muted">sites-enabled</span>
+                        </div>
+                        <div class="card-body">
+                            <div id="sitesEnabledList" class="sites-list">
+                                <div class="loading">Loading sites...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Sites Available (Disabled) -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📁 Sites Available</h2>
+                            <span class="text-muted">sites-available (disabled)</span>
+                        </div>
+                        <div class="card-body">
+                            <div id="sitesAvailableList" class="sites-list">
+                                <div class="loading">Loading sites...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Site Editor -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📝 Site Configuration</h2>
+                        <div class="card-actions">
+                            <select id="siteSelector" onchange="loadSiteConfig(this.value)">
+                                <option value="">Select a site to edit...</option>
+                            </select>
+                            <button class="btn btn-sm btn-success" onclick="saveSiteConfig()">💾 Save</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <textarea id="siteConfigEditor" class="config-editor" placeholder="Select a site to edit its configuration..."></textarea>
+                    </div>
+                </div>
+                
+                <!-- Quick Setup -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🚀 Quick Nginx Setup</h2>
+                        <span class="text-muted">Create SSL certificates and configure sites</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="nginx-setup-form">
+                            <div class="form-group">
+                                <label>Domain Name:</label>
+                                <input type="text" id="setupDomain" placeholder="example.com" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Email (for SSL):</label>
+                                <input type="email" id="setupEmail" placeholder="admin@example.com" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>Service to Proxy:</label>
+                                <select id="setupService" class="form-input">
+                                    <option value="reactmap:6001">ReactMap (Port 6001)</option>
+                                    <option value="koji:6002">Koji (Port 6002)</option>
+                                    <option value="dragonite:6003">Dragonite (Port 6003)</option>
+                                    <option value="rotom:6004">Rotom (Port 6004)</option>
+                                    <option value="golbat:6005">Golbat (Port 6005)</option>
+                                    <option value="grafana:3000">Grafana (Port 3000)</option>
+                                    <option value="shellder:5000">Shellder (Port 5000)</option>
+                                    <option value="custom">Custom Port...</option>
+                                </select>
+                            </div>
+                            <div class="form-group" id="customPortGroup" style="display: none;">
+                                <label>Custom Port:</label>
+                                <input type="number" id="setupCustomPort" placeholder="8080" class="form-input">
+                            </div>
+                            <div class="form-actions">
+                                <button class="btn btn-primary" onclick="runNginxSetup()">🔧 Setup Site with SSL</button>
+                                <button class="btn btn-sm" onclick="generateConfigPreview()">👁️ Preview Config</button>
+                            </div>
+                        </div>
+                        <div id="nginxSetupOutput" class="setup-output" style="display: none;">
+                            <pre></pre>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Error Log -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📋 Nginx Error Log</h2>
+                        <button class="btn btn-sm" onclick="loadNginxLogs()">🔄 Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <pre id="nginxLogContent" class="log-viewer">Loading nginx logs...</pre>
                     </div>
                 </div>
             </div>
@@ -628,13 +798,43 @@
             
             <!-- Xilriws Page -->
             <div id="page-xilriws" class="page">
+                <!-- Container Control Bar -->
+                <div class="control-bar">
+                    <div class="control-bar-left">
+                        <span class="control-label">Xilriws Container:</span>
+                        <span class="container-status-badge" id="xilriwsContainerStatus">
+                            <span class="status-dot"></span>
+                            <span class="status-text">Checking...</span>
+                        </span>
+                    </div>
+                    <div class="control-bar-right">
+                        <button class="btn btn-success btn-sm" onclick="xilriwsAction('start')" title="Start Xilriws">▶️ Start</button>
+                        <button class="btn btn-warning btn-sm" onclick="xilriwsAction('restart')" title="Restart Xilriws">🔄 Restart</button>
+                        <button class="btn btn-danger btn-sm" onclick="xilriwsAction('stop')" title="Stop Xilriws">⏹️ Stop</button>
+                    </div>
+                </div>
+                
                 <!-- Main Stats -->
                 <div class="stats-grid xilriws-stats-grid">
                     <div class="stat-card large">
                         <div class="stat-icon success">✓</div>
                         <div class="stat-info">
                             <div class="stat-value" id="xilSuccessRate">--%</div>
-                            <div class="stat-label">Success Rate</div>
+                            <div class="stat-label">Overall Success Rate</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success">👤</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilAccountSuccessRate">--%</div>
+                            <div class="stat-label">Account Success</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon success">🌐</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="xilProxySuccessRate">--%</div>
+                            <div class="stat-label">Proxy Success</div>
                         </div>
                     </div>
                     <div class="stat-card">
@@ -758,6 +958,31 @@
                     <div class="card-body">
                         <div id="recentErrors" class="recent-errors-list">
                             <div class="no-data">No recent errors</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Proxy Manager -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📝 Proxy Manager</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="loadProxyFile()" title="Reload from file">🔄 Reload</button>
+                            <button class="btn btn-sm btn-success" onclick="saveProxies()" title="Save changes">💾 Save</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="proxy-manager">
+                            <div class="proxy-info">
+                                <p>Edit proxies below (one per line). Format: <code>host:port</code> or <code>user:pass@host:port</code></p>
+                                <p class="text-muted">File: <code id="proxyFilePath">xilriws/proxies.txt</code> | <span id="proxyCount">0</span> proxies loaded</p>
+                            </div>
+                            <textarea id="proxyEditor" class="proxy-editor" placeholder="Loading proxies..."></textarea>
+                            <div class="proxy-actions">
+                                <button class="btn btn-warning" onclick="saveAndRestartXilriws()">💾 Save & Restart Xilriws</button>
+                                <button class="btn btn-sm" onclick="validateProxies()">✓ Validate Format</button>
+                                <button class="btn btn-sm btn-danger" onclick="clearProxies()">🗑️ Clear All</button>
+                            </div>
                         </div>
                     </div>
                 </div>
