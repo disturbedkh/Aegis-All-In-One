@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.18"  # 2025-12-02: Fixed fractional hours in API (5m option)
-SHELLDER_BUILD = "20251202-7"  # Date-based build number
+SHELLDER_VERSION = "1.0.19"  # 2025-12-02: Fixed SQLite minutes calc, UTC timezone in API
+SHELLDER_BUILD = "20251202-8"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -3275,6 +3275,8 @@ class ShellderDB:
         
         try:
             cursor = conn.cursor()
+            # Convert to minutes for better SQLite compatibility with fractional values
+            minutes = int(hours * 60)
             cursor.execute("""
                 SELECT metric_value, recorded_at
                 FROM metrics_history
@@ -3282,9 +3284,10 @@ class ShellderDB:
                   AND recorded_at >= datetime('now', ?)
                 ORDER BY recorded_at ASC
                 LIMIT ?
-            """, (metric_name, f'-{hours} hours', limit))
+            """, (metric_name, f'-{minutes} minutes', limit))
             
-            return [{'value': row[0], 'time': row[1]} for row in cursor.fetchall()]
+            # Return times in ISO 8601 format with Z suffix (UTC)
+            return [{'value': row[0], 'time': row[1].replace(' ', 'T') + 'Z'} for row in cursor.fetchall()]
         except Exception as e:
             print(f"Error getting metric history: {e}")
             return []
