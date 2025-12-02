@@ -854,20 +854,19 @@ function updateDashboard(data) {
 // =============================================================================
 
 async function loadSystemServices() {
-    console.log('[SERVICES] loadSystemServices called');
+    SHELLDER_DEBUG.info('SERVICES', 'loadSystemServices called');
     const container = document.getElementById('servicesList');
     const badge = document.getElementById('servicesStatus');
     if (!container) {
-        console.log('[SERVICES] ERROR: servicesList element not found!');
+        SHELLDER_DEBUG.error('SERVICES', 'servicesList element not found!');
         return;
     }
-    console.log('[SERVICES] Container found, fetching /api/services...');
+    SHELLDER_DEBUG.debug('SERVICES', 'Container found, fetching /api/services...');
     
     try {
-        // Use force:true on first call to bypass throttle
-        const isFirstCall = !RequestManager.lastCall.has('/api/services');
-        const data = await fetchAPI('/api/services', isFirstCall ? { force: true } : {});
-        console.log('[SERVICES] Response:', data);
+        // Always force on first few calls to ensure data loads
+        const data = await fetchAPI('/api/services', { force: true });
+        SHELLDER_DEBUG.info('SERVICES', 'Response received', { keys: data ? Object.keys(data) : 'null' });
         
         // Skip if throttled
         if (data._throttled) {
@@ -3919,19 +3918,19 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 // =============================================================================
 
 async function checkSiteAvailability() {
-    console.log('[SITES] checkSiteAvailability called');
+    SHELLDER_DEBUG.info('SITES', 'checkSiteAvailability called');
     const container = document.getElementById('siteAvailability');
     if (!container) {
-        console.log('[SITES] ERROR: siteAvailability element not found!');
+        SHELLDER_DEBUG.error('SITES', 'siteAvailability element not found!');
         return;
     }
     
     container.innerHTML = '<div class="loading">Checking sites...</div>';
     
     try {
-        console.log('[SITES] Fetching /api/sites/check...');
+        SHELLDER_DEBUG.debug('SITES', 'Fetching /api/sites/check...');
         const data = await fetchAPI('/api/sites/check', { force: true });
-        console.log('[SITES] Response:', data);
+        SHELLDER_DEBUG.info('SITES', 'Response received', { healthy: data?.healthy, total: data?.total });
         
         // Check for errors
         if (data.error) {
