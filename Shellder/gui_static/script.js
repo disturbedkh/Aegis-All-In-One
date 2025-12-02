@@ -1046,7 +1046,8 @@ async function showMetricDetail(metric) {
     openModal(titles[metric] || 'Metric History', `
         <div class="metric-detail-modal">
             <div class="metric-time-controls">
-                <button class="btn btn-sm ${metric === 'cpu' ? 'active' : ''}" onclick="loadMetricHistory('${metric}', 1)">1h</button>
+                <button class="btn btn-sm active" onclick="loadMetricHistory('${metric}', 0.0833)">5m</button>
+                <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 1)">1h</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 6)">6h</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 24)">24h</button>
                 <button class="btn btn-sm" onclick="loadMetricHistory('${metric}', 168)">7d</button>
@@ -1058,7 +1059,8 @@ async function showMetricDetail(metric) {
         </div>
     `);
     
-    loadMetricHistory(metric, 1);
+    // Default to 5 minutes for quick feedback
+    loadMetricHistory(metric, 0.0833);
 }
 
 async function loadMetricHistory(metric, hours) {
@@ -1090,23 +1092,48 @@ async function loadMetricHistory(metric, hours) {
         const min = Math.min(...values);
         const current = values[values.length - 1];
         
-        // Render chart as bar graph
-        const chartMax = Math.max(max, 100);
-        const chartHtml = data.data.map((d, i) => {
-            const height = Math.max(2, (d.value / chartMax) * 100);
+        // Generate time labels for X-axis (show ~5 labels evenly spaced)
+        const dataLen = data.data.length;
+        const timeLabels = [];
+        const labelCount = Math.min(5, dataLen);
+        for (let i = 0; i < labelCount; i++) {
+            const idx = Math.floor(i * (dataLen - 1) / (labelCount - 1 || 1));
+            const time = new Date(data.data[idx].time);
+            // Format based on time range
+            const label = hours < 1 ? time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit', second: '2-digit'}) :
+                         hours <= 24 ? time.toLocaleTimeString([], {hour: '2-digit', minute: '2-digit'}) :
+                         time.toLocaleDateString([], {month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+            timeLabels.push(label);
+        }
+        
+        // Render chart as bar graph with proper axes
+        const chartBars = data.data.map((d, i) => {
+            const height = Math.max(2, (d.value / 100) * 100);
             let colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
             const time = new Date(d.time).toLocaleTimeString();
             return `<div class="chart-bar ${colorClass}" style="height: ${height}%" 
                         title="${d.value.toFixed(1)}% at ${time}"></div>`;
         }).join('');
         
+        // Format time period for display
+        const periodLabel = hours < 1 ? `${Math.round(hours * 60)} minutes` : 
+                          hours < 24 ? `${hours} hour(s)` : 
+                          `${Math.round(hours / 24)} day(s)`;
+        
         chartEl.innerHTML = `
-            <div class="chart-container">
-                <div class="chart-bars">${chartHtml}</div>
-                <div class="chart-axis">
-                    <span>0%</span>
-                    <span>50%</span>
+            <div class="chart-wrapper">
+                <div class="chart-y-axis">
                     <span>100%</span>
+                    <span>75%</span>
+                    <span>50%</span>
+                    <span>25%</span>
+                    <span>0%</span>
+                </div>
+                <div class="chart-main">
+                    <div class="chart-bars">${chartBars}</div>
+                    <div class="chart-x-axis">
+                        ${timeLabels.map(l => `<span>${l}</span>`).join('')}
+                    </div>
                 </div>
             </div>
         `;
@@ -1132,7 +1159,7 @@ async function loadMetricHistory(metric, hours) {
                 </div>
             </div>
             <div class="metric-stat-info">
-                <small>${data.data.length} data points over ${hours} hour(s)</small>
+                <small>${data.data.length} data points over ${periodLabel}</small>
             </div>
         `;
         
@@ -1140,8 +1167,8 @@ async function loadMetricHistory(metric, hours) {
         document.querySelectorAll('.metric-time-controls .btn').forEach(b => {
             b.classList.remove('active');
             // Match button by its label
-            const hoursMap = {'1h': 1, '6h': 6, '24h': 24, '7d': 168};
-            if (hoursMap[b.textContent] === hours) {
+            const hoursMap = {'5m': 0.0833, '1h': 1, '6h': 6, '24h': 24, '7d': 168};
+            if (Math.abs(hoursMap[b.textContent] - hours) < 0.01) {
                 b.classList.add('active');
             }
         });

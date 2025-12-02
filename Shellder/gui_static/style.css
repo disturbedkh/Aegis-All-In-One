@@ -416,10 +416,29 @@ html, body {
     min-height: 150px;
 }
 
-.chart-container {
+/* Chart with proper X and Y axes */
+.chart-wrapper {
+    display: flex;
+    height: 180px;
+    gap: 8px;
+}
+
+.chart-y-axis {
     display: flex;
     flex-direction: column;
-    height: 150px;
+    justify-content: space-between;
+    font-size: 11px;
+    color: var(--text-muted);
+    text-align: right;
+    padding: 0 4px 20px 0;
+    min-width: 40px;
+}
+
+.chart-main {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-width: 0;
 }
 
 .chart-bars {
@@ -427,8 +446,9 @@ html, body {
     display: flex;
     align-items: flex-end;
     gap: 1px;
-    padding-bottom: 8px;
+    border-left: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
+    padding: 4px 4px 0 4px;
 }
 
 .chart-bar {
@@ -447,6 +467,21 @@ html, body {
 .chart-bar.low { background: var(--success); }
 .chart-bar.medium { background: var(--warning); }
 .chart-bar.high { background: var(--danger); }
+
+.chart-x-axis {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 4px 0 4px;
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+/* Legacy .chart-container and .chart-axis for backwards compat */
+.chart-container {
+    display: flex;
+    flex-direction: column;
+    height: 150px;
+}
 
 .chart-axis {
     display: flex;
