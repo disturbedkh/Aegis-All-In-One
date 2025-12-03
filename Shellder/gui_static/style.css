@@ -3045,7 +3045,7 @@ select:focus {
 }
 
 /* =============================================================================
-   SITE AVAILABILITY CHECK
+   SITE AVAILABILITY CHECK - 3-LEVEL COMPREHENSIVE
    ============================================================================= */
 
 .site-availability-grid {
@@ -3056,42 +3056,142 @@ select:focus {
 
 .site-check-item {
     display: flex;
-    align-items: center;
-    gap: 10px;
+    flex-direction: column;
+    gap: 6px;
     padding: 10px 14px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-sm);
     font-size: 13px;
+    border-left: 3px solid var(--border-color);
+    transition: all var(--transition-fast);
 }
 
-.site-check-item.healthy {
-    border-left: 3px solid var(--success);
+.site-check-item:hover {
+    background: var(--bg-hover);
 }
 
-.site-check-item.unhealthy {
-    border-left: 3px solid var(--danger);
+/* Status-based border colors */
+.site-check-item.site-status-healthy {
+    border-left-color: var(--success);
+}
+
+.site-check-item.site-status-running {
+    border-left-color: #22c55e;
+}
+
+.site-check-item.site-status-partial {
+    border-left-color: var(--warning);
+}
+
+.site-check-item.site-status-backend-down {
+    border-left-color: var(--danger);
+}
+
+.site-check-item.site-status-unreachable {
+    border-left-color: #f97316;
+}
+
+.site-check-item.site-status-offline {
+    border-left-color: #6b7280;
+}
+
+.site-check-item.site-status-error {
+    border-left-color: var(--danger);
+}
+
+.site-check-main {
+    display: flex;
+    align-items: center;
+    gap: 10px;
 }
 
 .site-check-icon {
     font-size: 1rem;
+    min-width: 24px;
+    text-align: center;
 }
 
 .site-check-name {
-    flex: 1;
-    font-weight: 500;
+    font-weight: 600;
+    color: var(--text-primary);
 }
 
-.site-check-status {
+.site-domain {
     font-family: var(--font-mono);
-    font-size: 12px;
-    padding: 2px 8px;
-    background: var(--bg-primary);
-    border-radius: 4px;
+    font-size: 11px;
+    color: var(--accent-primary);
+    text-decoration: none;
+    padding: 2px 6px;
+    background: rgba(59, 130, 246, 0.1);
+    border-radius: 3px;
+    margin-left: auto;
+}
+
+.site-domain:hover {
+    color: var(--accent-secondary);
+    background: rgba(59, 130, 246, 0.2);
+}
+
+.site-port {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-left: auto;
+}
+
+/* 3-Level Check Indicators */
+.site-check-levels {
+    display: flex;
+    gap: 12px;
+    padding-left: 34px;
+}
+
+.check-indicator {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    font-size: 11px;
+    padding: 2px 6px;
+    border-radius: 3px;
+    cursor: help;
+}
+
+.check-indicator.check-ok {
+    background: rgba(16, 185, 129, 0.15);
+    color: var(--success);
+}
+
+.check-indicator.check-fail {
+    background: rgba(239, 68, 68, 0.15);
+    color: var(--danger);
+}
+
+.check-indicator.check-na {
+    background: rgba(107, 114, 128, 0.15);
+    color: var(--text-muted);
 }
 
 .site-check-error {
     font-size: 11px;
     color: var(--danger);
+    padding-left: 34px;
+    font-style: italic;
+}
+
+/* Legend */
+.site-check-legend {
+    display: flex;
+    justify-content: center;
+    gap: 16px;
+    margin-top: 12px;
+    padding-top: 10px;
+    border-top: 1px solid var(--border-color);
+    font-size: 10px;
+    color: var(--text-muted);
+}
+
+.site-check-legend span {
+    cursor: help;
 }
 
 /* Button variants */

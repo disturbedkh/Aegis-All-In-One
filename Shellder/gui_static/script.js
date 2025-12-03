@@ -4017,7 +4017,7 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 });
 
 // =============================================================================
-// SITE AVAILABILITY CHECK
+// SITE AVAILABILITY CHECK - 3-LEVEL COMPREHENSIVE
 // =============================================================================
 
 async function checkSiteAvailability() {
@@ -4028,12 +4028,12 @@ async function checkSiteAvailability() {
         return;
     }
     
-    container.innerHTML = '<div class="loading">Checking sites...</div>';
+    container.innerHTML = '<div class="loading">Checking sites (3-level check)...</div>';
     
     try {
         SHELLDER_DEBUG.debug('SITES', 'Fetching /api/sites/check...');
         const data = await fetchAPI('/api/sites/check', { force: true });
-        SHELLDER_DEBUG.info('SITES', 'Response received', { healthy: data?.healthy, total: data?.total });
+        SHELLDER_DEBUG.info('SITES', 'Response received', data?.summary);
         
         // Check for errors
         if (data.error) {
@@ -4045,26 +4045,109 @@ async function checkSiteAvailability() {
         // Update dashboard card
         const healthEl = document.getElementById('siteHealth');
         const iconEl = document.getElementById('siteHealthIcon');
-        if (healthEl) healthEl.textContent = data.summary || 'N/A';
-        if (iconEl) iconEl.textContent = data.healthy === data.total ? '✅' : '⚠️';
+        if (healthEl && data.summary) {
+            healthEl.textContent = `${data.summary.healthy}/${data.summary.total}`;
+        }
+        if (iconEl && data.summary) {
+            iconEl.textContent = data.summary.healthy === data.summary.total ? '✅' : 
+                                 data.summary.running === data.summary.total ? '🟡' : '⚠️';
+        }
         
-        // Render site list
+        // Render site list with 3-level checks
         if (data.sites && data.sites.length > 0) {
-            container.innerHTML = data.sites.map(site => `
-                <div class="site-check-item ${site.healthy ? 'healthy' : 'unhealthy'}">
-                    <span class="site-check-icon">${site.healthy ? '✅' : '❌'}</span>
-                    <span class="site-check-name">${site.name}</span>
-                    <span class="site-check-status">${site.status || 'N/A'}</span>
-                    ${site.error ? `<span class="site-check-error">${site.error}</span>` : ''}
+            container.innerHTML = data.sites.map(site => {
+                const checks = site.checks || {};
+                const details = site.details || {};
+                
+                // Determine overall status icon
+                let statusIcon = '❓';
+                let statusClass = 'unknown';
+                switch (site.status) {
+                    case 'healthy':
+                        statusIcon = '✅';
+                        statusClass = 'healthy';
+                        break;
+                    case 'running':
+                        statusIcon = '🟢';
+                        statusClass = 'running';
+                        break;
+                    case 'partial':
+                        statusIcon = '🟡';
+                        statusClass = 'partial';
+                        break;
+                    case 'backend_down':
+                        statusIcon = '🔴';
+                        statusClass = 'backend-down';
+                        break;
+                    case 'unreachable':
+                        statusIcon = '🌐❌';
+                        statusClass = 'unreachable';
+                        break;
+                    case 'offline':
+                        statusIcon = '⬛';
+                        statusClass = 'offline';
+                        break;
+                    case 'error':
+                        statusIcon = '❌';
+                        statusClass = 'error';
+                        break;
+                }
+                
+                // Generate check indicators
+                const nginxCheck = checks.nginx_enabled ? 
+                    '<span class="check-indicator check-ok" title="Nginx site enabled">📁✓</span>' :
+                    '<span class="check-indicator check-na" title="No Nginx config">📁-</span>';
+                
+                const portCheck = checks.port_available ?
+                    `<span class="check-indicator check-ok" title="Port ${details.backend_port || '?'} responding">🔌✓</span>` :
+                    `<span class="check-indicator check-fail" title="Port ${details.backend_port || '?'} not responding">🔌✗</span>`;
+                
+                let domainCheck = '';
+                if (checks.domain_accessible === true) {
+                    domainCheck = `<span class="check-indicator check-ok" title="Domain accessible: ${details.domain || 'N/A'}">🌐✓</span>`;
+                } else if (checks.domain_accessible === false) {
+                    domainCheck = `<span class="check-indicator check-fail" title="Domain unreachable: ${site.error || 'Connection failed'}">🌐✗</span>`;
+                } else {
+                    domainCheck = '<span class="check-indicator check-na" title="No domain configured">🌐-</span>';
+                }
+                
+                // Domain display
+                const domainDisplay = details.domain ? 
+                    `<a href="${details.ssl ? 'https' : 'http'}://${details.domain}" target="_blank" class="site-domain">${details.domain}</a>` :
+                    `<span class="site-port">:${details.backend_port || '?'}</span>`;
+                
+                return `
+                    <div class="site-check-item site-status-${statusClass}">
+                        <div class="site-check-main">
+                            <span class="site-check-icon">${statusIcon}</span>
+                            <span class="site-check-name">${site.display_name || site.name}</span>
+                            ${domainDisplay}
+                        </div>
+                        <div class="site-check-levels">
+                            ${nginxCheck}
+                            ${portCheck}
+                            ${domainCheck}
+                        </div>
+                        ${site.error && site.status !== 'healthy' ? `<div class="site-check-error">${site.error}</div>` : ''}
+                    </div>
+                `;
+            }).join('');
+            
+            // Add legend
+            container.innerHTML += `
+                <div class="site-check-legend">
+                    <span title="Nginx config enabled">📁 Nginx</span>
+                    <span title="Backend port responding">🔌 Port</span>
+                    <span title="Domain/URL accessible">🌐 Domain</span>
                 </div>
-            `).join('');
-            console.log('[SITES] Rendered', data.sites.length, 'sites');
+            `;
+            
+            SHELLDER_DEBUG.info('SITES', `Rendered ${data.sites.length} sites`);
         } else {
-            container.innerHTML = '<div class="no-data">No sites configured in Nginx</div>';
-            console.log('[SITES] No sites to display');
+            container.innerHTML = '<div class="no-data">No sites or services detected</div>';
         }
     } catch (e) {
-        console.error('[SITES] Exception:', e);
+        SHELLDER_DEBUG.error('SITES', `Exception: ${e.message}`);
         container.innerHTML = `<div class="error-msg">Failed to check sites: ${e.message}</div>`;
     }
 }

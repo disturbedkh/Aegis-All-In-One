@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.28"  # 2025-12-03: Memory Manager - process list, kill, cache clear, emergency cleanup
-SHELLDER_BUILD = "20251203-4"  # Date-based build number
+SHELLDER_VERSION = "1.0.29"  # 2025-12-03: 3-level site availability - nginx enabled, port available, domain accessible
+SHELLDER_BUILD = "20251203-5"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -7524,122 +7524,309 @@ def api_nginx_setup():
         return jsonify({'success': False, 'error': str(e)})
 
 # =============================================================================
-# SITE AVAILABILITY CHECK
+# SITE AVAILABILITY CHECK - 3-LEVEL COMPREHENSIVE CHECK
 # =============================================================================
 
-@app.route('/api/sites/check')
-def api_sites_check():
-    """Check availability of configured sites (fast parallel version)"""
-    from concurrent.futures import ThreadPoolExecutor, as_completed
+# Known service configurations (name -> port mappings)
+KNOWN_SERVICES = {
+    'reactmap': {'port': 6001, 'name': 'ReactMap', 'container': 'reactmap'},
+    'koji': {'port': 6002, 'name': 'Koji', 'container': 'koji'},
+    'dragonite': {'port': 7272, 'name': 'Dragonite', 'container': 'dragonite'},
+    'rotom': {'port': 7070, 'name': 'Rotom', 'container': 'rotom'},
+    'golbat': {'port': 9001, 'name': 'Golbat', 'container': 'golbat'},
+    'shellder': {'port': 5000, 'name': 'Shellder', 'container': 'shellder'},
+    'grafana': {'port': 3000, 'name': 'Grafana', 'container': 'grafana'},
+    'poracle': {'port': 4201, 'name': 'Poracle', 'container': 'poracle'},
+    'authelia': {'port': 9091, 'name': 'Authelia', 'container': 'authelia'},
+}
+
+def _parse_nginx_config(config_path):
+    """Parse nginx config to extract server_name and proxy_pass port"""
+    result = {
+        'server_names': [],
+        'proxy_port': None,
+        'ssl': False,
+        'listen_port': 80
+    }
+    
+    try:
+        with open(config_path, 'r') as f:
+            content = f.read()
+        
+        # Extract server_name
+        server_name_match = re.search(r'server_name\s+([^;]+);', content)
+        if server_name_match:
+            names = server_name_match.group(1).strip().split()
+            result['server_names'] = [n for n in names if n != '_']
+        
+        # Extract proxy_pass port
+        proxy_match = re.search(r'proxy_pass\s+https?://[^:]+:(\d+)', content)
+        if proxy_match:
+            result['proxy_port'] = int(proxy_match.group(1))
+        else:
+            # Try localhost format
+            proxy_match = re.search(r'proxy_pass\s+https?://localhost:(\d+)', content)
+            if proxy_match:
+                result['proxy_port'] = int(proxy_match.group(1))
+            else:
+                # Try 127.0.0.1 format
+                proxy_match = re.search(r'proxy_pass\s+https?://127\.0\.0\.1:(\d+)', content)
+                if proxy_match:
+                    result['proxy_port'] = int(proxy_match.group(1))
+        
+        # Check for SSL
+        result['ssl'] = 'ssl_certificate' in content or 'listen 443' in content
+        
+        # Check listen port
+        listen_match = re.search(r'listen\s+(\d+)', content)
+        if listen_match:
+            result['listen_port'] = int(listen_match.group(1))
+            
+    except Exception as e:
+        debug('SITES', f'Failed to parse nginx config {config_path}: {e}')
+    
+    return result
+
+def _check_port_open(port, host='127.0.0.1', timeout=1):
+    """Check if a port is open (service is listening)"""
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(timeout)
+        result = sock.connect_ex((host, port))
+        sock.close()
+        return result == 0
+    except Exception:
+        return False
+
+def _check_url_accessible(url, timeout=2):
+    """Check if a URL is accessible via HTTP(S)"""
     import urllib.request
     import urllib.error
     import ssl
-    
-    info('SITES', 'Site availability check started')
-    start_time = time.time()
-    
-    sites_to_check = []
-    
-    # Get configured sites from nginx
-    sites_enabled = Path('/etc/nginx/sites-enabled')
-    if sites_enabled.exists():
-        for site in sites_enabled.iterdir():
-            if site.name != 'default':
-                sites_to_check.append(site.name)
-    
-    # Also check local services (only if stack is likely running)
-    local_services = [
-        {'name': 'ReactMap', 'url': 'http://localhost:6001', 'port': 6001},
-        {'name': 'Koji', 'url': 'http://localhost:6002', 'port': 6002},
-        {'name': 'Dragonite', 'url': 'http://localhost:7272', 'port': 7272},
-        {'name': 'Rotom', 'url': 'http://localhost:7070', 'port': 7070},
-        {'name': 'Golbat', 'url': 'http://localhost:9001', 'port': 9001},
-        {'name': 'Shellder', 'url': 'http://localhost:5000', 'port': 5000},
-    ]
-    
-    results = []
-    healthy = 0
-    total = 0
     
     ctx = ssl.create_default_context()
     ctx.check_hostname = False
     ctx.verify_mode = ssl.CERT_NONE
     
-    def check_service(svc):
-        """Check a single service with short timeout"""
-        try:
-            req = urllib.request.Request(svc['url'], method='HEAD')
-            req.add_header('User-Agent', 'Shellder-Health-Check')
-            response = urllib.request.urlopen(req, timeout=2, context=ctx)  # Reduced timeout
-            status = response.getcode()
-            return {
-                'name': svc['name'],
-                'url': svc['url'],
-                'status': status,
-                'healthy': 200 <= status < 400,
-                'type': svc.get('type', 'local')
-            }
-        except urllib.error.HTTPError as e:
-            return {
-                'name': svc['name'],
-                'url': svc['url'],
-                'status': e.code,
-                'healthy': False,
-                'error': str(e.reason),
-                'type': svc.get('type', 'local')
-            }
-        except Exception as e:
-            return {
-                'name': svc['name'],
-                'url': svc['url'],
-                'status': 0,
-                'healthy': False,
-                'error': 'Offline',
-                'type': svc.get('type', 'local')
-            }
+    try:
+        req = urllib.request.Request(url, method='HEAD')
+        req.add_header('User-Agent', 'Shellder-Health-Check/1.0')
+        response = urllib.request.urlopen(req, timeout=timeout, context=ctx)
+        return {
+            'accessible': True,
+            'status': response.getcode(),
+            'error': None
+        }
+    except urllib.error.HTTPError as e:
+        # HTTP errors mean the server responded (even if with an error)
+        return {
+            'accessible': e.code < 500,  # 4xx is still "accessible"
+            'status': e.code,
+            'error': str(e.reason)
+        }
+    except urllib.error.URLError as e:
+        return {
+            'accessible': False,
+            'status': 0,
+            'error': 'Connection refused' if 'refused' in str(e) else str(e.reason)
+        }
+    except Exception as e:
+        return {
+            'accessible': False,
+            'status': 0,
+            'error': str(e)
+        }
+
+@app.route('/api/sites/check')
+def api_sites_check():
+    """
+    Comprehensive 3-level site availability check:
+    1. Nginx Enabled - Is the site configuration enabled?
+    2. Port Available - Is the backend service listening?
+    3. Domain Accessible - Can we reach it via domain/subdomain?
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
     
-    # Check all services in parallel
-    all_checks = local_services.copy()
-    for site_name in sites_to_check:
-        all_checks.append({
+    info('SITES', 'Comprehensive site availability check started')
+    start_time = time.time()
+    
+    sites = []
+    
+    # Gather all sites from nginx sites-enabled
+    sites_enabled = Path('/etc/nginx/sites-enabled')
+    sites_available = Path('/etc/nginx/sites-available')
+    
+    # Track which sites are enabled vs available
+    enabled_sites = set()
+    if sites_enabled.exists():
+        for site in sites_enabled.iterdir():
+            if site.name != 'default' and not site.name.startswith('.'):
+                enabled_sites.add(site.name)
+    
+    available_sites = set()
+    if sites_available.exists():
+        for site in sites_available.iterdir():
+            if site.name != 'default' and not site.name.startswith('.'):
+                available_sites.add(site.name)
+    
+    # Process enabled sites (primary focus)
+    for site_name in enabled_sites:
+        config_path = sites_enabled / site_name
+        if config_path.is_symlink():
+            config_path = config_path.resolve()
+        
+        config = _parse_nginx_config(config_path)
+        
+        # Determine service name from filename or server_name
+        service_name = site_name.split('.')[0].lower()  # e.g., "reactmap.example.com" -> "reactmap"
+        known_service = KNOWN_SERVICES.get(service_name, {})
+        
+        # Use parsed port or known service port
+        backend_port = config['proxy_port'] or known_service.get('port')
+        
+        # Get the primary domain
+        primary_domain = config['server_names'][0] if config['server_names'] else site_name
+        
+        sites.append({
             'name': site_name,
-            'url': f'https://{site_name}',
-            'type': 'external'
+            'display_name': known_service.get('name', site_name.split('.')[0].title()),
+            'domain': primary_domain,
+            'domains': config['server_names'],
+            'backend_port': backend_port,
+            'ssl': config['ssl'],
+            'nginx_enabled': True,
+            'container': known_service.get('container'),
         })
     
+    # Add known services that aren't nginx-configured (for port check only)
+    for service_key, service_info in KNOWN_SERVICES.items():
+        # Check if this service already has a site entry
+        has_site = any(
+            s.get('backend_port') == service_info['port'] or 
+            service_key in s.get('name', '').lower()
+            for s in sites
+        )
+        
+        if not has_site:
+            sites.append({
+                'name': service_info['name'],
+                'display_name': service_info['name'],
+                'domain': None,
+                'domains': [],
+                'backend_port': service_info['port'],
+                'ssl': False,
+                'nginx_enabled': False,
+                'container': service_info['container'],
+            })
+    
+    # Parallel checks for all sites
+    def check_site(site):
+        result = {
+            'name': site['name'],
+            'display_name': site['display_name'],
+            'checks': {
+                'nginx_enabled': site['nginx_enabled'],
+                'port_available': False,
+                'domain_accessible': None,  # None = not applicable
+            },
+            'details': {
+                'domain': site['domain'],
+                'domains': site.get('domains', []),
+                'backend_port': site['backend_port'],
+                'ssl': site['ssl'],
+                'container': site['container'],
+            },
+            'status': 'unknown',
+            'status_code': 0,
+            'error': None,
+        }
+        
+        # Check 2: Port Available (backend service listening)
+        if site['backend_port']:
+            result['checks']['port_available'] = _check_port_open(site['backend_port'])
+        
+        # Check 3: Domain Accessible (only if nginx is enabled and we have a domain)
+        if site['nginx_enabled'] and site['domain']:
+            protocol = 'https' if site['ssl'] else 'http'
+            url = f"{protocol}://{site['domain']}"
+            
+            url_check = _check_url_accessible(url)
+            result['checks']['domain_accessible'] = url_check['accessible']
+            result['status_code'] = url_check['status']
+            if url_check['error']:
+                result['error'] = url_check['error']
+        
+        # Determine overall status
+        nginx_ok = result['checks']['nginx_enabled']
+        port_ok = result['checks']['port_available']
+        domain_ok = result['checks']['domain_accessible']
+        
+        if nginx_ok and port_ok and domain_ok:
+            result['status'] = 'healthy'
+        elif port_ok and (domain_ok is None or domain_ok):
+            result['status'] = 'running'  # Service running but maybe no nginx
+        elif nginx_ok and not port_ok:
+            result['status'] = 'backend_down'
+        elif nginx_ok and port_ok and domain_ok is False:
+            result['status'] = 'unreachable'
+        elif not port_ok:
+            result['status'] = 'offline'
+        else:
+            result['status'] = 'partial'
+        
+        return result
+    
+    results = []
     with ThreadPoolExecutor(max_workers=10) as executor:
-        futures = {executor.submit(check_service, svc): svc for svc in all_checks}
-        for future in as_completed(futures, timeout=5):  # Max 5s total
+        futures = {executor.submit(check_site, site): site for site in sites}
+        for future in as_completed(futures, timeout=10):
             try:
-                result = future.result(timeout=1)
+                result = future.result(timeout=3)
                 results.append(result)
-                total += 1
-                if result.get('healthy'):
-                    healthy += 1
-            except Exception:
-                svc = futures[future]
+            except Exception as e:
+                site = futures[future]
                 results.append({
-                    'name': svc['name'],
-                    'url': svc['url'],
-                    'status': 0,
-                    'healthy': False,
-                    'error': 'Timeout',
-                    'type': svc.get('type', 'local')
+                    'name': site['name'],
+                    'display_name': site['display_name'],
+                    'checks': {
+                        'nginx_enabled': site['nginx_enabled'],
+                        'port_available': False,
+                        'domain_accessible': None,
+                    },
+                    'details': {
+                        'domain': site.get('domain'),
+                        'backend_port': site.get('backend_port'),
+                    },
+                    'status': 'error',
+                    'error': str(e),
                 })
-                total += 1
+    
+    # Sort: healthy first, then by name
+    status_order = {'healthy': 0, 'running': 1, 'partial': 2, 'backend_down': 3, 'unreachable': 4, 'offline': 5, 'error': 6}
+    results.sort(key=lambda x: (status_order.get(x['status'], 99), x['name']))
+    
+    # Calculate summary
+    healthy = sum(1 for r in results if r['status'] == 'healthy')
+    running = sum(1 for r in results if r['status'] in ('healthy', 'running'))
+    total = len(results)
     
     duration = (time.time() - start_time) * 1000
-    info('SITES', f'Site availability check completed in {duration:.0f}ms', {
+    info('SITES', f'Site check completed in {duration:.0f}ms', {
         'healthy': healthy,
-        'total': total,
-        'sites': [r['name'] for r in results]
+        'running': running,
+        'total': total
     })
     
     return jsonify({
         'sites': results,
-        'healthy': healthy,
-        'total': total,
-        'summary': f'{healthy}/{total}'
+        'summary': {
+            'healthy': healthy,
+            'running': running,
+            'total': total,
+            'text': f'{healthy}/{total} fully healthy, {running}/{total} running'
+        },
+        'check_time_ms': round(duration),
+        'timestamp': datetime.now().isoformat()
     })
 
 # =============================================================================
