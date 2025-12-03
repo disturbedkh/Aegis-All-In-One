@@ -494,6 +494,15 @@ function initWebSocket() {
             updateServiceStatus(data);
         });
         
+        // Disk auto-cleanup notification
+        socket.on('disk_cleanup', (data) => {
+            showToast(`🧹 Auto-cleanup freed ${data.freed}! (${data.reason})`, 'success');
+            // Refresh disk health panel
+            if (typeof loadDiskHealth === 'function') {
+                loadDiskHealth();
+            }
+        });
+        
         // Action results
         socket.on('action_result', (data) => {
             if (data.success) {

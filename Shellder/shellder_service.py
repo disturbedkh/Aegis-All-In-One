@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.26"  # 2025-12-03: Disk health monitoring - detect/cleanup bloat, large file scanner
-SHELLDER_BUILD = "20251203-2"  # Date-based build number
+SHELLDER_VERSION = "1.0.27"  # 2025-12-03: Auto disk cleanup watchdog - prevents bloat buildup
+SHELLDER_BUILD = "20251203-3"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -3977,7 +3977,11 @@ class StatsCollector:
         # System services thread
         threading.Thread(target=self._check_system_services, daemon=True).start()
         
+        # Disk watchdog thread - auto-cleans known bloat
+        threading.Thread(target=self._disk_watchdog, daemon=True).start()
+        
         print("Stats collector started with parsers for: Xilriws, Rotom, Koji, Reactmap, Database")
+        print("Disk watchdog started - will auto-clean known bloat sources")
     
     def stop(self):
         self.running = False
@@ -5160,6 +5164,113 @@ class StatsCollector:
                 socketio.emit('service_status', services)
             
             time.sleep(60)
+    
+    def _disk_watchdog(self):
+        """
+        Background disk watchdog - automatically cleans known bloat sources
+        Runs every 30 minutes and cleans bloat when:
+        - Disk usage > 70% OR
+        - Any single bloat source > 1GB
+        
+        This prevents runaway caches like GNOME Tracker from filling the disk.
+        """
+        # Wait 60 seconds after startup before first check
+        time.sleep(60)
+        
+        info('DISK_WATCHDOG', 'Disk watchdog started - monitoring for bloat')
+        
+        while self.running:
+            try:
+                # Check disk usage
+                disk_usage = _get_disk_usage()
+                if not disk_usage:
+                    time.sleep(1800)  # 30 minutes
+                    continue
+                
+                disk_percent = disk_usage['percent']
+                should_clean = False
+                reason = ""
+                
+                # Auto-clean if disk > 70%
+                if disk_percent >= 70:
+                    should_clean = True
+                    reason = f"disk at {disk_percent}%"
+                
+                # Detect bloat
+                bloat_sources = _detect_bloat()
+                large_bloat = [b for b in bloat_sources if b['total_size'] > 1024 * 1024 * 1024]  # > 1GB
+                
+                if large_bloat:
+                    should_clean = True
+                    reason = f"large bloat detected: {', '.join(b['name'] for b in large_bloat)}"
+                
+                if should_clean:
+                    info('DISK_WATCHDOG', f'Auto-cleanup triggered: {reason}')
+                    
+                    # Clean only SAFE sources automatically
+                    cleaned_total = 0
+                    for source in bloat_sources:
+                        # Find full config
+                        source_config = None
+                        for s in KNOWN_BLOAT_SOURCES:
+                            if s['id'] == source['id'] and s['safe']:
+                                source_config = s
+                                break
+                        
+                        if not source_config:
+                            continue
+                        
+                        # Only clean if source is > 100MB
+                        if source['total_size'] < 100 * 1024 * 1024:
+                            continue
+                        
+                        size_before = source['total_size']
+                        
+                        # Run cleanup commands
+                        for cmd in source_config['cleanup_commands']:
+                            try:
+                                expanded_cmd = cmd
+                                for path in source_config['paths']:
+                                    if '~' in path:
+                                        expanded_cmd = expanded_cmd.replace(path, _expand_path(path))
+                                
+                                subprocess.run(
+                                    expanded_cmd,
+                                    shell=True,
+                                    capture_output=True,
+                                    text=True,
+                                    timeout=120
+                                )
+                            except Exception as e:
+                                warn('DISK_WATCHDOG', f'Cleanup command failed: {cmd}', {'error': str(e)})
+                        
+                        # Calculate freed space
+                        size_after = sum(_get_dir_size(p) for p in source_config['paths'])
+                        freed = size_before - size_after
+                        cleaned_total += freed
+                        
+                        if freed > 0:
+                            info('DISK_WATCHDOG', f'Cleaned {source_config["name"]}: freed {format_bytes(freed)}')
+                    
+                    if cleaned_total > 0:
+                        info('DISK_WATCHDOG', f'Auto-cleanup complete: freed {format_bytes(cleaned_total)} total')
+                        
+                        # Emit event to connected clients
+                        if socketio and SOCKETIO_AVAILABLE:
+                            socketio.emit('disk_cleanup', {
+                                'freed': format_bytes(cleaned_total),
+                                'freed_bytes': cleaned_total,
+                                'reason': reason,
+                                'timestamp': datetime.now().isoformat()
+                            })
+                else:
+                    debug('DISK_WATCHDOG', f'Disk healthy at {disk_percent}%, no cleanup needed')
+                
+            except Exception as e:
+                error('DISK_WATCHDOG', f'Watchdog error: {e}', exc_info=True)
+            
+            # Sleep for 30 minutes between checks
+            time.sleep(1800)
     
     def get_all_stats(self):
         """Get all collected statistics"""
