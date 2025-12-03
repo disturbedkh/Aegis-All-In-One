@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.24"  # 2025-12-02: Revert to flex:1 bars, remove placeholders
-SHELLDER_BUILD = "20251202-13"  # Date-based build number
+SHELLDER_VERSION = "1.0.25"  # 2025-12-03: Fix chart overflow - bars shrink to fit container
+SHELLDER_BUILD = "20251203-1"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
