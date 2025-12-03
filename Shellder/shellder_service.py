@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.30"  # 2025-12-03: Combined System Resources panel (Disk + Memory + Processes tabs)
-SHELLDER_BUILD = "20251203-6"  # Date-based build number
+SHELLDER_VERSION = "1.0.31"  # 2025-12-03: Add /api/metrics/debug endpoint to diagnose history issues
+SHELLDER_BUILD = "20251203-7"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -5423,6 +5423,92 @@ def api_metrics_current():
         'sparklines': sparklines,
         'timestamp': datetime.now().isoformat()
     })
+
+@app.route('/api/metrics/debug')
+def api_metrics_debug():
+    """Debug endpoint to diagnose metrics database issues"""
+    debug_info = {
+        'server_time': {
+            'utc': datetime.utcnow().isoformat() + 'Z',
+            'local': datetime.now().isoformat(),
+            'timezone': str(time.timezone / 3600) + ' hours from UTC'
+        },
+        'database': {
+            'available': shellder_db is not None,
+            'path': str(shellder_db.db_path) if shellder_db else None
+        },
+        'metrics': {}
+    }
+    
+    if shellder_db:
+        conn = shellder_db._connect()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                
+                # Get SQLite's view of now
+                cursor.execute("SELECT datetime('now'), datetime('now', 'localtime')")
+                row = cursor.fetchone()
+                debug_info['sqlite_time'] = {
+                    'now_utc': row[0],
+                    'now_local': row[1]
+                }
+                
+                # Get count and range for each metric
+                for metric in ['cpu_percent', 'memory_percent', 'disk_percent']:
+                    cursor.execute("""
+                        SELECT 
+                            COUNT(*) as count,
+                            MIN(recorded_at) as oldest,
+                            MAX(recorded_at) as newest,
+                            MIN(metric_value) as min_val,
+                            MAX(metric_value) as max_val,
+                            AVG(metric_value) as avg_val
+                        FROM metrics_history
+                        WHERE metric_name = ?
+                    """, (metric,))
+                    row = cursor.fetchone()
+                    debug_info['metrics'][metric] = {
+                        'count': row[0],
+                        'oldest': row[1],
+                        'newest': row[2],
+                        'min': round(row[3], 2) if row[3] else None,
+                        'max': round(row[4], 2) if row[4] else None,
+                        'avg': round(row[5], 2) if row[5] else None
+                    }
+                    
+                    # Get last 5 entries
+                    cursor.execute("""
+                        SELECT metric_value, recorded_at
+                        FROM metrics_history
+                        WHERE metric_name = ?
+                        ORDER BY recorded_at DESC
+                        LIMIT 5
+                    """, (metric,))
+                    debug_info['metrics'][metric]['last_5'] = [
+                        {'value': r[0], 'time': r[1]} for r in cursor.fetchall()
+                    ]
+                    
+                    # Test the 24h query
+                    cursor.execute("""
+                        SELECT COUNT(*), MIN(recorded_at), MAX(recorded_at)
+                        FROM metrics_history
+                        WHERE metric_name = ?
+                          AND recorded_at >= datetime('now', '-1440 minutes')
+                    """, (metric,))
+                    row = cursor.fetchone()
+                    debug_info['metrics'][metric]['last_24h_query'] = {
+                        'count': row[0],
+                        'oldest': row[1],
+                        'newest': row[2]
+                    }
+                
+            except Exception as e:
+                debug_info['error'] = str(e)
+            finally:
+                conn.close()
+    
+    return jsonify(debug_info)
 
 # =============================================================================
 # DEBUG ENDPOINTS (AI-FRIENDLY COMPREHENSIVE LOGGING)
