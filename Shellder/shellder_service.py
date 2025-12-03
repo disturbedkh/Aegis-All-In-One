@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.35"  # 2025-12-03: Add Sites & Security page with UFW, Fail2Ban, Authelia, Basic Auth
-SHELLDER_BUILD = "20251203-11"  # Date-based build number
+SHELLDER_VERSION = "1.0.36"  # 2025-12-03: Add Setup & Config page with GitHub manager, config editor, env manager
+SHELLDER_BUILD = "20251203-12"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -7624,6 +7624,765 @@ def api_nginx_setup():
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+# =============================================================================
+# SETUP & CONFIG MANAGER API
+# =============================================================================
+# Setup status, config file management, environment variables, GitHub integration
+
+# Define required config files and their purposes
+REQUIRED_CONFIGS = {
+    '.env': {
+        'name': 'Environment Variables',
+        'description': 'Main configuration file with passwords and secrets',
+        'template': 'env-default',
+        'critical': True,
+        'category': 'core'
+    },
+    'docker-compose.yaml': {
+        'name': 'Docker Compose',
+        'description': 'Defines all container services',
+        'template': None,
+        'critical': True,
+        'category': 'core'
+    },
+    'unown/dragonite_config.toml': {
+        'name': 'Dragonite Config',
+        'description': 'Scanner coordinator configuration',
+        'template': 'unown/dragonite_config-default.toml',
+        'critical': False,
+        'category': 'scanner'
+    },
+    'unown/golbat_config.toml': {
+        'name': 'Golbat Config',
+        'description': 'Data processor configuration',
+        'template': 'unown/golbat_config-default.toml',
+        'critical': False,
+        'category': 'scanner'
+    },
+    'unown/rotom_config.json': {
+        'name': 'Rotom Config',
+        'description': 'Device manager configuration',
+        'template': 'unown/rotom_config-default.json',
+        'critical': False,
+        'category': 'scanner'
+    },
+    'reactmap/local.json': {
+        'name': 'ReactMap Config',
+        'description': 'Map frontend configuration',
+        'template': 'reactmap/local-default.json',
+        'critical': False,
+        'category': 'frontend'
+    },
+    'fletchling.toml': {
+        'name': 'Fletchling Config',
+        'description': 'Pokemon nesting service configuration',
+        'template': None,
+        'critical': False,
+        'category': 'optional'
+    },
+    'Poracle/config/local.json': {
+        'name': 'Poracle Config',
+        'description': 'Alert/notification service configuration',
+        'template': None,
+        'critical': False,
+        'category': 'optional'
+    },
+    'mysql_data/mariadb.cnf': {
+        'name': 'MariaDB Config',
+        'description': 'Database server configuration',
+        'template': None,
+        'critical': False,
+        'category': 'database'
+    },
+    'init/01.sql': {
+        'name': 'Database Init',
+        'description': 'Initial database schema',
+        'template': None,
+        'critical': True,
+        'category': 'database'
+    }
+}
+
+# Required environment variables
+REQUIRED_ENV_VARS = {
+    'PUID': {'description': 'User ID for file permissions', 'default': '1000', 'category': 'system'},
+    'PGID': {'description': 'Group ID for file permissions', 'default': '1000', 'category': 'system'},
+    'MYSQL_ROOT_PASSWORD': {'description': 'Database root password', 'default': '', 'category': 'database', 'secret': True},
+    'MYSQL_USER': {'description': 'Database username', 'default': 'dbuser', 'category': 'database'},
+    'MYSQL_PASSWORD': {'description': 'Database user password', 'default': '', 'category': 'database', 'secret': True},
+    'KOJI_SECRET': {'description': 'Koji API secret', 'default': '', 'category': 'api', 'secret': True},
+    'DRAGONITE_PASSWORD': {'description': 'Dragonite admin password', 'default': '', 'category': 'api', 'secret': True},
+    'DRAGONITE_API_SECRET': {'description': 'Dragonite API secret', 'default': '', 'category': 'api', 'secret': True},
+    'GOLBAT_API_SECRET': {'description': 'Golbat API secret', 'default': '', 'category': 'api', 'secret': True},
+    'GOLBAT_RAW_SECRET': {'description': 'Golbat raw data secret', 'default': '', 'category': 'api', 'secret': True},
+}
+
+@app.route('/api/setup/status')
+def api_setup_status():
+    """Get overall setup status - what's configured and what's missing"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    status = {
+        'configs': {},
+        'env_vars': {},
+        'services': {},
+        'summary': {
+            'configs_present': 0,
+            'configs_missing': 0,
+            'env_vars_set': 0,
+            'env_vars_missing': 0,
+            'setup_complete': False
+        }
+    }
+    
+    # Check config files
+    for config_path, config_info in REQUIRED_CONFIGS.items():
+        full_path = os.path.join(aegis_root, config_path)
+        template_path = os.path.join(aegis_root, config_info['template']) if config_info['template'] else None
+        
+        exists = os.path.exists(full_path)
+        has_template = template_path and os.path.exists(template_path)
+        
+        status['configs'][config_path] = {
+            'name': config_info['name'],
+            'description': config_info['description'],
+            'exists': exists,
+            'critical': config_info['critical'],
+            'category': config_info['category'],
+            'has_template': has_template,
+            'template': config_info['template'],
+            'size': os.path.getsize(full_path) if exists else 0,
+            'modified': datetime.fromtimestamp(os.path.getmtime(full_path)).isoformat() if exists else None
+        }
+        
+        if exists:
+            status['summary']['configs_present'] += 1
+        else:
+            status['summary']['configs_missing'] += 1
+    
+    # Check environment variables
+    env_file = os.path.join(aegis_root, '.env')
+    env_values = {}
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        env_values[key.strip()] = value.strip()
+        except:
+            pass
+    
+    for var_name, var_info in REQUIRED_ENV_VARS.items():
+        value = env_values.get(var_name, '')
+        is_set = bool(value) and value != var_info.get('default', '')
+        
+        status['env_vars'][var_name] = {
+            'description': var_info['description'],
+            'category': var_info['category'],
+            'is_set': is_set,
+            'is_secret': var_info.get('secret', False),
+            'value': '***' if var_info.get('secret', False) and is_set else (value if value else var_info.get('default', ''))
+        }
+        
+        if is_set:
+            status['summary']['env_vars_set'] += 1
+        else:
+            status['summary']['env_vars_missing'] += 1
+    
+    # Check Docker status
+    try:
+        result = subprocess.run(['docker', 'info'], capture_output=True, text=True, timeout=5)
+        status['services']['docker'] = {
+            'installed': True,
+            'running': result.returncode == 0
+        }
+    except:
+        status['services']['docker'] = {'installed': False, 'running': False}
+    
+    # Check Docker Compose
+    try:
+        result = subprocess.run(['docker', 'compose', 'version'], capture_output=True, text=True, timeout=5)
+        status['services']['docker_compose'] = {
+            'installed': result.returncode == 0,
+            'version': result.stdout.strip() if result.returncode == 0 else None
+        }
+    except:
+        status['services']['docker_compose'] = {'installed': False}
+    
+    # Determine if setup is complete
+    critical_configs = [p for p, i in REQUIRED_CONFIGS.items() if i['critical']]
+    critical_present = all(status['configs'].get(p, {}).get('exists', False) for p in critical_configs)
+    critical_vars = ['MYSQL_ROOT_PASSWORD', 'MYSQL_PASSWORD']
+    critical_vars_set = all(status['env_vars'].get(v, {}).get('is_set', False) for v in critical_vars)
+    
+    status['summary']['setup_complete'] = critical_present and critical_vars_set and status['services'].get('docker', {}).get('running', False)
+    
+    return jsonify(status)
+
+@app.route('/api/setup/scripts')
+def api_setup_scripts():
+    """Get list of available setup scripts"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    shellder_dir = os.path.join(aegis_root, 'Shellder')
+    
+    scripts = [
+        {'name': 'setup.sh', 'description': 'Full initial setup', 'category': 'setup'},
+        {'name': 'dbsetup.sh', 'description': 'Database setup & maintenance', 'category': 'setup'},
+        {'name': 'nginx-setup.sh', 'description': 'Nginx & SSL configuration', 'category': 'setup'},
+        {'name': 'fletchling.sh', 'description': 'Fletchling nest service', 'category': 'service'},
+        {'name': 'poracle.sh', 'description': 'Poracle alerts service', 'category': 'service'},
+        {'name': 'check.sh', 'description': 'System health check', 'category': 'utility'},
+        {'name': 'logs.sh', 'description': 'Log viewer', 'category': 'utility'},
+    ]
+    
+    for script in scripts:
+        script_path = os.path.join(shellder_dir, script['name'])
+        script['exists'] = os.path.exists(script_path)
+        script['path'] = script_path
+    
+    return jsonify({'scripts': scripts})
+
+@app.route('/api/setup/run/<script>', methods=['POST'])
+def api_setup_run_script(script):
+    """Run a setup script (streams output)"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    # Whitelist allowed scripts
+    allowed_scripts = ['setup.sh', 'dbsetup.sh', 'nginx-setup.sh', 'check.sh', 'fletchling.sh', 'poracle.sh']
+    if script not in allowed_scripts:
+        return jsonify({'error': f'Script not allowed. Use: {allowed_scripts}'}), 400
+    
+    script_path = os.path.join(aegis_root, 'Shellder', script)
+    if not os.path.exists(script_path):
+        return jsonify({'error': 'Script not found'}), 404
+    
+    try:
+        # Run script with sudo and capture output
+        result = subprocess.run(
+            ['sudo', 'bash', script_path],
+            capture_output=True,
+            text=True,
+            timeout=300,  # 5 minute timeout
+            cwd=aegis_root
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'return_code': result.returncode
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Script timed out (5 minutes)'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/files')
+def api_config_files():
+    """Get list of all config files with their status"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    files = []
+    for config_path, config_info in REQUIRED_CONFIGS.items():
+        full_path = os.path.join(aegis_root, config_path)
+        files.append({
+            'path': config_path,
+            'full_path': full_path,
+            'name': config_info['name'],
+            'description': config_info['description'],
+            'category': config_info['category'],
+            'critical': config_info['critical'],
+            'exists': os.path.exists(full_path),
+            'template': config_info['template']
+        })
+    
+    return jsonify({'files': files})
+
+@app.route('/api/config/file', methods=['GET'])
+def api_config_file_read():
+    """Read a config file"""
+    path = request.args.get('path')
+    if not path:
+        return jsonify({'error': 'Path is required'}), 400
+    
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    # Security: ensure path is within aegis root
+    full_path = os.path.normpath(os.path.join(aegis_root, path))
+    if not full_path.startswith(aegis_root):
+        return jsonify({'error': 'Invalid path'}), 403
+    
+    if not os.path.exists(full_path):
+        # Check for template
+        config_info = REQUIRED_CONFIGS.get(path, {})
+        if config_info.get('template'):
+            template_path = os.path.join(aegis_root, config_info['template'])
+            if os.path.exists(template_path):
+                try:
+                    with open(template_path, 'r') as f:
+                        return jsonify({
+                            'content': f.read(),
+                            'is_template': True,
+                            'template_path': config_info['template']
+                        })
+                except Exception as e:
+                    return jsonify({'error': str(e)}), 500
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        with open(full_path, 'r') as f:
+            content = f.read()
+        return jsonify({
+            'content': content,
+            'path': path,
+            'size': len(content),
+            'modified': datetime.fromtimestamp(os.path.getmtime(full_path)).isoformat()
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/file', methods=['POST'])
+def api_config_file_write():
+    """Write a config file"""
+    data = request.get_json()
+    path = data.get('path')
+    content = data.get('content')
+    
+    if not path or content is None:
+        return jsonify({'error': 'Path and content are required'}), 400
+    
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    # Security: ensure path is within aegis root
+    full_path = os.path.normpath(os.path.join(aegis_root, path))
+    if not full_path.startswith(aegis_root):
+        return jsonify({'error': 'Invalid path'}), 403
+    
+    try:
+        # Create directory if needed
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        
+        # Write using sudo tee for permission handling
+        result = subprocess.run(
+            ['sudo', 'tee', full_path],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        
+        return jsonify({'success': True, 'path': path})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/env')
+def api_config_env_read():
+    """Read environment variables from .env file"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    env_file = os.path.join(aegis_root, '.env')
+    
+    variables = {}
+    raw_content = ''
+    
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                raw_content = f.read()
+                for line in raw_content.split('\n'):
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key, value = line.split('=', 1)
+                        key = key.strip()
+                        value = value.strip()
+                        
+                        # Check if it's a required var
+                        var_info = REQUIRED_ENV_VARS.get(key, {})
+                        variables[key] = {
+                            'value': '***' if var_info.get('secret', False) else value,
+                            'is_secret': var_info.get('secret', False),
+                            'description': var_info.get('description', 'Custom variable'),
+                            'category': var_info.get('category', 'custom')
+                        }
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    
+    # Add missing required vars
+    for var_name, var_info in REQUIRED_ENV_VARS.items():
+        if var_name not in variables:
+            variables[var_name] = {
+                'value': '',
+                'is_secret': var_info.get('secret', False),
+                'description': var_info['description'],
+                'category': var_info['category'],
+                'missing': True
+            }
+    
+    return jsonify({
+        'variables': variables,
+        'exists': os.path.exists(env_file),
+        'required': list(REQUIRED_ENV_VARS.keys())
+    })
+
+@app.route('/api/config/env', methods=['POST'])
+def api_config_env_write():
+    """Update environment variables in .env file"""
+    data = request.get_json()
+    updates = data.get('variables', {})
+    
+    if not updates:
+        return jsonify({'error': 'No variables to update'}), 400
+    
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    env_file = os.path.join(aegis_root, '.env')
+    
+    try:
+        # Read existing content
+        existing = {}
+        lines = []
+        if os.path.exists(env_file):
+            with open(env_file, 'r') as f:
+                for line in f:
+                    original_line = line
+                    line = line.strip()
+                    if line and not line.startswith('#') and '=' in line:
+                        key = line.split('=', 1)[0].strip()
+                        existing[key] = len(lines)
+                    lines.append(original_line)
+        
+        # Update values
+        for key, value in updates.items():
+            if value == '***':  # Skip masked values
+                continue
+            if key in existing:
+                # Update existing line
+                lines[existing[key]] = f'{key}={value}\n'
+            else:
+                # Add new line
+                lines.append(f'{key}={value}\n')
+        
+        # Write back
+        content = ''.join(lines)
+        result = subprocess.run(
+            ['sudo', 'tee', env_file],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        
+        return jsonify({'success': True, 'updated': list(updates.keys())})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/config/create-from-template', methods=['POST'])
+def api_config_create_from_template():
+    """Create a config file from its template"""
+    data = request.get_json()
+    path = data.get('path')
+    
+    if not path:
+        return jsonify({'error': 'Path is required'}), 400
+    
+    config_info = REQUIRED_CONFIGS.get(path)
+    if not config_info or not config_info.get('template'):
+        return jsonify({'error': 'No template available for this config'}), 404
+    
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    template_path = os.path.join(aegis_root, config_info['template'])
+    target_path = os.path.join(aegis_root, path)
+    
+    if not os.path.exists(template_path):
+        return jsonify({'error': 'Template file not found'}), 404
+    
+    try:
+        # Read template
+        with open(template_path, 'r') as f:
+            content = f.read()
+        
+        # Create directory if needed
+        os.makedirs(os.path.dirname(target_path), exist_ok=True)
+        
+        # Copy template
+        result = subprocess.run(
+            ['sudo', 'cp', template_path, target_path],
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to copy: {result.stderr}'}), 500
+        
+        return jsonify({'success': True, 'path': path})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+# =============================================================================
+# GITHUB MANAGER API
+# =============================================================================
+
+@app.route('/api/github/status')
+def api_github_status():
+    """Get git repository status"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    status = {
+        'is_repo': False,
+        'branch': None,
+        'commit': None,
+        'commit_short': None,
+        'commit_message': None,
+        'commit_date': None,
+        'remote_url': None,
+        'has_changes': False,
+        'behind': 0,
+        'ahead': 0
+    }
+    
+    try:
+        # Check if it's a git repo
+        result = subprocess.run(
+            ['git', 'rev-parse', '--git-dir'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        if result.returncode != 0:
+            return jsonify(status)
+        
+        status['is_repo'] = True
+        
+        # Get current branch
+        result = subprocess.run(
+            ['git', 'branch', '--show-current'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['branch'] = result.stdout.strip() if result.returncode == 0 else None
+        
+        # Get current commit
+        result = subprocess.run(
+            ['git', 'rev-parse', 'HEAD'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['commit'] = result.stdout.strip() if result.returncode == 0 else None
+        status['commit_short'] = status['commit'][:7] if status['commit'] else None
+        
+        # Get commit message
+        result = subprocess.run(
+            ['git', 'log', '-1', '--format=%s'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['commit_message'] = result.stdout.strip() if result.returncode == 0 else None
+        
+        # Get commit date
+        result = subprocess.run(
+            ['git', 'log', '-1', '--format=%ci'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['commit_date'] = result.stdout.strip() if result.returncode == 0 else None
+        
+        # Get remote URL
+        result = subprocess.run(
+            ['git', 'remote', 'get-url', 'origin'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['remote_url'] = result.stdout.strip() if result.returncode == 0 else None
+        
+        # Check for local changes
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        status['has_changes'] = bool(result.stdout.strip()) if result.returncode == 0 else False
+        
+        # Fetch remote to check for updates
+        subprocess.run(['git', 'fetch', '--quiet'], capture_output=True, timeout=30, cwd=aegis_root)
+        
+        # Check ahead/behind
+        result = subprocess.run(
+            ['git', 'rev-list', '--count', '--left-right', f'{status["branch"]}...origin/{status["branch"]}'],
+            capture_output=True, text=True, timeout=5, cwd=aegis_root
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            parts = result.stdout.strip().split()
+            if len(parts) == 2:
+                status['ahead'] = int(parts[0])
+                status['behind'] = int(parts[1])
+        
+    except Exception as e:
+        status['error'] = str(e)
+    
+    return jsonify(status)
+
+@app.route('/api/github/pull', methods=['POST'])
+def api_github_pull():
+    """Pull latest changes from remote"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    try:
+        # Stash any local changes first
+        stash_result = subprocess.run(
+            ['git', 'stash', '--include-untracked'],
+            capture_output=True, text=True, timeout=30, cwd=aegis_root
+        )
+        stashed = 'Saved working directory' in stash_result.stdout
+        
+        # Pull changes
+        result = subprocess.run(
+            ['git', 'pull', '--ff-only'],
+            capture_output=True, text=True, timeout=60, cwd=aegis_root
+        )
+        
+        # Restore stashed changes
+        if stashed:
+            subprocess.run(['git', 'stash', 'pop'], capture_output=True, timeout=30, cwd=aegis_root)
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'output': result.stdout,
+                'stashed': stashed
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'error': result.stderr or result.stdout,
+                'stashed': stashed
+            })
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/github/pull-restart', methods=['POST'])
+def api_github_pull_restart():
+    """Pull latest changes and restart Shellder service"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    steps = []
+    
+    try:
+        # Step 1: Stash changes
+        stash_result = subprocess.run(
+            ['git', 'stash', '--include-untracked'],
+            capture_output=True, text=True, timeout=30, cwd=aegis_root
+        )
+        stashed = 'Saved working directory' in stash_result.stdout
+        steps.append({'step': 'stash', 'success': True, 'stashed': stashed})
+        
+        # Step 2: Pull changes
+        pull_result = subprocess.run(
+            ['git', 'pull', '--ff-only'],
+            capture_output=True, text=True, timeout=60, cwd=aegis_root
+        )
+        steps.append({
+            'step': 'pull',
+            'success': pull_result.returncode == 0,
+            'output': pull_result.stdout or pull_result.stderr
+        })
+        
+        if pull_result.returncode != 0:
+            # Restore stash if pull failed
+            if stashed:
+                subprocess.run(['git', 'stash', 'pop'], capture_output=True, timeout=30, cwd=aegis_root)
+            return jsonify({'success': False, 'steps': steps, 'error': 'Pull failed'})
+        
+        # Step 3: Restore stash
+        if stashed:
+            pop_result = subprocess.run(
+                ['git', 'stash', 'pop'],
+                capture_output=True, text=True, timeout=30, cwd=aegis_root
+            )
+            steps.append({'step': 'restore', 'success': pop_result.returncode == 0})
+        
+        # Step 4: Restart Shellder container
+        restart_result = subprocess.run(
+            ['docker', 'compose', 'restart', 'shellder'],
+            capture_output=True, text=True, timeout=60, cwd=aegis_root
+        )
+        steps.append({
+            'step': 'restart',
+            'success': restart_result.returncode == 0,
+            'output': restart_result.stdout or restart_result.stderr
+        })
+        
+        return jsonify({
+            'success': all(s.get('success', True) for s in steps),
+            'steps': steps,
+            'message': 'Pull and restart complete. Page will reload shortly.'
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'steps': steps, 'error': str(e)})
+
+@app.route('/api/github/changes')
+def api_github_changes():
+    """Get list of changed files"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    
+    try:
+        result = subprocess.run(
+            ['git', 'status', '--porcelain'],
+            capture_output=True, text=True, timeout=10, cwd=aegis_root
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr}), 500
+        
+        changes = []
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                status = line[:2]
+                file_path = line[3:]
+                changes.append({
+                    'status': status.strip(),
+                    'path': file_path,
+                    'type': 'modified' if 'M' in status else 'added' if 'A' in status else 'deleted' if 'D' in status else 'untracked' if '?' in status else 'other'
+                })
+        
+        return jsonify({'changes': changes, 'count': len(changes)})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/github/commits')
+def api_github_commits():
+    """Get recent commits"""
+    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    limit = request.args.get('limit', 10, type=int)
+    
+    try:
+        result = subprocess.run(
+            ['git', 'log', f'-{limit}', '--format=%H|%h|%s|%an|%ci'],
+            capture_output=True, text=True, timeout=10, cwd=aegis_root
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr}), 500
+        
+        commits = []
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                parts = line.split('|')
+                if len(parts) >= 5:
+                    commits.append({
+                        'hash': parts[0],
+                        'short_hash': parts[1],
+                        'message': parts[2],
+                        'author': parts[3],
+                        'date': parts[4]
+                    })
+        
+        return jsonify({'commits': commits})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # =============================================================================
 # SECURITY SERVICES API

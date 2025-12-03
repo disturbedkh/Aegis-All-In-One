@@ -31,6 +31,10 @@
                     <span class="nav-icon">🐳</span>
                     <span>Containers</span>
                 </a>
+                <a href="#" class="nav-item" data-page="setup" onclick="navigateTo('setup'); return false;">
+                    <span class="nav-icon">⚙️</span>
+                    <span>Setup & Config</span>
+                </a>
             </div>
             
             <div class="nav-section">
@@ -441,6 +445,205 @@
                     <div class="card-body">
                         <div id="containerDetailList" class="container-detail-list">
                             <div class="loading">Loading...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Setup & Config Page -->
+            <div id="page-setup" class="page">
+                <!-- Setup Status Overview -->
+                <div class="stats-grid setup-stats-grid">
+                    <div class="stat-card" id="setupStatusCard">
+                        <div class="stat-icon" id="setupStatusIcon">⚙️</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="setupStatus">Checking...</div>
+                            <div class="stat-label">Setup Status</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📄</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="configsStatus">-/-</div>
+                            <div class="stat-label">Config Files</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🔑</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="envVarsStatus">-/-</div>
+                            <div class="stat-label">Env Variables</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="gitStatusCard">
+                        <div class="stat-icon" id="gitStatusIcon">📦</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="gitStatus">-</div>
+                            <div class="stat-label">Repository</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="setup-tabs">
+                    <button class="setup-tab active" onclick="showSetupTab('github')">📦 GitHub</button>
+                    <button class="setup-tab" onclick="showSetupTab('configs')">📄 Configs</button>
+                    <button class="setup-tab" onclick="showSetupTab('env')">🔑 Environment</button>
+                    <button class="setup-tab" onclick="showSetupTab('scripts')">🚀 Setup Scripts</button>
+                </div>
+                
+                <!-- GitHub Manager Tab -->
+                <div id="setup-tab-github" class="setup-tab-content active">
+                    <div class="dashboard-grid github-grid">
+                        <!-- Repository Status -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>📦 Repository Status</h2>
+                                <button class="btn btn-sm" onclick="loadGitStatus()">🔄 Refresh</button>
+                            </div>
+                            <div class="card-body">
+                                <div id="gitRepoStatus" class="git-status">
+                                    <div class="loading">Loading...</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Quick Actions -->
+                        <div class="card">
+                            <div class="card-header">
+                                <h2>⚡ Quick Actions</h2>
+                            </div>
+                            <div class="card-body">
+                                <div class="git-actions">
+                                    <button class="btn btn-primary btn-lg" onclick="gitPullAndRestart()">
+                                        🔄 Pull & Restart
+                                        <span class="btn-hint">Update code and restart Shellder</span>
+                                    </button>
+                                    <button class="btn btn-lg" onclick="gitPullOnly()">
+                                        📥 Pull Only
+                                        <span class="btn-hint">Download updates without restart</span>
+                                    </button>
+                                    <button class="btn btn-warning btn-lg" onclick="restartShellder()">
+                                        🔃 Restart Shellder
+                                        <span class="btn-hint">Restart without pulling</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Recent Commits -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📜 Recent Commits</h2>
+                        </div>
+                        <div class="card-body">
+                            <div id="recentCommits" class="commits-list">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Changed Files -->
+                    <div class="card" id="changedFilesCard" style="display: none;">
+                        <div class="card-header">
+                            <h2>📝 Local Changes</h2>
+                            <span class="badge badge-warning" id="changesCount">0 files</span>
+                        </div>
+                        <div class="card-body">
+                            <div id="changedFiles" class="changes-list"></div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Config Files Tab -->
+                <div id="setup-tab-configs" class="setup-tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📄 Configuration Files</h2>
+                            <button class="btn btn-sm" onclick="loadConfigFiles()">🔄 Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="configFilesList" class="config-files-list">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Config Editor -->
+                    <div class="card" id="configEditorCard" style="display: none;">
+                        <div class="card-header">
+                            <h2 id="configEditorTitle">📝 Edit Config</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-success btn-sm" onclick="saveConfigFile()">💾 Save</button>
+                                <button class="btn btn-sm" onclick="closeConfigEditor()">✖ Close</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <textarea id="configEditorContent" class="config-editor" placeholder="Loading..."></textarea>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Environment Variables Tab -->
+                <div id="setup-tab-env" class="setup-tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔑 Environment Variables (.env)</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-success btn-sm" onclick="saveEnvVars()">💾 Save All</button>
+                                <button class="btn btn-sm" onclick="loadEnvVars()">🔄 Refresh</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom: 15px;">
+                                ⚠️ These variables are used by all services. Changes require a container restart to take effect.
+                            </p>
+                            <div id="envVarsList" class="env-vars-list">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Setup Scripts Tab -->
+                <div id="setup-tab-scripts" class="setup-tab-content">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🚀 Setup Scripts</h2>
+                            <span class="text-muted">Run setup and configuration scripts</span>
+                        </div>
+                        <div class="card-body">
+                            <div class="setup-scripts-grid">
+                                <div class="setup-script-card" onclick="runSetupScript('setup.sh')">
+                                    <div class="script-icon">🔧</div>
+                                    <div class="script-name">Full Setup</div>
+                                    <div class="script-desc">Initial setup - Docker, configs, passwords</div>
+                                </div>
+                                <div class="setup-script-card" onclick="runSetupScript('dbsetup.sh')">
+                                    <div class="script-icon">🗄️</div>
+                                    <div class="script-name">Database Setup</div>
+                                    <div class="script-desc">MariaDB installation & configuration</div>
+                                </div>
+                                <div class="setup-script-card" onclick="runSetupScript('nginx-setup.sh')">
+                                    <div class="script-icon">🔒</div>
+                                    <div class="script-name">Nginx & SSL</div>
+                                    <div class="script-desc">Web server & certificates</div>
+                                </div>
+                                <div class="setup-script-card" onclick="runSetupScript('check.sh')">
+                                    <div class="script-icon">✅</div>
+                                    <div class="script-name">Health Check</div>
+                                    <div class="script-desc">System health verification</div>
+                                </div>
+                            </div>
+                            
+                            <!-- Script Output -->
+                            <div id="scriptOutputCard" class="script-output-card" style="display: none;">
+                                <div class="script-output-header">
+                                    <span id="scriptOutputTitle">Script Output</span>
+                                    <button class="btn btn-sm" onclick="closeScriptOutput()">✖ Close</button>
+                                </div>
+                                <pre id="scriptOutput" class="script-output"></pre>
+                            </div>
                         </div>
                     </div>
                 </div>

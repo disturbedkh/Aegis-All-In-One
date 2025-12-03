@@ -2528,6 +2528,9 @@ navigateTo = function(page) {
         case 'devices':
             loadDevicesPage();
             break;
+        case 'setup':
+            loadSetupPage();
+            break;
     }
 };
 
@@ -4573,6 +4576,606 @@ function loadSecurityData() {
     loadAutheliaStatus();
     loadBasicAuthUsers();
     loadSslCertificates();
+}
+
+// =============================================================================
+// SETUP & CONFIG MANAGER
+// =============================================================================
+
+let currentConfigPath = null;
+
+// Tab management
+function showSetupTab(tabName) {
+    // Hide all tabs
+    document.querySelectorAll('.setup-tab-content').forEach(tab => {
+        tab.classList.remove('active');
+    });
+    document.querySelectorAll('.setup-tab').forEach(btn => {
+        btn.classList.remove('active');
+    });
+    
+    // Show selected tab
+    const tabContent = document.getElementById(`setup-tab-${tabName}`);
+    if (tabContent) tabContent.classList.add('active');
+    
+    // Highlight button
+    document.querySelectorAll('.setup-tab').forEach(btn => {
+        if (btn.textContent.toLowerCase().includes(tabName)) {
+            btn.classList.add('active');
+        }
+    });
+    
+    // Load tab data
+    switch(tabName) {
+        case 'github':
+            loadGitStatus();
+            loadRecentCommits();
+            loadChangedFiles();
+            break;
+        case 'configs':
+            loadConfigFiles();
+            break;
+        case 'env':
+            loadEnvVars();
+            break;
+    }
+}
+
+// Load setup status overview
+async function loadSetupStatus() {
+    try {
+        const data = await fetchAPI('/api/setup/status');
+        
+        // Update status card
+        const statusEl = document.getElementById('setupStatus');
+        const statusIcon = document.getElementById('setupStatusIcon');
+        if (statusEl) {
+            if (data.summary.setup_complete) {
+                statusEl.textContent = 'Complete';
+                statusEl.className = 'stat-value text-success';
+                if (statusIcon) statusIcon.className = 'stat-icon success';
+            } else {
+                statusEl.textContent = 'Incomplete';
+                statusEl.className = 'stat-value text-warning';
+                if (statusIcon) statusIcon.className = 'stat-icon warning';
+            }
+        }
+        
+        // Update configs status
+        const configsEl = document.getElementById('configsStatus');
+        if (configsEl) {
+            configsEl.textContent = `${data.summary.configs_present}/${data.summary.configs_present + data.summary.configs_missing}`;
+        }
+        
+        // Update env vars status
+        const envEl = document.getElementById('envVarsStatus');
+        if (envEl) {
+            envEl.textContent = `${data.summary.env_vars_set}/${data.summary.env_vars_set + data.summary.env_vars_missing}`;
+        }
+        
+        return data;
+    } catch (e) {
+        console.error('Failed to load setup status:', e);
+    }
+}
+
+// =============================================================================
+// GITHUB MANAGER
+// =============================================================================
+
+async function loadGitStatus() {
+    const container = document.getElementById('gitRepoStatus');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/github/status');
+        
+        // Update stat card
+        const gitStatusEl = document.getElementById('gitStatus');
+        const gitStatusIcon = document.getElementById('gitStatusIcon');
+        if (gitStatusEl) {
+            if (data.behind > 0) {
+                gitStatusEl.textContent = `${data.behind} behind`;
+                gitStatusEl.className = 'stat-value text-warning';
+                if (gitStatusIcon) gitStatusIcon.className = 'stat-icon warning';
+            } else {
+                gitStatusEl.textContent = 'Up to date';
+                gitStatusEl.className = 'stat-value text-success';
+                if (gitStatusIcon) gitStatusIcon.className = 'stat-icon success';
+            }
+        }
+        
+        if (!data.is_repo) {
+            container.innerHTML = '<div class="info-msg">Not a git repository</div>';
+            return;
+        }
+        
+        container.innerHTML = `
+            <div class="git-info">
+                <div class="git-row">
+                    <span class="git-label">Branch:</span>
+                    <span class="git-value">${data.branch || 'unknown'}</span>
+                </div>
+                <div class="git-row">
+                    <span class="git-label">Commit:</span>
+                    <span class="git-value git-commit">${data.commit_short || 'unknown'}</span>
+                </div>
+                <div class="git-row">
+                    <span class="git-label">Message:</span>
+                    <span class="git-value">${data.commit_message || 'unknown'}</span>
+                </div>
+                <div class="git-row">
+                    <span class="git-label">Date:</span>
+                    <span class="git-value">${data.commit_date ? new Date(data.commit_date).toLocaleString() : 'unknown'}</span>
+                </div>
+                <div class="git-row">
+                    <span class="git-label">Remote:</span>
+                    <span class="git-value git-remote">${data.remote_url || 'none'}</span>
+                </div>
+                ${data.behind > 0 ? `
+                <div class="git-update-notice">
+                    <span class="update-icon">⬇️</span>
+                    <span>${data.behind} update(s) available</span>
+                </div>
+                ` : ''}
+                ${data.has_changes ? `
+                <div class="git-changes-notice">
+                    <span class="changes-icon">📝</span>
+                    <span>Local changes detected</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load git status: ${e.message}</div>`;
+    }
+}
+
+async function loadRecentCommits() {
+    const container = document.getElementById('recentCommits');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/github/commits?limit=5');
+        
+        if (data.commits && data.commits.length > 0) {
+            container.innerHTML = data.commits.map((commit, idx) => `
+                <div class="commit-item ${idx === 0 ? 'current' : ''}">
+                    <div class="commit-header">
+                        <span class="commit-hash">${commit.short_hash}</span>
+                        <span class="commit-date">${new Date(commit.date).toLocaleString()}</span>
+                    </div>
+                    <div class="commit-message">${commit.message}</div>
+                    <div class="commit-author">by ${commit.author}</div>
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="info-msg">No commits found</div>';
+        }
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load commits: ${e.message}</div>`;
+    }
+}
+
+async function loadChangedFiles() {
+    const card = document.getElementById('changedFilesCard');
+    const container = document.getElementById('changedFiles');
+    const badge = document.getElementById('changesCount');
+    if (!container || !card) return;
+    
+    try {
+        const data = await fetchAPI('/api/github/changes');
+        
+        if (data.changes && data.changes.length > 0) {
+            card.style.display = 'block';
+            if (badge) badge.textContent = `${data.count} files`;
+            
+            container.innerHTML = data.changes.map(change => `
+                <div class="change-item change-${change.type}">
+                    <span class="change-status">${change.status}</span>
+                    <span class="change-path">${change.path}</span>
+                </div>
+            `).join('');
+        } else {
+            card.style.display = 'none';
+        }
+        
+    } catch (e) {
+        card.style.display = 'none';
+    }
+}
+
+async function gitPullOnly() {
+    showToast('Pulling latest changes...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/github/pull', {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Pull successful! ' + (result.stashed ? '(Local changes preserved)' : ''), 'success');
+            loadGitStatus();
+            loadRecentCommits();
+            loadChangedFiles();
+        } else {
+            showToast(`Pull failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function gitPullAndRestart() {
+    showToast('Pulling and restarting Shellder...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/github/pull-restart', {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Pull and restart complete! Reloading page in 5 seconds...', 'success');
+            setTimeout(() => location.reload(), 5000);
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+            console.log('Pull restart steps:', result.steps);
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function restartShellder() {
+    showToast('Restarting Shellder service...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/debug/restart', {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Restarting... Page will reload in 5 seconds', 'success');
+            setTimeout(() => location.reload(), 5000);
+        } else {
+            showToast(`Restart failed: ${result.error || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// =============================================================================
+// CONFIG FILES MANAGER
+// =============================================================================
+
+async function loadConfigFiles() {
+    const container = document.getElementById('configFilesList');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/setup/status');
+        
+        // Group by category
+        const categories = {
+            'core': { name: 'Core Configuration', files: [] },
+            'scanner': { name: 'Scanner Services', files: [] },
+            'frontend': { name: 'Frontend', files: [] },
+            'database': { name: 'Database', files: [] },
+            'optional': { name: 'Optional Services', files: [] }
+        };
+        
+        for (const [path, info] of Object.entries(data.configs)) {
+            const category = info.category || 'optional';
+            if (categories[category]) {
+                categories[category].files.push({ path, ...info });
+            }
+        }
+        
+        let html = '';
+        for (const [catId, cat] of Object.entries(categories)) {
+            if (cat.files.length === 0) continue;
+            
+            html += `
+                <div class="config-category">
+                    <h4 class="category-title">${cat.name}</h4>
+                    <div class="config-items">
+                        ${cat.files.map(file => `
+                            <div class="config-item ${file.exists ? '' : 'missing'} ${file.critical ? 'critical' : ''}">
+                                <div class="config-status">
+                                    ${file.exists ? '✅' : '❌'}
+                                </div>
+                                <div class="config-info">
+                                    <div class="config-name">${file.name}</div>
+                                    <div class="config-path">${file.path}</div>
+                                    <div class="config-desc">${file.description}</div>
+                                </div>
+                                <div class="config-actions">
+                                    ${file.exists ? `
+                                        <button class="btn btn-sm" onclick="editConfigFile('${file.path}')">📝 Edit</button>
+                                    ` : file.has_template ? `
+                                        <button class="btn btn-sm btn-primary" onclick="createConfigFromTemplate('${file.path}')">➕ Create</button>
+                                    ` : `
+                                        <span class="text-muted">No template</span>
+                                    `}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html || '<div class="info-msg">No config files defined</div>';
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load config files: ${e.message}</div>`;
+    }
+}
+
+async function editConfigFile(path) {
+    const card = document.getElementById('configEditorCard');
+    const title = document.getElementById('configEditorTitle');
+    const editor = document.getElementById('configEditorContent');
+    
+    if (!card || !editor) return;
+    
+    currentConfigPath = path;
+    card.style.display = 'block';
+    title.textContent = `📝 Editing: ${path}`;
+    editor.value = 'Loading...';
+    
+    try {
+        const data = await fetchAPI(`/api/config/file?path=${encodeURIComponent(path)}`);
+        
+        if (data.is_template) {
+            editor.value = data.content;
+            showToast('Loaded from template - save to create the actual file', 'info');
+        } else {
+            editor.value = data.content;
+        }
+        
+        // Scroll to editor
+        card.scrollIntoView({ behavior: 'smooth' });
+        
+    } catch (e) {
+        editor.value = `Error loading file: ${e.message}`;
+    }
+}
+
+async function saveConfigFile() {
+    if (!currentConfigPath) {
+        showToast('No file selected', 'warning');
+        return;
+    }
+    
+    const editor = document.getElementById('configEditorContent');
+    if (!editor) return;
+    
+    try {
+        const result = await fetchAPI('/api/config/file', {
+            method: 'POST',
+            body: JSON.stringify({
+                path: currentConfigPath,
+                content: editor.value
+            }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`${currentConfigPath} saved successfully`, 'success');
+            loadConfigFiles();
+            loadSetupStatus();
+        } else {
+            showToast(`Save failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+function closeConfigEditor() {
+    const card = document.getElementById('configEditorCard');
+    if (card) card.style.display = 'none';
+    currentConfigPath = null;
+}
+
+async function createConfigFromTemplate(path) {
+    showToast(`Creating ${path} from template...`, 'info');
+    
+    try {
+        const result = await fetchAPI('/api/config/create-from-template', {
+            method: 'POST',
+            body: JSON.stringify({ path }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`${path} created successfully`, 'success');
+            loadConfigFiles();
+            loadSetupStatus();
+            editConfigFile(path);  // Open for editing
+        } else {
+            showToast(`Failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// =============================================================================
+// ENVIRONMENT VARIABLES MANAGER
+// =============================================================================
+
+async function loadEnvVars() {
+    const container = document.getElementById('envVarsList');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/config/env');
+        
+        // Group by category
+        const categories = {
+            'system': { name: '🖥️ System', vars: [] },
+            'database': { name: '🗄️ Database', vars: [] },
+            'api': { name: '🔑 API Secrets', vars: [] },
+            'custom': { name: '📋 Custom', vars: [] }
+        };
+        
+        for (const [name, info] of Object.entries(data.variables)) {
+            const category = info.category || 'custom';
+            if (categories[category]) {
+                categories[category].vars.push({ name, ...info });
+            }
+        }
+        
+        let html = '';
+        for (const [catId, cat] of Object.entries(categories)) {
+            if (cat.vars.length === 0) continue;
+            
+            html += `
+                <div class="env-category">
+                    <h4 class="category-title">${cat.name}</h4>
+                    <div class="env-items">
+                        ${cat.vars.map(v => `
+                            <div class="env-item ${v.missing ? 'missing' : ''} ${v.is_secret ? 'secret' : ''}">
+                                <div class="env-info">
+                                    <div class="env-name">${v.name}</div>
+                                    <div class="env-desc">${v.description}</div>
+                                </div>
+                                <div class="env-value">
+                                    <input type="${v.is_secret ? 'password' : 'text'}" 
+                                           class="form-input env-input" 
+                                           id="env-${v.name}"
+                                           value="${v.value || ''}"
+                                           placeholder="${v.missing ? 'Not set' : ''}">
+                                    ${v.is_secret ? `
+                                        <button class="btn btn-xs" onclick="toggleEnvVisibility('${v.name}')">👁️</button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `).join('')}
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html || '<div class="info-msg">No environment file found</div>';
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load environment variables: ${e.message}</div>`;
+    }
+}
+
+function toggleEnvVisibility(name) {
+    const input = document.getElementById(`env-${name}`);
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+}
+
+async function saveEnvVars() {
+    // Collect all env values
+    const variables = {};
+    document.querySelectorAll('.env-input').forEach(input => {
+        const name = input.id.replace('env-', '');
+        const value = input.value;
+        if (value && value !== '***') {
+            variables[name] = value;
+        }
+    });
+    
+    if (Object.keys(variables).length === 0) {
+        showToast('No changes to save', 'info');
+        return;
+    }
+    
+    showToast('Saving environment variables...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/config/env', {
+            method: 'POST',
+            body: JSON.stringify({ variables }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`Saved ${result.updated.length} variables. Restart containers for changes to take effect.`, 'success');
+            loadEnvVars();
+            loadSetupStatus();
+        } else {
+            showToast(`Save failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// =============================================================================
+// SETUP SCRIPTS
+// =============================================================================
+
+async function runSetupScript(script) {
+    const outputCard = document.getElementById('scriptOutputCard');
+    const outputTitle = document.getElementById('scriptOutputTitle');
+    const output = document.getElementById('scriptOutput');
+    
+    if (!outputCard || !output) return;
+    
+    outputCard.style.display = 'block';
+    outputTitle.textContent = `Running: ${script}`;
+    output.textContent = 'Starting script...\n\n';
+    
+    // Scroll to output
+    outputCard.scrollIntoView({ behavior: 'smooth' });
+    
+    try {
+        showToast(`Running ${script}... This may take a few minutes.`, 'info');
+        
+        const result = await fetchAPI(`/api/setup/run/${script}`, {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            output.textContent = result.stdout || 'Script completed successfully.\n';
+            if (result.stderr) {
+                output.textContent += '\n--- STDERR ---\n' + result.stderr;
+            }
+            showToast(`${script} completed successfully`, 'success');
+        } else {
+            output.textContent = `Script failed (exit code: ${result.return_code})\n\n`;
+            output.textContent += result.stdout || '';
+            output.textContent += '\n--- ERRORS ---\n' + (result.stderr || result.error || 'Unknown error');
+            showToast(`${script} failed`, 'error');
+        }
+        
+        // Refresh status
+        loadSetupStatus();
+        loadConfigFiles();
+        
+    } catch (e) {
+        output.textContent = `Error running script: ${e.message}`;
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+function closeScriptOutput() {
+    const card = document.getElementById('scriptOutputCard');
+    if (card) card.style.display = 'none';
+}
+
+// Load setup page data
+function loadSetupPage() {
+    loadSetupStatus();
+    loadGitStatus();
+    loadRecentCommits();
+    loadChangedFiles();
 }
 
 // =============================================================================
