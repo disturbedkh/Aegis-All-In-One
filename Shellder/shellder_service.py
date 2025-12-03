@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.31"  # 2025-12-03: Add /api/metrics/debug endpoint to diagnose history issues
-SHELLDER_BUILD = "20251203-7"  # Date-based build number
+SHELLDER_VERSION = "1.0.32"  # 2025-12-03: Debug metrics collection - better logging, /api/metrics/debug
+SHELLDER_BUILD = "20251203-8"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -3251,19 +3251,24 @@ class ShellderDB:
         """Record multiple metrics at once: {name: value, ...}"""
         conn = self._connect()
         if not conn:
-            return
+            print(f"[METRICS DB] Cannot connect to database at {self.db_path}")
+            return False
         
         try:
             cursor = conn.cursor()
+            recorded = 0
             for name, value in metrics.items():
                 if value is not None:
                     cursor.execute("""
                         INSERT INTO metrics_history (metric_name, metric_value)
                         VALUES (?, ?)
                     """, (name, float(value)))
+                    recorded += 1
             conn.commit()
+            return recorded > 0
         except Exception as e:
-            print(f"Error recording metrics batch: {e}")
+            print(f"[METRICS DB] Error recording metrics batch: {e}")
+            return False
         finally:
             conn.close()
     
@@ -4166,8 +4171,14 @@ class StatsCollector:
                 metrics['disk_percent'] = stats['disk'].get('percent', 0)
             
             if metrics:
-                shellder_db.record_metrics_batch(metrics)
+                if shellder_db:
+                    success = shellder_db.record_metrics_batch(metrics)
+                    if not success:
+                        error('METRICS', 'Failed to record metrics batch - returned False')
+                else:
+                    error('METRICS', 'Cannot record metrics - shellder_db is None')
         except Exception as e:
+            error('METRICS', f'Exception recording system metrics: {e}', exc_info=True)
             print(f"Error recording system metrics: {e}")
     
     def _cleanup_old_metrics(self):
