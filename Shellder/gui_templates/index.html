@@ -56,8 +56,8 @@
             <div class="nav-section">
                 <div class="nav-label">Management</div>
                 <a href="#" class="nav-item" data-page="nginx" onclick="navigateTo('nginx'); return false;">
-                    <span class="nav-icon">🌐</span>
-                    <span>Nginx & Sites</span>
+                    <span class="nav-icon">🔐</span>
+                    <span>Sites & Security</span>
                 </a>
                 <a href="#" class="nav-item" data-page="files" onclick="navigateTo('files'); return false;">
                     <span class="nav-icon">📁</span>
@@ -699,6 +699,165 @@
                     </div>
                     <div class="card-body">
                         <pre id="nginxLogContent" class="log-viewer">Loading nginx logs...</pre>
+                    </div>
+                </div>
+                
+                <!-- Security Services Section -->
+                <div class="section-divider">
+                    <h2>🛡️ Security Services</h2>
+                    <p class="text-muted">Firewall, intrusion prevention, and authentication controls</p>
+                </div>
+                
+                <!-- Security Status Overview -->
+                <div class="stats-grid security-stats-grid">
+                    <div class="stat-card" id="ufwStatusCard">
+                        <div class="stat-icon" id="ufwStatusIcon">🔥</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="ufwStatus">-</div>
+                            <div class="stat-label">UFW Firewall</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="fail2banStatusCard">
+                        <div class="stat-icon" id="fail2banStatusIcon">🚫</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="fail2banStatus">-</div>
+                            <div class="stat-label">Fail2Ban</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="autheliaStatusCard">
+                        <div class="stat-icon" id="autheliaStatusIcon">🔑</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="autheliaStatus">-</div>
+                            <div class="stat-label">Authelia SSO</div>
+                        </div>
+                    </div>
+                    <div class="stat-card" id="basicAuthStatusCard">
+                        <div class="stat-icon">👤</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="basicAuthStatus">-</div>
+                            <div class="stat-label">Basic Auth Users</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid security-grid">
+                    <!-- UFW Firewall -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔥 UFW Firewall</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-success btn-sm" onclick="ufwAction('enable')">✓ Enable</button>
+                                <button class="btn btn-danger btn-sm" onclick="ufwAction('disable')">✗ Disable</button>
+                                <button class="btn btn-sm" onclick="ufwAction('reload')">🔄 Reload</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="ufwRules" class="rules-list">
+                                <div class="loading">Loading firewall rules...</div>
+                            </div>
+                            <div class="add-rule-form" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                                <h4>Add Rule</h4>
+                                <div class="form-row">
+                                    <select id="ufwRuleType" class="form-input form-input-sm">
+                                        <option value="allow">Allow</option>
+                                        <option value="deny">Deny</option>
+                                    </select>
+                                    <input type="text" id="ufwRulePort" placeholder="Port (e.g., 22, 80)" class="form-input form-input-sm">
+                                    <select id="ufwRuleProtocol" class="form-input form-input-sm">
+                                        <option value="tcp">TCP</option>
+                                        <option value="udp">UDP</option>
+                                        <option value="">Both</option>
+                                    </select>
+                                    <button class="btn btn-primary btn-sm" onclick="addUfwRule()">➕ Add</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Fail2Ban -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🚫 Fail2Ban</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-success btn-sm" onclick="fail2banAction('start')">▶️ Start</button>
+                                <button class="btn btn-warning btn-sm" onclick="fail2banAction('restart')">🔄 Restart</button>
+                                <button class="btn btn-danger btn-sm" onclick="fail2banAction('stop')">⏹️ Stop</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="fail2banJails" class="jails-list">
+                                <div class="loading">Loading fail2ban status...</div>
+                            </div>
+                            <div class="unban-form" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                                <h4>Unban IP</h4>
+                                <div class="form-row">
+                                    <input type="text" id="unbanIp" placeholder="IP Address" class="form-input form-input-sm">
+                                    <select id="unbanJail" class="form-input form-input-sm">
+                                        <option value="sshd">sshd</option>
+                                        <option value="nginx-http-auth">nginx-http-auth</option>
+                                    </select>
+                                    <button class="btn btn-warning btn-sm" onclick="unbanIp()">🔓 Unban</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Authelia SSO -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔑 Authelia SSO</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-success btn-sm" onclick="autheliaAction('start')">▶️ Start</button>
+                                <button class="btn btn-warning btn-sm" onclick="autheliaAction('restart')">🔄 Restart</button>
+                                <button class="btn btn-danger btn-sm" onclick="autheliaAction('stop')">⏹️ Stop</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="autheliaInfo" class="authelia-info">
+                                <div class="loading">Loading Authelia status...</div>
+                            </div>
+                            <div class="authelia-links" style="margin-top: 15px;">
+                                <a href="/authelia" target="_blank" class="btn btn-sm">🌐 Open Authelia Portal</a>
+                                <button class="btn btn-sm" onclick="loadAutheliaLogs()">📋 View Logs</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Basic Auth -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>👤 Basic Auth (htpasswd)</h2>
+                            <button class="btn btn-sm" onclick="loadBasicAuthUsers()">🔄 Refresh</button>
+                        </div>
+                        <div class="card-body">
+                            <div id="basicAuthUsers" class="users-list">
+                                <div class="loading">Loading users...</div>
+                            </div>
+                            <div class="add-user-form" style="margin-top: 15px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                                <h4>Add/Update User</h4>
+                                <div class="form-row">
+                                    <input type="text" id="htpasswdUsername" placeholder="Username" class="form-input form-input-sm">
+                                    <input type="password" id="htpasswdPassword" placeholder="Password" class="form-input form-input-sm">
+                                    <button class="btn btn-primary btn-sm" onclick="addBasicAuthUser()">➕ Add</button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- SSL Certificates -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🔒 SSL Certificates</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="loadSslCertificates()">🔄 Refresh</button>
+                            <button class="btn btn-warning btn-sm" onclick="renewAllCerts()">🔄 Renew All</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="sslCertsList" class="certs-list">
+                            <div class="loading">Loading certificates...</div>
+                        </div>
                     </div>
                 </div>
             </div>

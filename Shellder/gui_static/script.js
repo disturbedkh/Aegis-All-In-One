@@ -2514,6 +2514,7 @@ navigateTo = function(page) {
             loadNginxStatus();
             loadNginxSites();
             loadNginxLogs();
+            loadSecurityData();  // Load security services
             break;
         case 'stats':
             loadHistoricalStats();
@@ -4015,6 +4016,564 @@ document.getElementById('setupService')?.addEventListener('change', function() {
         customGroup.style.display = this.value === 'custom' ? 'block' : 'none';
     }
 });
+
+// =============================================================================
+// SECURITY SERVICES
+// =============================================================================
+
+// Load all security service statuses
+async function loadSecurityStatus() {
+    try {
+        const data = await fetchAPI('/api/security/status');
+        
+        // Update UFW status
+        const ufwEl = document.getElementById('ufwStatus');
+        const ufwIcon = document.getElementById('ufwStatusIcon');
+        if (ufwEl && data.ufw) {
+            if (data.ufw.installed) {
+                ufwEl.textContent = data.ufw.active ? 'Active' : 'Inactive';
+                ufwEl.className = 'stat-value ' + (data.ufw.active ? 'text-success' : 'text-warning');
+                if (ufwIcon) ufwIcon.className = 'stat-icon ' + (data.ufw.active ? 'success' : 'warning');
+            } else {
+                ufwEl.textContent = 'Not Installed';
+                ufwEl.className = 'stat-value text-muted';
+            }
+        }
+        
+        // Update Fail2Ban status
+        const f2bEl = document.getElementById('fail2banStatus');
+        const f2bIcon = document.getElementById('fail2banStatusIcon');
+        if (f2bEl && data.fail2ban) {
+            if (data.fail2ban.installed) {
+                const banned = data.fail2ban.banned_count || 0;
+                f2bEl.textContent = data.fail2ban.active ? `Active (${banned} banned)` : 'Inactive';
+                f2bEl.className = 'stat-value ' + (data.fail2ban.active ? 'text-success' : 'text-warning');
+                if (f2bIcon) f2bIcon.className = 'stat-icon ' + (data.fail2ban.active ? 'success' : 'warning');
+            } else {
+                f2bEl.textContent = 'Not Installed';
+                f2bEl.className = 'stat-value text-muted';
+            }
+        }
+        
+        // Update Authelia status
+        const authEl = document.getElementById('autheliaStatus');
+        const authIcon = document.getElementById('autheliaStatusIcon');
+        if (authEl && data.authelia) {
+            if (data.authelia.installed) {
+                authEl.textContent = data.authelia.active ? 'Running' : data.authelia.status || 'Stopped';
+                authEl.className = 'stat-value ' + (data.authelia.active ? 'text-success' : 'text-warning');
+                if (authIcon) authIcon.className = 'stat-icon ' + (data.authelia.active ? 'success' : 'warning');
+            } else {
+                authEl.textContent = 'Not Found';
+                authEl.className = 'stat-value text-muted';
+            }
+        }
+        
+        // Update Basic Auth status
+        const baEl = document.getElementById('basicAuthStatus');
+        if (baEl && data.basic_auth) {
+            baEl.textContent = data.basic_auth.user_count > 0 ? 
+                `${data.basic_auth.user_count} users` : 'No users';
+            baEl.className = 'stat-value ' + (data.basic_auth.user_count > 0 ? '' : 'text-muted');
+        }
+        
+        // Update SSL cert count on nginx page
+        if (data.ssl) {
+            const sslEl = document.getElementById('sslCerts');
+            if (sslEl) sslEl.textContent = data.ssl.count || 0;
+        }
+        
+    } catch (e) {
+        console.error('Failed to load security status:', e);
+    }
+}
+
+// UFW Functions
+async function loadUfwStatus() {
+    const container = document.getElementById('ufwRules');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/security/ufw/status');
+        
+        if (data.error) {
+            container.innerHTML = `<div class="error-msg">${data.error}</div>`;
+            return;
+        }
+        
+        if (!data.active) {
+            container.innerHTML = `
+                <div class="info-msg">
+                    <span class="status-badge status-inactive">⚠️ UFW is disabled</span>
+                    <p style="margin-top: 10px;">Enable the firewall to protect your server.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Show rules
+        let html = '<div class="ufw-output"><pre>' + (data.output || 'No rules configured') + '</pre></div>';
+        container.innerHTML = html;
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load UFW status: ${e.message}</div>`;
+    }
+}
+
+async function ufwAction(action) {
+    const actionNames = { enable: 'Enabling', disable: 'Disabling', reload: 'Reloading' };
+    showToast(`${actionNames[action] || action} UFW...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/security/ufw/${action}`, {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`UFW ${action} successful`, 'success');
+            loadUfwStatus();
+            loadSecurityStatus();
+        } else {
+            showToast(`UFW ${action} failed: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function addUfwRule() {
+    const type = document.getElementById('ufwRuleType').value;
+    const port = document.getElementById('ufwRulePort').value.trim();
+    const protocol = document.getElementById('ufwRuleProtocol').value;
+    
+    if (!port) {
+        showToast('Port is required', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/security/ufw/rule', {
+            method: 'POST',
+            body: JSON.stringify({ type, port, protocol }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Rule added successfully', 'success');
+            document.getElementById('ufwRulePort').value = '';
+            loadUfwStatus();
+        } else {
+            showToast(`Failed to add rule: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// Fail2Ban Functions
+async function loadFail2banStatus() {
+    const container = document.getElementById('fail2banJails');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/security/fail2ban/status');
+        
+        if (data.error) {
+            container.innerHTML = `<div class="error-msg">${data.error}</div>`;
+            return;
+        }
+        
+        if (!data.active) {
+            container.innerHTML = `
+                <div class="info-msg">
+                    <span class="status-badge status-inactive">⚠️ Fail2Ban is not running</span>
+                    <p style="margin-top: 10px;">Start fail2ban to protect against brute force attacks.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        // Show jails
+        if (data.jails && data.jails.length > 0) {
+            container.innerHTML = data.jails.map(jail => `
+                <div class="jail-item">
+                    <div class="jail-header">
+                        <span class="jail-name">🔒 ${jail.name}</span>
+                        <span class="banned-count ${jail.currently_banned > 0 ? 'has-banned' : ''}">
+                            ${jail.currently_banned || 0} banned
+                        </span>
+                    </div>
+                    ${jail.banned_ips && jail.banned_ips.length > 0 ? `
+                        <div class="banned-ips">
+                            ${jail.banned_ips.map(ip => `
+                                <span class="banned-ip" onclick="quickUnban('${ip}', '${jail.name}')">
+                                    ${ip} <span class="unban-hint">click to unban</span>
+                                </span>
+                            `).join('')}
+                        </div>
+                    ` : ''}
+                </div>
+            `).join('');
+        } else {
+            container.innerHTML = '<div class="info-msg">No jails configured</div>';
+        }
+        
+        // Update unban jail dropdown
+        const jailSelect = document.getElementById('unbanJail');
+        if (jailSelect && data.jails) {
+            jailSelect.innerHTML = data.jails.map(j => 
+                `<option value="${j.name}">${j.name}</option>`
+            ).join('');
+        }
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load fail2ban status: ${e.message}</div>`;
+    }
+}
+
+async function fail2banAction(action) {
+    const actionNames = { start: 'Starting', stop: 'Stopping', restart: 'Restarting' };
+    showToast(`${actionNames[action] || action} Fail2Ban...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/security/fail2ban/${action}`, {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`Fail2Ban ${action} successful`, 'success');
+            setTimeout(() => {
+                loadFail2banStatus();
+                loadSecurityStatus();
+            }, 2000);
+        } else {
+            showToast(`Fail2Ban ${action} failed: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function unbanIp() {
+    const ip = document.getElementById('unbanIp').value.trim();
+    const jail = document.getElementById('unbanJail').value;
+    
+    if (!ip) {
+        showToast('IP address is required', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/security/fail2ban/unban', {
+            method: 'POST',
+            body: JSON.stringify({ ip, jail }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`${ip} unbanned from ${jail}`, 'success');
+            document.getElementById('unbanIp').value = '';
+            loadFail2banStatus();
+        } else {
+            showToast(`Failed to unban: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+function quickUnban(ip, jail) {
+    document.getElementById('unbanIp').value = ip;
+    document.getElementById('unbanJail').value = jail;
+    unbanIp();
+}
+
+// Authelia Functions
+async function loadAutheliaStatus() {
+    const container = document.getElementById('autheliaInfo');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/security/authelia/status');
+        
+        if (!data.installed) {
+            container.innerHTML = `
+                <div class="info-msg">
+                    <span class="status-badge status-inactive">⚠️ Authelia not found</span>
+                    <p style="margin-top: 10px;">Authelia container is not running or not configured.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        const statusClass = data.running ? 'success' : 'warning';
+        container.innerHTML = `
+            <div class="authelia-status">
+                <div class="status-row">
+                    <span>Status:</span>
+                    <span class="status-badge status-${statusClass}">${data.status || 'unknown'}</span>
+                </div>
+                <div class="status-row">
+                    <span>Health:</span>
+                    <span>${data.health || 'N/A'}</span>
+                </div>
+                <div class="status-row">
+                    <span>Image:</span>
+                    <span class="text-muted">${data.image || 'N/A'}</span>
+                </div>
+                ${data.started_at ? `
+                <div class="status-row">
+                    <span>Started:</span>
+                    <span>${new Date(data.started_at).toLocaleString()}</span>
+                </div>
+                ` : ''}
+            </div>
+        `;
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load Authelia status: ${e.message}</div>`;
+    }
+}
+
+async function autheliaAction(action) {
+    const actionNames = { start: 'Starting', stop: 'Stopping', restart: 'Restarting' };
+    showToast(`${actionNames[action] || action} Authelia...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/security/authelia/${action}`, {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`Authelia ${action} successful`, 'success');
+            setTimeout(() => {
+                loadAutheliaStatus();
+                loadSecurityStatus();
+            }, 2000);
+        } else {
+            showToast(`Authelia ${action} failed: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function loadAutheliaLogs() {
+    showToast('Loading Authelia logs...', 'info');
+    try {
+        const result = await fetchAPI('/api/containers/authelia/logs?lines=100');
+        if (result.logs) {
+            // Show in a modal or new tab
+            const logWindow = window.open('', 'Authelia Logs', 'width=800,height=600');
+            logWindow.document.write(`<pre style="background:#1a1a2e;color:#eee;padding:20px;font-family:monospace;">${result.logs}</pre>`);
+        }
+    } catch (e) {
+        showToast(`Failed to load logs: ${e.message}`, 'error');
+    }
+}
+
+// Basic Auth Functions
+async function loadBasicAuthUsers() {
+    const container = document.getElementById('basicAuthUsers');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/security/basicauth/users');
+        
+        if (!data.path) {
+            container.innerHTML = `
+                <div class="info-msg">
+                    <span class="status-badge status-inactive">ℹ️ No htpasswd file found</span>
+                    <p style="margin-top: 10px;">Add a user to create the htpasswd file.</p>
+                </div>
+            `;
+            return;
+        }
+        
+        if (data.users && data.users.length > 0) {
+            container.innerHTML = `
+                <div class="htpasswd-path text-muted" style="margin-bottom: 10px;">
+                    📁 ${data.path}
+                </div>
+                <div class="users-grid">
+                    ${data.users.map(user => `
+                        <div class="user-item">
+                            <span class="user-name">👤 ${user}</span>
+                            <button class="btn btn-danger btn-xs" onclick="deleteBasicAuthUser('${user}')">🗑️</button>
+                        </div>
+                    `).join('')}
+                </div>
+            `;
+        } else {
+            container.innerHTML = '<div class="info-msg">No users configured</div>';
+        }
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load users: ${e.message}</div>`;
+    }
+}
+
+async function addBasicAuthUser() {
+    const username = document.getElementById('htpasswdUsername').value.trim();
+    const password = document.getElementById('htpasswdPassword').value;
+    
+    if (!username || !password) {
+        showToast('Username and password are required', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/security/basicauth/user', {
+            method: 'POST',
+            body: JSON.stringify({ username, password }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`User ${username} added/updated`, 'success');
+            document.getElementById('htpasswdUsername').value = '';
+            document.getElementById('htpasswdPassword').value = '';
+            loadBasicAuthUsers();
+            loadSecurityStatus();
+        } else {
+            showToast(`Failed to add user: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function deleteBasicAuthUser(username) {
+    if (!confirm(`Delete user "${username}"?`)) return;
+    
+    try {
+        const result = await fetchAPI(`/api/security/basicauth/user/${username}`, {
+            method: 'DELETE',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast(`User ${username} deleted`, 'success');
+            loadBasicAuthUsers();
+            loadSecurityStatus();
+        } else {
+            showToast(`Failed to delete user: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// SSL Certificate Functions
+async function loadSslCertificates() {
+    const container = document.getElementById('sslCertsList');
+    if (!container) return;
+    
+    try {
+        const data = await fetchAPI('/api/security/ssl/certificates');
+        
+        if (data.error) {
+            container.innerHTML = `<div class="error-msg">${data.error}</div>`;
+            return;
+        }
+        
+        if (data.certificates && data.certificates.length > 0) {
+            container.innerHTML = data.certificates.map(cert => {
+                // Check if expiring soon (within 30 days)
+                let expiryClass = '';
+                let expiryIcon = '✅';
+                if (cert.expiry) {
+                    const expiryDate = new Date(cert.expiry);
+                    const daysLeft = Math.ceil((expiryDate - new Date()) / (1000 * 60 * 60 * 24));
+                    if (daysLeft < 0) {
+                        expiryClass = 'expired';
+                        expiryIcon = '❌';
+                    } else if (daysLeft < 7) {
+                        expiryClass = 'expiring-critical';
+                        expiryIcon = '🔴';
+                    } else if (daysLeft < 30) {
+                        expiryClass = 'expiring-soon';
+                        expiryIcon = '🟡';
+                    }
+                }
+                
+                return `
+                    <div class="cert-item ${expiryClass}">
+                        <div class="cert-header">
+                            <span class="cert-name">🔒 ${cert.name}</span>
+                            <button class="btn btn-warning btn-xs" onclick="renewCert('${cert.name}')">🔄 Renew</button>
+                        </div>
+                        <div class="cert-domains">
+                            ${(cert.domains || []).map(d => `<span class="domain-badge">${d}</span>`).join('')}
+                        </div>
+                        <div class="cert-expiry ${expiryClass}">
+                            ${expiryIcon} Expires: ${cert.expiry || 'Unknown'}
+                        </div>
+                    </div>
+                `;
+            }).join('');
+        } else {
+            container.innerHTML = '<div class="info-msg">No SSL certificates found. Use the Quick Setup above to create certificates.</div>';
+        }
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load certificates: ${e.message}</div>`;
+    }
+}
+
+async function renewCert(domain) {
+    showToast(`Renewing certificate for ${domain}...`, 'info');
+    
+    try {
+        const result = await fetchAPI('/api/security/ssl/renew', {
+            method: 'POST',
+            body: JSON.stringify({ domain }),
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('Certificate renewed successfully', 'success');
+            loadSslCertificates();
+        } else {
+            showToast(`Renewal failed: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function renewAllCerts() {
+    showToast('Renewing all certificates...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/security/ssl/renew', {
+            method: 'POST',
+            force: true
+        });
+        
+        if (result.success) {
+            showToast('All certificates renewed successfully', 'success');
+            loadSslCertificates();
+        } else {
+            showToast(`Renewal failed: ${result.output || 'Unknown error'}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// Load security data when nginx page is shown
+function loadSecurityData() {
+    loadSecurityStatus();
+    loadUfwStatus();
+    loadFail2banStatus();
+    loadAutheliaStatus();
+    loadBasicAuthUsers();
+    loadSslCertificates();
+}
 
 // =============================================================================
 // SITE AVAILABILITY CHECK - 3-LEVEL COMPREHENSIVE

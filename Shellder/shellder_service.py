@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.34"  # 2025-12-03: Fix metric history showing oldest instead of newest data
-SHELLDER_BUILD = "20251203-10"  # Date-based build number
+SHELLDER_VERSION = "1.0.35"  # 2025-12-03: Add Sites & Security page with UFW, Fail2Ban, Authelia, Basic Auth
+SHELLDER_BUILD = "20251203-11"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -7624,6 +7624,534 @@ def api_nginx_setup():
         
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
+
+# =============================================================================
+# SECURITY SERVICES API
+# =============================================================================
+# Controls for UFW, fail2ban, Authelia, and basic auth
+
+@app.route('/api/security/status')
+def api_security_status():
+    """Get status of all security services"""
+    services = {}
+    
+    # UFW (Firewall)
+    try:
+        result = subprocess.run(['sudo', 'ufw', 'status'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            output = result.stdout
+            services['ufw'] = {
+                'installed': True,
+                'active': 'Status: active' in output,
+                'status': 'active' if 'Status: active' in output else 'inactive',
+                'output': output
+            }
+        else:
+            services['ufw'] = {'installed': False, 'error': result.stderr}
+    except FileNotFoundError:
+        services['ufw'] = {'installed': False, 'error': 'UFW not installed'}
+    except Exception as e:
+        services['ufw'] = {'installed': False, 'error': str(e)}
+    
+    # fail2ban
+    try:
+        result = subprocess.run(['sudo', 'systemctl', 'is-active', 'fail2ban'], capture_output=True, text=True, timeout=5)
+        is_active = result.stdout.strip() == 'active'
+        
+        # Get banned IPs count
+        banned_count = 0
+        if is_active:
+            try:
+                ban_result = subprocess.run(['sudo', 'fail2ban-client', 'status'], capture_output=True, text=True, timeout=5)
+                # Parse jails
+                jails = []
+                if 'Jail list:' in ban_result.stdout:
+                    jail_line = ban_result.stdout.split('Jail list:')[1].strip().split('\n')[0]
+                    jails = [j.strip() for j in jail_line.split(',') if j.strip()]
+                
+                # Count banned IPs per jail
+                for jail in jails:
+                    jail_result = subprocess.run(['sudo', 'fail2ban-client', 'status', jail], capture_output=True, text=True, timeout=5)
+                    if 'Currently banned:' in jail_result.stdout:
+                        count = int(jail_result.stdout.split('Currently banned:')[1].split('\n')[0].strip())
+                        banned_count += count
+            except:
+                pass
+        
+        services['fail2ban'] = {
+            'installed': True,
+            'active': is_active,
+            'status': 'active' if is_active else 'inactive',
+            'banned_count': banned_count
+        }
+    except FileNotFoundError:
+        services['fail2ban'] = {'installed': False, 'error': 'fail2ban not installed'}
+    except Exception as e:
+        services['fail2ban'] = {'installed': False, 'error': str(e)}
+    
+    # Authelia (Docker container)
+    try:
+        result = subprocess.run(['docker', 'inspect', '--format', '{{.State.Status}}', 'authelia'], 
+                              capture_output=True, text=True, timeout=5)
+        status = result.stdout.strip()
+        services['authelia'] = {
+            'installed': True,
+            'active': status == 'running',
+            'status': status if status else 'not found',
+            'type': 'docker'
+        }
+    except Exception as e:
+        services['authelia'] = {'installed': False, 'error': str(e), 'type': 'docker'}
+    
+    # Basic Auth (htpasswd file)
+    htpasswd_paths = ['/etc/nginx/.htpasswd', '/etc/apache2/.htpasswd', '/etc/htpasswd']
+    htpasswd_found = None
+    htpasswd_users = []
+    for path in htpasswd_paths:
+        if os.path.exists(path):
+            htpasswd_found = path
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        if ':' in line:
+                            htpasswd_users.append(line.split(':')[0])
+            except:
+                pass
+            break
+    
+    services['basic_auth'] = {
+        'installed': htpasswd_found is not None,
+        'active': htpasswd_found is not None and len(htpasswd_users) > 0,
+        'path': htpasswd_found,
+        'users': htpasswd_users,
+        'user_count': len(htpasswd_users)
+    }
+    
+    # SSL Certificates (certbot)
+    try:
+        result = subprocess.run(['sudo', 'certbot', 'certificates'], capture_output=True, text=True, timeout=10)
+        certs = []
+        if result.returncode == 0:
+            # Parse certificate info
+            cert_blocks = result.stdout.split('Certificate Name:')[1:] if 'Certificate Name:' in result.stdout else []
+            for block in cert_blocks:
+                lines = block.strip().split('\n')
+                cert_name = lines[0].strip()
+                domains = []
+                expiry = None
+                for line in lines:
+                    if 'Domains:' in line:
+                        domains = [d.strip() for d in line.split('Domains:')[1].split()]
+                    if 'Expiry Date:' in line:
+                        expiry = line.split('Expiry Date:')[1].strip().split(' ')[0]
+                certs.append({'name': cert_name, 'domains': domains, 'expiry': expiry})
+        
+        services['ssl'] = {
+            'installed': True,
+            'certificates': certs,
+            'count': len(certs)
+        }
+    except Exception as e:
+        services['ssl'] = {'installed': False, 'error': str(e)}
+    
+    return jsonify(services)
+
+@app.route('/api/security/ufw/status')
+def api_ufw_status():
+    """Get detailed UFW status with rules"""
+    try:
+        result = subprocess.run(['sudo', 'ufw', 'status', 'verbose'], capture_output=True, text=True, timeout=5)
+        
+        rules = []
+        lines = result.stdout.split('\n')
+        in_rules = False
+        for line in lines:
+            if line.startswith('--'):
+                in_rules = True
+                continue
+            if in_rules and line.strip():
+                parts = line.split()
+                if len(parts) >= 3:
+                    rules.append({
+                        'to': parts[0],
+                        'action': parts[1],
+                        'from': parts[2] if len(parts) > 2 else 'Anywhere'
+                    })
+        
+        return jsonify({
+            'active': 'Status: active' in result.stdout,
+            'output': result.stdout,
+            'rules': rules
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/ufw/<action>', methods=['POST'])
+def api_ufw_action(action):
+    """Control UFW firewall"""
+    valid_actions = ['enable', 'disable', 'reload']
+    if action not in valid_actions:
+        return jsonify({'error': f'Invalid action. Use: {valid_actions}'}), 400
+    
+    try:
+        if action == 'enable':
+            cmd = ['sudo', 'ufw', '--force', 'enable']
+        elif action == 'disable':
+            cmd = ['sudo', 'ufw', 'disable']
+        else:
+            cmd = ['sudo', 'ufw', 'reload']
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/ufw/rule', methods=['POST'])
+def api_ufw_add_rule():
+    """Add UFW rule"""
+    data = request.get_json()
+    rule_type = data.get('type', 'allow')  # allow, deny
+    port = data.get('port')
+    protocol = data.get('protocol', 'tcp')  # tcp, udp, or empty for both
+    from_ip = data.get('from')
+    
+    if not port:
+        return jsonify({'error': 'Port is required'}), 400
+    
+    try:
+        cmd = ['sudo', 'ufw']
+        if from_ip:
+            cmd.extend([rule_type, 'from', from_ip, 'to', 'any', 'port', str(port)])
+        else:
+            cmd.extend([rule_type, f'{port}/{protocol}' if protocol else str(port)])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/ufw/rule', methods=['DELETE'])
+def api_ufw_delete_rule():
+    """Delete UFW rule"""
+    data = request.get_json()
+    rule_number = data.get('number')
+    
+    if not rule_number:
+        return jsonify({'error': 'Rule number is required'}), 400
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'ufw', '--force', 'delete', str(rule_number)],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/fail2ban/status')
+def api_fail2ban_status():
+    """Get detailed fail2ban status"""
+    try:
+        # Check if running
+        active_result = subprocess.run(['sudo', 'systemctl', 'is-active', 'fail2ban'], 
+                                       capture_output=True, text=True, timeout=5)
+        is_active = active_result.stdout.strip() == 'active'
+        
+        if not is_active:
+            return jsonify({'active': False, 'jails': []})
+        
+        # Get jail list
+        result = subprocess.run(['sudo', 'fail2ban-client', 'status'], 
+                              capture_output=True, text=True, timeout=5)
+        
+        jails = []
+        if 'Jail list:' in result.stdout:
+            jail_line = result.stdout.split('Jail list:')[1].strip().split('\n')[0]
+            jail_names = [j.strip() for j in jail_line.split(',') if j.strip()]
+            
+            # Get details for each jail
+            for jail in jail_names:
+                try:
+                    jail_result = subprocess.run(
+                        ['sudo', 'fail2ban-client', 'status', jail],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    
+                    currently_banned = 0
+                    total_banned = 0
+                    banned_ips = []
+                    
+                    output = jail_result.stdout
+                    if 'Currently banned:' in output:
+                        currently_banned = int(output.split('Currently banned:')[1].split('\n')[0].strip())
+                    if 'Total banned:' in output:
+                        total_banned = int(output.split('Total banned:')[1].split('\n')[0].strip())
+                    if 'Banned IP list:' in output:
+                        ip_line = output.split('Banned IP list:')[1].strip().split('\n')[0]
+                        banned_ips = [ip.strip() for ip in ip_line.split() if ip.strip()]
+                    
+                    jails.append({
+                        'name': jail,
+                        'currently_banned': currently_banned,
+                        'total_banned': total_banned,
+                        'banned_ips': banned_ips
+                    })
+                except:
+                    jails.append({'name': jail, 'error': 'Could not get status'})
+        
+        return jsonify({
+            'active': True,
+            'jails': jails,
+            'total_banned': sum(j.get('currently_banned', 0) for j in jails)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/fail2ban/<action>', methods=['POST'])
+def api_fail2ban_action(action):
+    """Control fail2ban service"""
+    valid_actions = ['start', 'stop', 'restart', 'reload']
+    if action not in valid_actions:
+        return jsonify({'error': f'Invalid action. Use: {valid_actions}'}), 400
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', action, 'fail2ban'],
+            capture_output=True, text=True, timeout=30
+        )
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/fail2ban/unban', methods=['POST'])
+def api_fail2ban_unban():
+    """Unban an IP from fail2ban"""
+    data = request.get_json()
+    ip = data.get('ip')
+    jail = data.get('jail', 'sshd')
+    
+    if not ip:
+        return jsonify({'error': 'IP address is required'}), 400
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'fail2ban-client', 'set', jail, 'unbanip', ip],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/authelia/status')
+def api_authelia_status():
+    """Get Authelia container status and config info"""
+    try:
+        # Check container status
+        result = subprocess.run(
+            ['docker', 'inspect', 'authelia'],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'installed': False, 'error': 'Authelia container not found'})
+        
+        import json as json_lib
+        container_info = json_lib.loads(result.stdout)[0]
+        
+        state = container_info.get('State', {})
+        config = container_info.get('Config', {})
+        
+        # Check for config file
+        config_paths = [
+            '/aegis/Authelia/configuration.yml',
+            '/app/config/configuration.yml',
+            './Authelia/configuration.yml'
+        ]
+        config_found = None
+        for path in config_paths:
+            if os.path.exists(path):
+                config_found = path
+                break
+        
+        return jsonify({
+            'installed': True,
+            'status': state.get('Status', 'unknown'),
+            'running': state.get('Running', False),
+            'started_at': state.get('StartedAt'),
+            'health': state.get('Health', {}).get('Status', 'unknown'),
+            'image': config.get('Image', 'unknown'),
+            'config_path': config_found,
+            'ports': container_info.get('NetworkSettings', {}).get('Ports', {})
+        })
+    except Exception as e:
+        return jsonify({'installed': False, 'error': str(e)})
+
+@app.route('/api/security/authelia/<action>', methods=['POST'])
+def api_authelia_action(action):
+    """Control Authelia container"""
+    valid_actions = ['start', 'stop', 'restart']
+    if action not in valid_actions:
+        return jsonify({'error': f'Invalid action. Use: {valid_actions}'}), 400
+    
+    try:
+        if action == 'start':
+            result = subprocess.run(['docker', 'start', 'authelia'], capture_output=True, text=True, timeout=30)
+        elif action == 'stop':
+            result = subprocess.run(['docker', 'stop', 'authelia'], capture_output=True, text=True, timeout=30)
+        else:
+            result = subprocess.run(['docker', 'restart', 'authelia'], capture_output=True, text=True, timeout=60)
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/basicauth/users')
+def api_basicauth_users():
+    """Get list of basic auth users"""
+    htpasswd_paths = ['/etc/nginx/.htpasswd', '/etc/apache2/.htpasswd', '/etc/htpasswd']
+    
+    for path in htpasswd_paths:
+        if os.path.exists(path):
+            try:
+                users = []
+                with open(path, 'r') as f:
+                    for line in f:
+                        if ':' in line:
+                            users.append(line.split(':')[0])
+                return jsonify({
+                    'path': path,
+                    'users': users,
+                    'count': len(users)
+                })
+            except Exception as e:
+                return jsonify({'error': str(e)}), 500
+    
+    return jsonify({'path': None, 'users': [], 'count': 0})
+
+@app.route('/api/security/basicauth/user', methods=['POST'])
+def api_basicauth_add_user():
+    """Add or update basic auth user"""
+    data = request.get_json()
+    username = data.get('username')
+    password = data.get('password')
+    
+    if not username or not password:
+        return jsonify({'error': 'Username and password are required'}), 400
+    
+    htpasswd_path = '/etc/nginx/.htpasswd'
+    
+    try:
+        # Check if htpasswd command exists
+        if os.path.exists(htpasswd_path):
+            # Update/add user
+            result = subprocess.run(
+                ['sudo', 'htpasswd', '-b', htpasswd_path, username, password],
+                capture_output=True, text=True, timeout=10
+            )
+        else:
+            # Create new file
+            result = subprocess.run(
+                ['sudo', 'htpasswd', '-bc', htpasswd_path, username, password],
+                capture_output=True, text=True, timeout=10
+            )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/basicauth/user/<username>', methods=['DELETE'])
+def api_basicauth_delete_user(username):
+    """Delete basic auth user"""
+    htpasswd_path = '/etc/nginx/.htpasswd'
+    
+    if not os.path.exists(htpasswd_path):
+        return jsonify({'error': 'htpasswd file not found'}), 404
+    
+    try:
+        result = subprocess.run(
+            ['sudo', 'htpasswd', '-D', htpasswd_path, username],
+            capture_output=True, text=True, timeout=10
+        )
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/ssl/certificates')
+def api_ssl_certificates():
+    """Get SSL certificate information"""
+    try:
+        result = subprocess.run(
+            ['sudo', 'certbot', 'certificates'],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        certificates = []
+        if 'Certificate Name:' in result.stdout:
+            cert_blocks = result.stdout.split('Certificate Name:')[1:]
+            for block in cert_blocks:
+                lines = block.strip().split('\n')
+                cert = {'name': lines[0].strip()}
+                for line in lines[1:]:
+                    if 'Domains:' in line:
+                        cert['domains'] = [d.strip() for d in line.split('Domains:')[1].split()]
+                    elif 'Expiry Date:' in line:
+                        cert['expiry'] = line.split('Expiry Date:')[1].strip()
+                    elif 'Certificate Path:' in line:
+                        cert['cert_path'] = line.split('Certificate Path:')[1].strip()
+                    elif 'Private Key Path:' in line:
+                        cert['key_path'] = line.split('Private Key Path:')[1].strip()
+                certificates.append(cert)
+        
+        return jsonify({
+            'certificates': certificates,
+            'count': len(certificates)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/security/ssl/renew', methods=['POST'])
+def api_ssl_renew():
+    """Renew SSL certificates"""
+    data = request.get_json() or {}
+    domain = data.get('domain')  # Optional: renew specific domain
+    
+    try:
+        if domain:
+            cmd = ['sudo', 'certbot', 'renew', '--cert-name', domain, '--force-renewal']
+        else:
+            cmd = ['sudo', 'certbot', 'renew']
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # =============================================================================
 # SITE AVAILABILITY CHECK - 3-LEVEL COMPREHENSIVE CHECK
