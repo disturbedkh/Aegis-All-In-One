@@ -4196,3 +4196,363 @@ if (document.getElementById('debugLogOutput')) {
     loadDebugPanel();
     startDebugAutoRefresh();
 }
+
+// =============================================================================
+// DISK HEALTH MONITORING
+// =============================================================================
+
+let diskHealthRefreshInterval = null;
+
+async function loadDiskHealth() {
+    try {
+        const data = await fetchAPI('/api/disk/health');
+        
+        if (data.error) {
+            SHELLDER_DEBUG.error('DISK', 'Failed to get disk health', data);
+            return;
+        }
+        
+        // Update the health card styling
+        const card = document.getElementById('diskHealthCard');
+        if (card) {
+            card.className = 'card disk-health-card status-' + data.status;
+        }
+        
+        // Update badge
+        const badge = document.getElementById('diskHealthStatus');
+        if (badge) {
+            badge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            badge.className = 'badge badge-' + (data.status === 'healthy' ? 'success' : 
+                                                data.status === 'warning' ? 'warning' : 'danger');
+        }
+        
+        // Update usage bar
+        const usageBar = document.getElementById('diskUsageBar');
+        if (usageBar) {
+            usageBar.style.width = data.usage.percent + '%';
+            usageBar.className = 'disk-usage-bar' + (
+                data.status === 'emergency' ? ' emergency' :
+                data.status === 'critical' ? ' critical' :
+                data.status === 'warning' ? ' warning' : ''
+            );
+        }
+        
+        // Update stats
+        const usedEl = document.getElementById('diskHealthUsed');
+        const totalEl = document.getElementById('diskHealthTotal');
+        const freeEl = document.getElementById('diskHealthFree');
+        if (usedEl) usedEl.textContent = data.usage.used;
+        if (totalEl) totalEl.textContent = data.usage.total;
+        if (freeEl) freeEl.textContent = data.usage.free;
+        
+        // Handle growth warning
+        const growthWarning = document.getElementById('diskGrowthWarning');
+        const growthMessage = document.getElementById('diskGrowthMessage');
+        if (growthWarning && growthMessage) {
+            if (data.growth_warning) {
+                growthWarning.style.display = 'flex';
+                growthMessage.textContent = data.growth_warning.message;
+            } else {
+                growthWarning.style.display = 'none';
+            }
+        }
+        
+        // Show/hide alert banner
+        const alertBanner = document.getElementById('diskAlertBanner');
+        const alertMessage = document.getElementById('diskAlertMessage');
+        if (alertBanner && alertMessage) {
+            if (data.status === 'critical' || data.status === 'emergency') {
+                alertBanner.style.display = 'flex';
+                alertBanner.className = 'alert-banner alert-' + (data.status === 'emergency' ? 'critical' : 'warning');
+                alertMessage.textContent = data.message;
+            } else {
+                alertBanner.style.display = 'none';
+            }
+        }
+        
+        SHELLDER_DEBUG.info('DISK', 'Disk health loaded', { 
+            status: data.status, 
+            percent: data.usage.percent,
+            free: data.usage.free 
+        });
+        
+    } catch (e) {
+        SHELLDER_DEBUG.error('DISK', 'Failed to load disk health', e);
+    }
+}
+
+function hideDiskAlert() {
+    const banner = document.getElementById('diskAlertBanner');
+    if (banner) banner.style.display = 'none';
+}
+
+function showDiskHealthPanel() {
+    const card = document.getElementById('diskHealthCard');
+    if (card) {
+        card.scrollIntoView({ behavior: 'smooth' });
+        card.style.animation = 'pulse-card 0.5s 3';
+    }
+}
+
+async function scanLargeFiles() {
+    const resultsDiv = document.getElementById('diskScanResults');
+    if (!resultsDiv) return;
+    
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div class="loading">🔍 Scanning for large files (100MB+)...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/disk/large-files?min_size_mb=100&max_results=15');
+        
+        if (data.error) {
+            resultsDiv.innerHTML = `<div class="cleanup-result error">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        if (!data.files || data.files.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="no-bloat-found">
+                    <div class="icon">✅</div>
+                    <div>No files over 100MB found!</div>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = `
+            <div class="disk-scan-header">
+                <span class="disk-scan-title">🔍 Large Files Found</span>
+                <span class="disk-scan-total">Total: ${data.total_size_human}</span>
+            </div>
+        `;
+        
+        for (const file of data.files) {
+            html += `
+                <div class="large-file-item">
+                    <div class="file-info">
+                        <div class="file-path">${escapeHtml(file.path)}</div>
+                        <div class="file-modified">Modified: ${new Date(file.modified).toLocaleString()}</div>
+                    </div>
+                    <span class="file-size">${file.size_human}</span>
+                    <div class="file-actions">
+                        <button class="btn-delete" onclick="deleteFile('${escapeHtml(file.path)}')" title="Delete file">🗑️ Delete</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        resultsDiv.innerHTML = html;
+        showToast(`Found ${data.count} large files totaling ${data.total_size_human}`, 'info');
+        
+    } catch (e) {
+        resultsDiv.innerHTML = `<div class="cleanup-result error">Error: ${e.message}</div>`;
+        SHELLDER_DEBUG.error('DISK', 'Failed to scan large files', e);
+    }
+}
+
+async function detectBloat() {
+    const resultsDiv = document.getElementById('diskScanResults');
+    if (!resultsDiv) return;
+    
+    resultsDiv.style.display = 'block';
+    resultsDiv.innerHTML = '<div class="loading">🗑️ Detecting known bloat sources...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/disk/bloat');
+        
+        if (data.error) {
+            resultsDiv.innerHTML = `<div class="cleanup-result error">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        if (!data.bloat_sources || data.bloat_sources.length === 0) {
+            resultsDiv.innerHTML = `
+                <div class="no-bloat-found">
+                    <div class="icon">✅</div>
+                    <div>No bloat detected! System is clean.</div>
+                </div>
+            `;
+            return;
+        }
+        
+        let html = `
+            <div class="disk-scan-header">
+                <span class="disk-scan-title">🗑️ Bloat Sources Detected</span>
+                <span class="disk-scan-total">Total: ${data.total_bloat_human} recoverable</span>
+            </div>
+        `;
+        
+        for (const source of data.bloat_sources) {
+            const safeLabel = source.safe ? '(Safe)' : '⚠️ (May have side effects)';
+            html += `
+                <div class="bloat-item">
+                    <div class="bloat-info">
+                        <div class="bloat-name">${escapeHtml(source.name)}</div>
+                        <div class="bloat-description">${escapeHtml(source.description)} ${safeLabel}</div>
+                    </div>
+                    <span class="bloat-severity ${source.severity}">${source.severity}</span>
+                    <span class="bloat-size">${source.total_size_human}</span>
+                    <div class="bloat-actions">
+                        <button class="btn-cleanup" onclick="cleanupBloat('${source.id}', ${source.safe})" 
+                                title="Clean up ${source.name}">
+                            🧹 Clean
+                        </button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        resultsDiv.innerHTML = html;
+        showToast(`Found ${data.bloat_sources.length} bloat sources totaling ${data.total_bloat_human}`, 'warning');
+        
+    } catch (e) {
+        resultsDiv.innerHTML = `<div class="cleanup-result error">Error: ${e.message}</div>`;
+        SHELLDER_DEBUG.error('DISK', 'Failed to detect bloat', e);
+    }
+}
+
+async function cleanupBloat(sourceId, isSafe) {
+    if (!isSafe) {
+        if (!confirm(`This cleanup is marked as potentially unsafe and may have side effects. Are you sure you want to proceed?`)) {
+            return;
+        }
+    }
+    
+    showToast(`🧹 Cleaning up ${sourceId}...`, 'info');
+    
+    try {
+        const data = await fetchAPI('/api/disk/cleanup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ source_id: sourceId, force: !isSafe })
+        });
+        
+        if (data.error) {
+            showToast(`❌ Cleanup failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        showToast(`✅ Cleaned ${data.source_name}: freed ${data.freed}!`, 'success');
+        
+        // Refresh disk health and bloat detection
+        await loadDiskHealth();
+        await detectBloat();
+        
+    } catch (e) {
+        showToast(`❌ Cleanup failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('DISK', 'Cleanup failed', e);
+    }
+}
+
+async function cleanupAllSafe() {
+    showToast('🧹 Running quick cleanup on all safe sources...', 'info');
+    
+    try {
+        const data = await fetchAPI('/api/disk/cleanup-all', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ include_unsafe: false })
+        });
+        
+        if (data.error) {
+            showToast(`❌ Cleanup failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        if (data.total_freed_bytes > 0) {
+            showToast(`✅ Quick cleanup complete! Freed ${data.total_freed}`, 'success');
+        } else {
+            showToast('No bloat to clean up - system is already clean!', 'info');
+        }
+        
+        // Show results
+        const resultsDiv = document.getElementById('diskScanResults');
+        if (resultsDiv && data.results && data.results.length > 0) {
+            resultsDiv.style.display = 'block';
+            let html = `
+                <div class="disk-scan-header">
+                    <span class="disk-scan-title">🧹 Cleanup Results</span>
+                    <span class="disk-scan-total">Total freed: ${data.total_freed}</span>
+                </div>
+            `;
+            
+            for (const result of data.results) {
+                if (result.skipped) {
+                    html += `
+                        <div class="bloat-item" style="opacity: 0.6;">
+                            <div class="bloat-info">
+                                <div class="bloat-name">${escapeHtml(result.source_name)}</div>
+                                <div class="bloat-description">Skipped: ${result.reason}</div>
+                            </div>
+                        </div>
+                    `;
+                } else {
+                    html += `
+                        <div class="bloat-item">
+                            <div class="bloat-info">
+                                <div class="bloat-name">${escapeHtml(result.source_name)}</div>
+                                <div class="bloat-description">Cleaned successfully</div>
+                            </div>
+                            <span class="bloat-size" style="color: var(--success);">-${result.freed}</span>
+                        </div>
+                    `;
+                }
+            }
+            
+            resultsDiv.innerHTML = html;
+        }
+        
+        // Refresh disk health
+        await loadDiskHealth();
+        
+    } catch (e) {
+        showToast(`❌ Cleanup failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('DISK', 'Quick cleanup failed', e);
+    }
+}
+
+async function deleteFile(filepath) {
+    if (!confirm(`Are you sure you want to permanently delete:\n\n${filepath}\n\nThis cannot be undone!`)) {
+        return;
+    }
+    
+    showToast(`🗑️ Deleting file...`, 'info');
+    
+    try {
+        const data = await fetchAPI('/api/disk/delete-file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ path: filepath })
+        });
+        
+        if (data.error) {
+            showToast(`❌ Delete failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        showToast(`✅ Deleted! Freed ${data.size_freed}`, 'success');
+        
+        // Refresh disk health and file scan
+        await loadDiskHealth();
+        await scanLargeFiles();
+        
+    } catch (e) {
+        showToast(`❌ Delete failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('DISK', 'File delete failed', e);
+    }
+}
+
+// Start disk health monitoring on dashboard
+function startDiskHealthMonitoring() {
+    // Initial load
+    loadDiskHealth();
+    
+    // Refresh every 60 seconds
+    if (diskHealthRefreshInterval) clearInterval(diskHealthRefreshInterval);
+    diskHealthRefreshInterval = setInterval(loadDiskHealth, 60000);
+}
+
+// Initialize disk health on dashboard load
+if (document.getElementById('diskHealthCard')) {
+    startDiskHealthMonitoring();
+}

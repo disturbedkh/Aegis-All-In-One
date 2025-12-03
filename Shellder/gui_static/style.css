@@ -3221,3 +3221,320 @@ select:focus {
     color: var(--text-muted);
 }
 
+/* =============================================================================
+   DISK HEALTH PANEL
+   ============================================================================= */
+
+.alert-banner {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 12px 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 1rem;
+    animation: pulse-alert 2s infinite;
+}
+
+.alert-banner.alert-critical {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.3) 0%, rgba(239, 68, 68, 0.1) 100%);
+    border: 2px solid var(--danger);
+}
+
+.alert-banner.alert-warning {
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.3) 0%, rgba(245, 158, 11, 0.1) 100%);
+    border: 2px solid var(--warning);
+}
+
+@keyframes pulse-alert {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.7; }
+}
+
+.alert-content {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+    justify-content: center;
+}
+
+.alert-icon {
+    font-size: 24px;
+    animation: shake 0.5s infinite;
+}
+
+@keyframes shake {
+    0%, 100% { transform: rotate(0deg); }
+    25% { transform: rotate(-5deg); }
+    75% { transform: rotate(5deg); }
+}
+
+.alert-message {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.disk-health-card {
+    border: 1px solid var(--border-color);
+}
+
+.disk-health-card.status-healthy {
+    border-color: var(--success);
+}
+
+.disk-health-card.status-warning {
+    border-color: var(--warning);
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(245, 158, 11, 0.05) 100%);
+}
+
+.disk-health-card.status-critical,
+.disk-health-card.status-emergency {
+    border-color: var(--danger);
+    background: linear-gradient(135deg, var(--bg-card) 0%, rgba(239, 68, 68, 0.1) 100%);
+    animation: pulse-card 2s infinite;
+}
+
+@keyframes pulse-card {
+    0%, 100% { box-shadow: 0 0 10px rgba(239, 68, 68, 0.3); }
+    50% { box-shadow: 0 0 20px rgba(239, 68, 68, 0.5); }
+}
+
+.disk-health-overview {
+    margin-bottom: 16px;
+}
+
+.disk-usage-bar-container {
+    height: 20px;
+    background: var(--bg-primary);
+    border-radius: 10px;
+    overflow: hidden;
+    margin-bottom: 8px;
+    border: 1px solid var(--border-color);
+}
+
+.disk-usage-bar {
+    height: 100%;
+    border-radius: 10px;
+    transition: width 0.5s ease, background 0.3s ease;
+    background: var(--success);
+}
+
+.disk-usage-bar.warning {
+    background: linear-gradient(90deg, var(--warning) 0%, #fbbf24 100%);
+}
+
+.disk-usage-bar.critical {
+    background: linear-gradient(90deg, var(--danger) 0%, #f87171 100%);
+}
+
+.disk-usage-bar.emergency {
+    background: linear-gradient(90deg, #dc2626 0%, var(--danger) 50%, #dc2626 100%);
+    animation: danger-pulse 1s infinite;
+}
+
+@keyframes danger-pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+.disk-usage-stats {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.disk-free {
+    color: var(--text-muted);
+}
+
+.disk-growth-warning {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 14px;
+    background: rgba(245, 158, 11, 0.2);
+    border: 1px solid var(--warning);
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    font-size: 13px;
+    color: var(--warning);
+}
+
+.disk-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-bottom: 16px;
+}
+
+.disk-scan-results {
+    background: var(--bg-primary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    padding: 12px;
+    max-height: 400px;
+    overflow-y: auto;
+}
+
+.disk-scan-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 10px;
+    margin-bottom: 10px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.disk-scan-title {
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.disk-scan-total {
+    font-size: 12px;
+    color: var(--warning);
+    font-weight: 500;
+}
+
+.bloat-item, .large-file-item {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 8px;
+    transition: background var(--transition-fast);
+}
+
+.bloat-item:hover, .large-file-item:hover {
+    background: var(--bg-hover);
+}
+
+.bloat-info, .file-info {
+    flex: 1;
+}
+
+.bloat-name, .file-path {
+    font-weight: 500;
+    font-size: 13px;
+    color: var(--text-primary);
+    word-break: break-all;
+}
+
+.bloat-description, .file-modified {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.bloat-size, .file-size {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--warning);
+    margin-right: 12px;
+    white-space: nowrap;
+}
+
+.bloat-severity {
+    padding: 2px 8px;
+    border-radius: 4px;
+    font-size: 10px;
+    font-weight: 600;
+    text-transform: uppercase;
+    margin-right: 10px;
+}
+
+.bloat-severity.high {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+}
+
+.bloat-severity.medium {
+    background: rgba(245, 158, 11, 0.2);
+    color: var(--warning);
+}
+
+.bloat-severity.low {
+    background: rgba(59, 130, 246, 0.2);
+    color: var(--accent-primary);
+}
+
+.bloat-actions, .file-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.btn-cleanup {
+    background: var(--warning);
+    color: #000;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-cleanup:hover {
+    background: #fbbf24;
+    transform: scale(1.05);
+}
+
+.btn-cleanup:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+    transform: none;
+}
+
+.btn-delete {
+    background: var(--danger);
+    color: #fff;
+    border: none;
+    padding: 4px 10px;
+    border-radius: 4px;
+    font-size: 11px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.btn-delete:hover {
+    background: #f87171;
+    transform: scale(1.05);
+}
+
+.cleanup-result {
+    font-size: 12px;
+    padding: 8px 12px;
+    border-radius: var(--radius-sm);
+    margin-top: 8px;
+}
+
+.cleanup-result.success {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+    border: 1px solid var(--success);
+}
+
+.cleanup-result.error {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+    border: 1px solid var(--danger);
+}
+
+.no-bloat-found {
+    text-align: center;
+    padding: 20px;
+    color: var(--success);
+    font-size: 14px;
+}
+
+.no-bloat-found .icon {
+    font-size: 32px;
+    margin-bottom: 8px;
+}
+

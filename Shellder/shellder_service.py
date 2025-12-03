@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.25"  # 2025-12-03: Fix chart overflow - bars shrink to fit container
-SHELLDER_BUILD = "20251203-1"  # Date-based build number
+SHELLDER_VERSION = "1.0.26"  # 2025-12-03: Disk health monitoring - detect/cleanup bloat, large file scanner
+SHELLDER_BUILD = "20251203-2"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -5777,6 +5777,589 @@ def api_status():
         'services': stats.get('services', {}),
         'timestamp': datetime.now().isoformat()
     })
+
+# =============================================================================
+# DISK HEALTH MONITORING
+# =============================================================================
+# Known bloat sources that can safely be cleaned
+KNOWN_BLOAT_SOURCES = [
+    {
+        'id': 'gnome_tracker',
+        'name': 'GNOME Tracker Cache',
+        'description': 'File indexing cache that can grow uncontrollably',
+        'paths': [
+            '~/.cache/tracker3/',
+            '~/.cache/tracker/',
+        ],
+        'cleanup_commands': [
+            'tracker3 daemon -k 2>/dev/null || true',
+            'systemctl --user stop tracker-miner-fs-3 2>/dev/null || true',
+            'systemctl --user stop tracker-extract-3 2>/dev/null || true',
+            'rm -rf ~/.cache/tracker3/',
+            'rm -rf ~/.cache/tracker/',
+        ],
+        'disable_commands': [
+            'systemctl --user mask tracker-miner-fs-3 2>/dev/null || true',
+            'systemctl --user mask tracker-extract-3 2>/dev/null || true',
+        ],
+        'safe': True,
+        'severity': 'high',
+    },
+    {
+        'id': 'systemd_journal',
+        'name': 'Systemd Journal Logs',
+        'description': 'System logs that can grow very large',
+        'paths': ['/var/log/journal/'],
+        'cleanup_commands': ['sudo journalctl --vacuum-size=500M'],
+        'safe': True,
+        'severity': 'medium',
+    },
+    {
+        'id': 'apt_cache',
+        'name': 'APT Package Cache',
+        'description': 'Downloaded package files',
+        'paths': ['/var/cache/apt/archives/'],
+        'cleanup_commands': ['sudo apt-get clean'],
+        'safe': True,
+        'severity': 'low',
+    },
+    {
+        'id': 'docker_unused',
+        'name': 'Docker Unused Data',
+        'description': 'Unused containers, images, networks, and volumes',
+        'paths': ['/var/lib/docker/'],
+        'cleanup_commands': ['docker system prune -af --volumes'],
+        'safe': False,  # Requires confirmation
+        'severity': 'medium',
+    },
+    {
+        'id': 'thumbnail_cache',
+        'name': 'Thumbnail Cache',
+        'description': 'Cached image thumbnails',
+        'paths': ['~/.cache/thumbnails/'],
+        'cleanup_commands': ['rm -rf ~/.cache/thumbnails/*'],
+        'safe': True,
+        'severity': 'low',
+    },
+    {
+        'id': 'trash',
+        'name': 'Trash',
+        'description': 'Deleted files in trash',
+        'paths': ['~/.local/share/Trash/'],
+        'cleanup_commands': ['rm -rf ~/.local/share/Trash/*'],
+        'safe': True,
+        'severity': 'medium',
+    },
+    {
+        'id': 'npm_cache',
+        'name': 'NPM Cache',
+        'description': 'Node.js package manager cache',
+        'paths': ['~/.npm/_cacache/'],
+        'cleanup_commands': ['npm cache clean --force'],
+        'safe': True,
+        'severity': 'low',
+    },
+    {
+        'id': 'pip_cache',
+        'name': 'PIP Cache',
+        'description': 'Python package manager cache',
+        'paths': ['~/.cache/pip/'],
+        'cleanup_commands': ['pip cache purge'],
+        'safe': True,
+        'severity': 'low',
+    },
+]
+
+# Disk usage thresholds
+DISK_THRESHOLD_WARNING = 70  # Yellow warning
+DISK_THRESHOLD_CRITICAL = 85  # Red critical
+DISK_THRESHOLD_EMERGENCY = 95  # Emergency - system may become unstable
+
+# Track disk usage history for growth detection
+_disk_history = []
+_disk_history_max = 60  # Keep 60 samples (1 hour at 1 min intervals)
+
+def _get_disk_usage():
+    """Get current disk usage"""
+    if not PSUTIL_AVAILABLE:
+        return None
+    try:
+        usage = psutil.disk_usage('/')
+        return {
+            'total': usage.total,
+            'used': usage.used,
+            'free': usage.free,
+            'percent': usage.percent
+        }
+    except Exception as e:
+        error('DISK', f'Failed to get disk usage: {e}')
+        return None
+
+def _expand_path(path):
+    """Expand ~ in path to actual home directory"""
+    if path.startswith('~'):
+        # Try to find the main user's home (not root)
+        home_dir = None
+        try:
+            # Get the home directory of the user running the service
+            import pwd
+            # Look for common non-root users
+            for user in ['pokemap', 'aegis', 'ubuntu', 'admin']:
+                try:
+                    pw = pwd.getpwnam(user)
+                    home_dir = pw.pw_dir
+                    break
+                except KeyError:
+                    continue
+            # Fall back to current user's home
+            if not home_dir:
+                home_dir = os.path.expanduser('~')
+        except:
+            home_dir = os.path.expanduser('~')
+        return path.replace('~', home_dir, 1)
+    return path
+
+def _get_dir_size(path):
+    """Get total size of a directory"""
+    expanded_path = _expand_path(path)
+    if not os.path.exists(expanded_path):
+        return 0
+    
+    total = 0
+    try:
+        for dirpath, dirnames, filenames in os.walk(expanded_path):
+            for filename in filenames:
+                filepath = os.path.join(dirpath, filename)
+                try:
+                    total += os.path.getsize(filepath)
+                except (OSError, FileNotFoundError):
+                    pass
+    except PermissionError:
+        # Try using du command as fallback
+        try:
+            result = subprocess.run(
+                ['du', '-sb', expanded_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            if result.returncode == 0:
+                total = int(result.stdout.split()[0])
+        except:
+            pass
+    return total
+
+def _find_large_files(min_size_mb=100, max_results=20):
+    """Find large files on the system"""
+    large_files = []
+    min_size_bytes = min_size_mb * 1024 * 1024
+    
+    # Directories to search
+    search_dirs = ['/home', '/var', '/tmp', '/root']
+    # Directories to skip
+    skip_dirs = {'/proc', '/sys', '/dev', '/run', '/snap'}
+    
+    for search_dir in search_dirs:
+        if not os.path.exists(search_dir):
+            continue
+        
+        try:
+            for dirpath, dirnames, filenames in os.walk(search_dir):
+                # Skip certain directories
+                if any(dirpath.startswith(skip) for skip in skip_dirs):
+                    continue
+                
+                # Don't descend into certain directories
+                dirnames[:] = [d for d in dirnames if d not in ['.git', 'node_modules', '__pycache__']]
+                
+                for filename in filenames:
+                    filepath = os.path.join(dirpath, filename)
+                    try:
+                        size = os.path.getsize(filepath)
+                        if size >= min_size_bytes:
+                            large_files.append({
+                                'path': filepath,
+                                'size': size,
+                                'size_human': format_bytes(size),
+                                'modified': datetime.fromtimestamp(os.path.getmtime(filepath)).isoformat()
+                            })
+                    except (OSError, FileNotFoundError):
+                        pass
+        except PermissionError:
+            continue
+    
+    # Sort by size descending
+    large_files.sort(key=lambda x: x['size'], reverse=True)
+    return large_files[:max_results]
+
+def _detect_bloat():
+    """Detect known bloat sources and their sizes"""
+    detected = []
+    
+    for source in KNOWN_BLOAT_SOURCES:
+        total_size = 0
+        found_paths = []
+        
+        for path in source['paths']:
+            expanded = _expand_path(path)
+            if os.path.exists(expanded):
+                size = _get_dir_size(path)
+                if size > 0:
+                    total_size += size
+                    found_paths.append({
+                        'path': expanded,
+                        'size': size,
+                        'size_human': format_bytes(size)
+                    })
+        
+        if total_size > 0:
+            detected.append({
+                'id': source['id'],
+                'name': source['name'],
+                'description': source['description'],
+                'total_size': total_size,
+                'total_size_human': format_bytes(total_size),
+                'paths': found_paths,
+                'safe': source['safe'],
+                'severity': source['severity'],
+                'cleanup_commands': source['cleanup_commands'],
+            })
+    
+    # Sort by size descending
+    detected.sort(key=lambda x: x['total_size'], reverse=True)
+    return detected
+
+@app.route('/api/disk/health')
+def api_disk_health():
+    """Get disk health status with alerts"""
+    usage = _get_disk_usage()
+    if not usage:
+        return jsonify({'error': 'Could not get disk usage'}), 500
+    
+    # Determine status
+    percent = usage['percent']
+    if percent >= DISK_THRESHOLD_EMERGENCY:
+        status = 'emergency'
+        message = '🚨 EMERGENCY: Disk almost full! System may become unstable.'
+    elif percent >= DISK_THRESHOLD_CRITICAL:
+        status = 'critical'
+        message = '🔴 CRITICAL: Disk usage very high. Clean up immediately!'
+    elif percent >= DISK_THRESHOLD_WARNING:
+        status = 'warning'
+        message = '⚠️ WARNING: Disk usage elevated. Consider cleaning up.'
+    else:
+        status = 'healthy'
+        message = '✅ Disk usage is healthy.'
+    
+    # Check for rapid growth
+    growth_warning = None
+    if len(_disk_history) >= 2:
+        oldest = _disk_history[0]
+        newest = _disk_history[-1]
+        time_diff = (newest['time'] - oldest['time']).total_seconds() / 3600  # hours
+        if time_diff > 0:
+            size_diff = newest['used'] - oldest['used']
+            growth_rate = size_diff / time_diff  # bytes per hour
+            if growth_rate > 1024 * 1024 * 100:  # > 100MB/hour
+                growth_warning = {
+                    'rate': growth_rate,
+                    'rate_human': f"{format_bytes(growth_rate)}/hour",
+                    'message': f"⚠️ Disk growing at {format_bytes(growth_rate)}/hour!"
+                }
+    
+    # Record current usage
+    _disk_history.append({
+        'time': datetime.now(),
+        'used': usage['used'],
+        'percent': usage['percent']
+    })
+    if len(_disk_history) > _disk_history_max:
+        _disk_history.pop(0)
+    
+    return jsonify({
+        'status': status,
+        'message': message,
+        'usage': {
+            'total': format_bytes(usage['total']),
+            'used': format_bytes(usage['used']),
+            'free': format_bytes(usage['free']),
+            'percent': usage['percent'],
+            'total_bytes': usage['total'],
+            'used_bytes': usage['used'],
+            'free_bytes': usage['free'],
+        },
+        'thresholds': {
+            'warning': DISK_THRESHOLD_WARNING,
+            'critical': DISK_THRESHOLD_CRITICAL,
+            'emergency': DISK_THRESHOLD_EMERGENCY,
+        },
+        'growth_warning': growth_warning,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/disk/large-files')
+def api_disk_large_files():
+    """Find large files on the system"""
+    min_size = request.args.get('min_size_mb', 100, type=int)
+    max_results = request.args.get('max_results', 20, type=int)
+    
+    info('DISK', f'Scanning for large files (min: {min_size}MB)')
+    
+    try:
+        files = _find_large_files(min_size_mb=min_size, max_results=max_results)
+        total_size = sum(f['size'] for f in files)
+        
+        return jsonify({
+            'files': files,
+            'count': len(files),
+            'total_size': total_size,
+            'total_size_human': format_bytes(total_size),
+            'min_size_mb': min_size,
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        error('DISK', f'Failed to scan for large files: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/disk/bloat')
+def api_disk_bloat():
+    """Detect known bloat sources"""
+    info('DISK', 'Detecting known bloat sources')
+    
+    try:
+        bloat = _detect_bloat()
+        total_bloat = sum(b['total_size'] for b in bloat)
+        
+        # Also get disk usage for context
+        usage = _get_disk_usage()
+        
+        return jsonify({
+            'bloat_sources': bloat,
+            'total_bloat': total_bloat,
+            'total_bloat_human': format_bytes(total_bloat),
+            'disk_usage': {
+                'percent': usage['percent'] if usage else 0,
+                'free': format_bytes(usage['free']) if usage else 'Unknown',
+            } if usage else None,
+            'potential_recovery': f"Cleaning all safe sources could free up to {format_bytes(sum(b['total_size'] for b in bloat if b['safe']))}",
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        error('DISK', f'Failed to detect bloat: {e}', exc_info=True)
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/disk/cleanup', methods=['POST'])
+def api_disk_cleanup():
+    """Clean up a specific bloat source"""
+    data = request.get_json() or {}
+    source_id = data.get('source_id')
+    
+    if not source_id:
+        return jsonify({'error': 'source_id required'}), 400
+    
+    # Find the source
+    source = None
+    for s in KNOWN_BLOAT_SOURCES:
+        if s['id'] == source_id:
+            source = s
+            break
+    
+    if not source:
+        return jsonify({'error': f'Unknown source: {source_id}'}), 404
+    
+    if not source['safe'] and not data.get('force'):
+        return jsonify({
+            'error': 'This cleanup is not marked as safe. Set force=true to proceed.',
+            'warning': f"Cleaning {source['name']} may have side effects."
+        }), 400
+    
+    info('DISK', f"Starting cleanup of {source['name']}")
+    
+    # Get size before cleanup
+    size_before = sum(_get_dir_size(p) for p in source['paths'])
+    
+    # Run cleanup commands
+    results = []
+    for cmd in source['cleanup_commands']:
+        try:
+            # Expand ~ in commands
+            expanded_cmd = cmd
+            for path in source['paths']:
+                if '~' in path:
+                    expanded_cmd = expanded_cmd.replace(path, _expand_path(path))
+            
+            result = subprocess.run(
+                expanded_cmd,
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=60
+            )
+            results.append({
+                'command': cmd,
+                'success': result.returncode == 0,
+                'stdout': result.stdout[:500] if result.stdout else '',
+                'stderr': result.stderr[:500] if result.stderr else '',
+            })
+        except subprocess.TimeoutExpired:
+            results.append({
+                'command': cmd,
+                'success': False,
+                'error': 'Command timed out'
+            })
+        except Exception as e:
+            results.append({
+                'command': cmd,
+                'success': False,
+                'error': str(e)
+            })
+    
+    # Get size after cleanup
+    size_after = sum(_get_dir_size(p) for p in source['paths'])
+    freed = size_before - size_after
+    
+    info('DISK', f"Cleanup complete: freed {format_bytes(freed)}")
+    
+    return jsonify({
+        'source_id': source_id,
+        'source_name': source['name'],
+        'size_before': format_bytes(size_before),
+        'size_after': format_bytes(size_after),
+        'freed': format_bytes(freed),
+        'freed_bytes': freed,
+        'commands_run': results,
+        'success': all(r.get('success', False) for r in results),
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/disk/cleanup-all', methods=['POST'])
+def api_disk_cleanup_all():
+    """Clean up all safe bloat sources"""
+    data = request.get_json() or {}
+    include_unsafe = data.get('include_unsafe', False)
+    
+    info('DISK', f"Starting cleanup of all {'sources' if include_unsafe else 'safe sources'}")
+    
+    # Get current bloat
+    bloat = _detect_bloat()
+    
+    results = []
+    total_freed = 0
+    
+    for source in bloat:
+        if not source['safe'] and not include_unsafe:
+            results.append({
+                'source_id': source['id'],
+                'source_name': source['name'],
+                'skipped': True,
+                'reason': 'Not marked as safe'
+            })
+            continue
+        
+        # Get size before
+        size_before = source['total_size']
+        
+        # Find full source config
+        source_config = None
+        for s in KNOWN_BLOAT_SOURCES:
+            if s['id'] == source['id']:
+                source_config = s
+                break
+        
+        if not source_config:
+            continue
+        
+        # Run cleanup
+        cmd_results = []
+        for cmd in source_config['cleanup_commands']:
+            try:
+                expanded_cmd = cmd
+                for path in source_config['paths']:
+                    if '~' in path:
+                        expanded_cmd = expanded_cmd.replace(path, _expand_path(path))
+                
+                result = subprocess.run(
+                    expanded_cmd,
+                    shell=True,
+                    capture_output=True,
+                    text=True,
+                    timeout=60
+                )
+                cmd_results.append({
+                    'command': cmd,
+                    'success': result.returncode == 0
+                })
+            except Exception as e:
+                cmd_results.append({
+                    'command': cmd,
+                    'success': False,
+                    'error': str(e)
+                })
+        
+        # Get size after
+        size_after = sum(_get_dir_size(p) for p in source_config['paths'])
+        freed = size_before - size_after
+        total_freed += freed
+        
+        results.append({
+            'source_id': source['id'],
+            'source_name': source['name'],
+            'size_before': format_bytes(size_before),
+            'freed': format_bytes(freed),
+            'commands': cmd_results
+        })
+    
+    # Get new disk status
+    usage = _get_disk_usage()
+    
+    info('DISK', f"Cleanup all complete: freed {format_bytes(total_freed)}")
+    
+    return jsonify({
+        'results': results,
+        'total_freed': format_bytes(total_freed),
+        'total_freed_bytes': total_freed,
+        'disk_usage_after': {
+            'percent': usage['percent'] if usage else 0,
+            'free': format_bytes(usage['free']) if usage else 'Unknown',
+        } if usage else None,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/disk/delete-file', methods=['POST'])
+def api_disk_delete_file():
+    """Delete a specific large file"""
+    data = request.get_json() or {}
+    filepath = data.get('path')
+    
+    if not filepath:
+        return jsonify({'error': 'path required'}), 400
+    
+    # Safety checks
+    dangerous_paths = ['/', '/home', '/var', '/etc', '/usr', '/bin', '/sbin', '/root']
+    if filepath in dangerous_paths:
+        return jsonify({'error': 'Cannot delete system directories'}), 400
+    
+    if not os.path.exists(filepath):
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        size = os.path.getsize(filepath)
+        os.remove(filepath)
+        
+        info('DISK', f"Deleted file: {filepath} ({format_bytes(size)})")
+        
+        return jsonify({
+            'deleted': filepath,
+            'size_freed': format_bytes(size),
+            'size_freed_bytes': size,
+            'success': True,
+            'timestamp': datetime.now().isoformat()
+        })
+    except PermissionError:
+        return jsonify({'error': 'Permission denied. May need to run as root.'}), 403
+    except Exception as e:
+        error('DISK', f'Failed to delete file: {e}')
+        return jsonify({'error': str(e)}), 500
 
 @app.route('/api/containers')
 def api_containers():

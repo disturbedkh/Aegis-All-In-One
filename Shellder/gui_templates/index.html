@@ -240,7 +240,51 @@
                     </div>
                 </div>
                 
+                <!-- Disk Health Alert Banner (shown when disk is critical) -->
+                <div id="diskAlertBanner" class="alert-banner alert-critical" style="display: none;">
+                    <div class="alert-content">
+                        <span class="alert-icon">🚨</span>
+                        <span class="alert-message" id="diskAlertMessage">Disk space critical!</span>
+                        <button class="btn btn-sm btn-warning" onclick="showDiskHealthPanel()">View Details</button>
+                        <button class="btn btn-sm" onclick="hideDiskAlert()">Dismiss</button>
+                    </div>
+                </div>
+                
                 <div class="dashboard-grid" style="margin-top: 1rem;">
+                    <!-- Disk Health Panel -->
+                    <div class="card disk-health-card" id="diskHealthCard">
+                        <div class="card-header">
+                            <h2 title="Monitor disk usage and clean up bloat">💾 Disk Health</h2>
+                            <div class="card-actions">
+                                <span id="diskHealthStatus" class="badge badge-success">Healthy</span>
+                                <button class="btn btn-sm" onclick="loadDiskHealth()" title="Refresh disk info">🔄</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="disk-health-overview" id="diskHealthOverview">
+                                <div class="disk-usage-bar-container">
+                                    <div class="disk-usage-bar" id="diskUsageBar" style="width: 0%"></div>
+                                </div>
+                                <div class="disk-usage-stats">
+                                    <span id="diskHealthUsed">--</span> / <span id="diskHealthTotal">--</span>
+                                    <span class="disk-free">(<span id="diskHealthFree">--</span> free)</span>
+                                </div>
+                            </div>
+                            <div id="diskGrowthWarning" class="disk-growth-warning" style="display: none;">
+                                <span class="warning-icon">⚠️</span>
+                                <span id="diskGrowthMessage">Disk growing rapidly!</span>
+                            </div>
+                            <div class="disk-actions">
+                                <button class="btn btn-sm" onclick="scanLargeFiles()" title="Find files over 100MB">🔍 Scan Large Files</button>
+                                <button class="btn btn-sm" onclick="detectBloat()" title="Detect known bloat">🗑️ Detect Bloat</button>
+                                <button class="btn btn-sm btn-warning" onclick="cleanupAllSafe()" title="Clean all safe bloat">🧹 Quick Cleanup</button>
+                            </div>
+                            <div id="diskScanResults" class="disk-scan-results" style="display: none;">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="card">
                         <div class="card-header">
                             <h2 title="System services required for the Aegis stack to function">🔌 System Services</h2>
