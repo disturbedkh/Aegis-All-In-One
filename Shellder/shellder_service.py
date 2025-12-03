@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.29"  # 2025-12-03: 3-level site availability - nginx enabled, port available, domain accessible
-SHELLDER_BUILD = "20251203-5"  # Date-based build number
+SHELLDER_VERSION = "1.0.30"  # 2025-12-03: Combined System Resources panel (Disk + Memory + Processes tabs)
+SHELLDER_BUILD = "20251203-6"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!

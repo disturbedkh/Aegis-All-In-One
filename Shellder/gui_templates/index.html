@@ -251,81 +251,107 @@
                 </div>
                 
                 <div class="dashboard-grid" style="margin-top: 1rem;">
-                    <!-- Disk Health Panel -->
-                    <div class="card disk-health-card" id="diskHealthCard">
+                    <!-- Combined System Resources Panel -->
+                    <div class="card system-resources-card" id="systemResourcesCard">
                         <div class="card-header">
-                            <h2 title="Monitor disk usage and clean up bloat">💾 Disk Health</h2>
+                            <h2 title="Monitor and manage system resources">⚡ System Resources</h2>
                             <div class="card-actions">
-                                <span id="diskHealthStatus" class="badge badge-success">Healthy</span>
-                                <button class="btn btn-sm" onclick="loadDiskHealth()" title="Refresh disk info">🔄</button>
+                                <span id="diskHealthStatus" class="badge badge-success" title="Disk status">💾 --</span>
+                                <span id="memoryHealthStatus" class="badge badge-success" title="Memory status">🧠 --</span>
+                                <button class="btn btn-sm" onclick="loadSystemResources()" title="Refresh all">🔄</button>
                             </div>
                         </div>
                         <div class="card-body">
-                            <div class="disk-health-overview" id="diskHealthOverview">
-                                <div class="disk-usage-bar-container">
-                                    <div class="disk-usage-bar" id="diskUsageBar" style="width: 0%"></div>
-                                </div>
-                                <div class="disk-usage-stats">
-                                    <span id="diskHealthUsed">--</span> / <span id="diskHealthTotal">--</span>
-                                    <span class="disk-free">(<span id="diskHealthFree">--</span> free)</span>
-                                </div>
+                            <!-- Resource Tabs -->
+                            <div class="resource-tabs">
+                                <button class="resource-tab active" onclick="showResourceTab('disk')" id="tabDisk">
+                                    💾 Disk
+                                </button>
+                                <button class="resource-tab" onclick="showResourceTab('memory')" id="tabMemory">
+                                    🧠 Memory
+                                </button>
+                                <button class="resource-tab" onclick="showResourceTab('processes')" id="tabProcesses">
+                                    📊 Processes
+                                </button>
                             </div>
-                            <div id="diskGrowthWarning" class="disk-growth-warning" style="display: none;">
-                                <span class="warning-icon">⚠️</span>
-                                <span id="diskGrowthMessage">Disk growing rapidly!</span>
-                            </div>
-                            <div class="disk-actions">
-                                <button class="btn btn-sm" onclick="scanLargeFiles()" title="Find files over 100MB">🔍 Scan Large Files</button>
-                                <button class="btn btn-sm" onclick="detectBloat()" title="Detect known bloat">🗑️ Detect Bloat</button>
-                                <button class="btn btn-sm btn-warning" onclick="cleanupAllSafe()" title="Clean all safe bloat">🧹 Quick Cleanup</button>
-                            </div>
-                            <div id="diskScanResults" class="disk-scan-results" style="display: none;">
-                                <!-- Populated by JS -->
-                            </div>
-                        </div>
-                    </div>
-                    
-                    <!-- Memory Manager Panel -->
-                    <div class="card memory-health-card" id="memoryHealthCard">
-                        <div class="card-header">
-                            <h2 title="Monitor RAM usage and manage processes">🧠 Memory Manager</h2>
-                            <div class="card-actions">
-                                <span id="memoryHealthStatus" class="badge badge-success">Healthy</span>
-                                <button class="btn btn-sm" onclick="loadMemoryHealth()" title="Refresh memory info">🔄</button>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="memory-health-overview">
-                                <div class="memory-section">
-                                    <div class="memory-label">RAM</div>
-                                    <div class="memory-usage-bar-container">
-                                        <div class="memory-usage-bar" id="ramUsageBar" style="width: 0%"></div>
-                                    </div>
-                                    <div class="memory-usage-stats">
-                                        <span id="ramUsed">--</span> / <span id="ramTotal">--</span>
-                                        <span class="memory-available">(<span id="ramAvailable">--</span> available)</span>
+                            
+                            <!-- Disk Tab Content -->
+                            <div class="resource-content" id="resourceDisk">
+                                <div class="resource-bars">
+                                    <div class="resource-bar-group">
+                                        <div class="resource-bar-label">
+                                            <span>💾 Disk</span>
+                                            <span id="diskHealthPercent">--%</span>
+                                        </div>
+                                        <div class="resource-bar-container">
+                                            <div class="resource-bar disk" id="diskUsageBar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="resource-bar-stats">
+                                            <span id="diskHealthUsed">--</span> / <span id="diskHealthTotal">--</span>
+                                            <span class="resource-free">(<span id="diskHealthFree">--</span> free)</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="memory-section">
-                                    <div class="memory-label">Swap</div>
-                                    <div class="memory-usage-bar-container swap">
-                                        <div class="memory-usage-bar swap" id="swapUsageBar" style="width: 0%"></div>
+                                <div id="diskGrowthWarning" class="resource-warning" style="display: none;">
+                                    <span>⚠️</span>
+                                    <span id="diskGrowthMessage">Disk growing rapidly!</span>
+                                </div>
+                                <div class="resource-actions">
+                                    <button class="btn btn-sm" onclick="scanLargeFiles()" title="Find files over 100MB">🔍 Large Files</button>
+                                    <button class="btn btn-sm" onclick="detectBloat()" title="Detect known bloat">🗑️ Bloat</button>
+                                    <button class="btn btn-sm btn-warning" onclick="cleanupAllSafe()" title="Clean all safe bloat">🧹 Cleanup</button>
+                                </div>
+                                <div id="diskScanResults" class="resource-scan-results" style="display: none;"></div>
+                            </div>
+                            
+                            <!-- Memory Tab Content -->
+                            <div class="resource-content" id="resourceMemory" style="display: none;">
+                                <div class="resource-bars">
+                                    <div class="resource-bar-group">
+                                        <div class="resource-bar-label">
+                                            <span>🧠 RAM</span>
+                                            <span id="ramPercent">--%</span>
+                                        </div>
+                                        <div class="resource-bar-container">
+                                            <div class="resource-bar memory" id="ramUsageBar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="resource-bar-stats">
+                                            <span id="ramUsed">--</span> / <span id="ramTotal">--</span>
+                                            <span class="resource-free">(<span id="ramAvailable">--</span> avail)</span>
+                                        </div>
                                     </div>
-                                    <div class="memory-usage-stats">
-                                        <span id="swapUsed">--</span> / <span id="swapTotal">--</span>
+                                    <div class="resource-bar-group">
+                                        <div class="resource-bar-label">
+                                            <span>💿 Swap</span>
+                                            <span id="swapPercent">--%</span>
+                                        </div>
+                                        <div class="resource-bar-container swap">
+                                            <div class="resource-bar swap" id="swapUsageBar" style="width: 0%"></div>
+                                        </div>
+                                        <div class="resource-bar-stats">
+                                            <span id="swapUsed">--</span> / <span id="swapTotal">--</span>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="memory-cache-info">
-                                    <span>💾 Clearable cache: <strong id="memoryClearable">--</strong></span>
+                                <div class="resource-cache-info">
+                                    💾 Clearable cache: <strong id="memoryClearable">--</strong>
+                                </div>
+                                <div class="resource-actions">
+                                    <button class="btn btn-sm btn-warning" onclick="clearMemoryCache()" title="Clear RAM cache">🧹 Clear Cache</button>
+                                    <button class="btn btn-sm btn-danger" onclick="emergencyMemoryCleanup()" title="Kill high memory processes">🚨 Emergency</button>
                                 </div>
                             </div>
-                            <div class="memory-actions">
-                                <button class="btn btn-sm" onclick="showProcessList()" title="View top processes">📊 Processes</button>
-                                <button class="btn btn-sm btn-warning" onclick="clearMemoryCache()" title="Clear RAM cache">🧹 Clear Cache</button>
-                                <button class="btn btn-sm btn-danger" onclick="emergencyMemoryCleanup()" title="Kill high memory processes">🚨 Emergency</button>
-                            </div>
-                            <div id="processListContainer" class="process-list-container" style="display: none;">
-                                <!-- Populated by JS -->
+                            
+                            <!-- Processes Tab Content -->
+                            <div class="resource-content" id="resourceProcesses" style="display: none;">
+                                <div class="process-controls">
+                                    <span class="process-sort-label">Sort by:</span>
+                                    <button class="process-sort-btn active" onclick="loadProcessList('memory')" id="sortMemory">Memory</button>
+                                    <button class="process-sort-btn" onclick="loadProcessList('cpu')" id="sortCpu">CPU</button>
+                                </div>
+                                <div id="processListContainer" class="process-list-compact">
+                                    <div class="loading">Click to load processes...</div>
+                                </div>
                             </div>
                         </div>
                     </div>

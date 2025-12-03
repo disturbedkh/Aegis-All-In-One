@@ -4304,27 +4304,24 @@ async function loadDiskHealth() {
             return;
         }
         
-        // Update the health card styling
-        const card = document.getElementById('diskHealthCard');
-        if (card) {
-            card.className = 'card disk-health-card status-' + data.status;
-        }
-        
-        // Update badge
+        // Update badge in header
         const badge = document.getElementById('diskHealthStatus');
         if (badge) {
-            badge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            badge.textContent = `💾 ${data.usage.percent}%`;
             badge.className = 'badge badge-' + (data.status === 'healthy' ? 'success' : 
                                                 data.status === 'warning' ? 'warning' : 'danger');
         }
+        
+        // Update percent display
+        const percentEl = document.getElementById('diskHealthPercent');
+        if (percentEl) percentEl.textContent = `${data.usage.percent}%`;
         
         // Update usage bar
         const usageBar = document.getElementById('diskUsageBar');
         if (usageBar) {
             usageBar.style.width = data.usage.percent + '%';
-            usageBar.className = 'disk-usage-bar' + (
-                data.status === 'emergency' ? ' emergency' :
-                data.status === 'critical' ? ' critical' :
+            usageBar.className = 'resource-bar disk' + (
+                data.status === 'emergency' || data.status === 'critical' ? ' critical' :
                 data.status === 'warning' ? ' warning' : ''
             );
         }
@@ -4645,8 +4642,41 @@ function startDiskHealthMonitoring() {
 }
 
 // Initialize disk health on dashboard load
-if (document.getElementById('diskHealthCard')) {
-    startDiskHealthMonitoring();
+if (document.getElementById('systemResourcesCard')) {
+    startSystemResourcesMonitoring();
+}
+
+// Combined System Resources functions
+function loadSystemResources() {
+    loadDiskHealth();
+    loadMemoryHealth();
+}
+
+function startSystemResourcesMonitoring() {
+    loadSystemResources();
+    // Refresh every 30 seconds
+    setInterval(loadSystemResources, 30000);
+}
+
+function showResourceTab(tab) {
+    // Hide all content
+    document.querySelectorAll('.resource-content').forEach(el => el.style.display = 'none');
+    // Deactivate all tabs
+    document.querySelectorAll('.resource-tab').forEach(el => el.classList.remove('active'));
+    
+    // Show selected content
+    const contentId = 'resource' + tab.charAt(0).toUpperCase() + tab.slice(1);
+    const content = document.getElementById(contentId);
+    if (content) content.style.display = 'block';
+    
+    // Activate selected tab
+    const tabEl = document.getElementById('tab' + tab.charAt(0).toUpperCase() + tab.slice(1));
+    if (tabEl) tabEl.classList.add('active');
+    
+    // Load processes if switching to that tab
+    if (tab === 'processes') {
+        loadProcessList();
+    }
 }
 
 // =============================================================================
@@ -4665,25 +4695,23 @@ async function loadMemoryHealth() {
             return;
         }
         
-        // Update card styling
-        const card = document.getElementById('memoryHealthCard');
-        if (card) {
-            card.className = 'card memory-health-card status-' + data.status;
-        }
-        
-        // Update badge
+        // Update badge in header
         const badge = document.getElementById('memoryHealthStatus');
         if (badge) {
-            badge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            badge.textContent = `🧠 ${data.ram.percent}%`;
             badge.className = 'badge badge-' + (data.status === 'healthy' ? 'success' : 
                                                 data.status === 'warning' ? 'warning' : 'danger');
         }
+        
+        // Update RAM percent
+        const ramPercent = document.getElementById('ramPercent');
+        if (ramPercent) ramPercent.textContent = `${data.ram.percent}%`;
         
         // Update RAM bar
         const ramBar = document.getElementById('ramUsageBar');
         if (ramBar) {
             ramBar.style.width = data.ram.percent + '%';
-            ramBar.className = 'memory-usage-bar' + (
+            ramBar.className = 'resource-bar memory' + (
                 data.status === 'emergency' || data.status === 'critical' ? ' critical' :
                 data.status === 'warning' ? ' warning' : ''
             );
@@ -4696,6 +4724,10 @@ async function loadMemoryHealth() {
         if (ramUsed) ramUsed.textContent = data.ram.used;
         if (ramTotal) ramTotal.textContent = data.ram.total;
         if (ramAvailable) ramAvailable.textContent = data.ram.available;
+        
+        // Update Swap percent
+        const swapPercent = document.getElementById('swapPercent');
+        if (swapPercent) swapPercent.textContent = `${data.swap.percent}%`;
         
         // Update Swap bar
         const swapBar = document.getElementById('swapUsageBar');
@@ -4725,19 +4757,8 @@ async function loadMemoryHealth() {
 }
 
 async function showProcessList() {
-    const container = document.getElementById('processListContainer');
-    if (!container) return;
-    
-    // Toggle visibility
-    if (container.style.display === 'block') {
-        container.style.display = 'none';
-        return;
-    }
-    
-    container.style.display = 'block';
-    container.innerHTML = '<div class="loading">Loading processes...</div>';
-    
-    await loadProcessList();
+    // Just switch to processes tab
+    showResourceTab('processes');
 }
 
 async function loadProcessList(sortBy = currentProcessSort) {
@@ -4746,25 +4767,21 @@ async function loadProcessList(sortBy = currentProcessSort) {
     
     currentProcessSort = sortBy;
     
+    // Update sort button states
+    document.getElementById('sortMemory')?.classList.toggle('active', sortBy === 'memory');
+    document.getElementById('sortCpu')?.classList.toggle('active', sortBy === 'cpu');
+    
+    container.innerHTML = '<div class="loading">Loading processes...</div>';
+    
     try {
-        const data = await fetchAPI(`/api/memory/processes?sort=${sortBy}&limit=15`);
+        const data = await fetchAPI(`/api/memory/processes?sort=${sortBy}&limit=12`);
         
         if (data.error) {
             container.innerHTML = `<div class="cleanup-result error">Error: ${data.error}</div>`;
             return;
         }
         
-        let html = `
-            <div class="process-list-header">
-                <span class="process-list-title">📊 Top Processes (${data.count})</span>
-                <div class="process-sort-controls">
-                    <button class="process-sort-btn ${sortBy === 'memory' ? 'active' : ''}" 
-                            onclick="loadProcessList('memory')">Memory</button>
-                    <button class="process-sort-btn ${sortBy === 'cpu' ? 'active' : ''}" 
-                            onclick="loadProcessList('cpu')">CPU</button>
-                </div>
-            </div>
-        `;
+        let html = '';
         
         for (const proc of data.processes) {
             const isProtected = isProtectedProcess(proc.name);
@@ -4776,8 +4793,7 @@ async function loadProcessList(sortBy = currentProcessSort) {
                         <div class="process-name">${escapeHtml(proc.name)}</div>
                         <div class="process-details">
                             <span>PID: ${proc.pid}</span>
-                            <span>User: ${proc.user}</span>
-                            <span>Uptime: ${uptimeStr}</span>
+                            <span>${uptimeStr}</span>
                         </div>
                     </div>
                     <div class="process-stats">
@@ -4792,7 +4808,7 @@ async function loadProcessList(sortBy = currentProcessSort) {
                     </div>
                     <div class="process-actions">
                         ${isProtected ? 
-                            '<span class="process-protected">Protected</span>' :
+                            '<span class="process-protected">🔒</span>' :
                             `<button class="btn-process-kill" onclick="killProcess(${proc.pid}, '${escapeHtml(proc.name)}')" title="Kill process">Kill</button>`
                         }
                     </div>
@@ -4800,7 +4816,7 @@ async function loadProcessList(sortBy = currentProcessSort) {
             `;
         }
         
-        container.innerHTML = html;
+        container.innerHTML = html || '<div class="no-data">No processes found</div>';
         
     } catch (e) {
         container.innerHTML = `<div class="cleanup-result error">Error: ${e.message}</div>`;
@@ -4940,17 +4956,4 @@ async function emergencyMemoryCleanup() {
     }
 }
 
-// Start memory health monitoring on dashboard
-function startMemoryHealthMonitoring() {
-    // Initial load
-    loadMemoryHealth();
-    
-    // Refresh every 30 seconds
-    if (memoryHealthRefreshInterval) clearInterval(memoryHealthRefreshInterval);
-    memoryHealthRefreshInterval = setInterval(loadMemoryHealth, 30000);
-}
-
-// Initialize memory health on dashboard load
-if (document.getElementById('memoryHealthCard')) {
-    startMemoryHealthMonitoring();
-}
+// Memory health monitoring is now handled by startSystemResourcesMonitoring()
