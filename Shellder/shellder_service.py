@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.33"  # 2025-12-03: Fix debug_logger path + add to Docker, fix file permissions
-SHELLDER_BUILD = "20251203-9"  # Date-based build number
+SHELLDER_VERSION = "1.0.34"  # 2025-12-03: Fix metric history showing oldest instead of newest data
+SHELLDER_BUILD = "20251203-10"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -3283,13 +3283,18 @@ class ShellderDB:
             # Convert to minutes for better SQLite compatibility with fractional values
             # Use round() to avoid truncation (0.0833 * 60 = 4.998, should be 5 not 4)
             minutes = round(hours * 60)
+            # Use subquery to get NEWEST records (not oldest) within time range
+            # Inner query: get newest {limit} records ordered DESC
+            # Outer query: re-order ASC for chart display (oldest to newest)
             cursor.execute("""
-                SELECT metric_value, recorded_at
-                FROM metrics_history
-                WHERE metric_name = ?
-                  AND recorded_at >= datetime('now', ?)
-                ORDER BY recorded_at ASC
-                LIMIT ?
+                SELECT metric_value, recorded_at FROM (
+                    SELECT metric_value, recorded_at
+                    FROM metrics_history
+                    WHERE metric_name = ?
+                      AND recorded_at >= datetime('now', ?)
+                    ORDER BY recorded_at DESC
+                    LIMIT ?
+                ) ORDER BY recorded_at ASC
             """, (metric_name, f'-{minutes} minutes', limit))
             
             # Return times in ISO 8601 format with Z suffix (UTC)
@@ -3352,7 +3357,7 @@ class ShellderDB:
             print(f"Error cleaning up metrics: {e}")
         finally:
             conn.close()
-
+    
     def persist_rotom_stats(self, stats):
         """Save Rotom stats to database"""
         conn = self._connect()
