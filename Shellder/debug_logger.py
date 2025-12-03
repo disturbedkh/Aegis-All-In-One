@@ -26,7 +26,10 @@ from collections import deque
 # CONFIGURATION
 # =============================================================================
 
-DEBUG_LOG_PATH = Path(__file__).parent / 'debuglog.txt'
+# Determine log path - prefer /app/logs (Docker) or Shellder/logs (local)
+_LOG_DIR = Path('/app/logs') if Path('/app/logs').exists() else Path(__file__).parent / 'logs'
+_LOG_DIR.mkdir(exist_ok=True, parents=True)
+DEBUG_LOG_PATH = _LOG_DIR / 'debuglog.txt'
 MAX_LOG_SIZE_MB = 50  # Rotate after this size
 MAX_LOG_LINES = 100000  # Keep last N lines on rotation
 ENABLED = True  # Always on for debugging phase

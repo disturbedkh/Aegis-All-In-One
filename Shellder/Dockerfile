@@ -33,6 +33,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application files
 # Note: gui_server.py is deprecated, shellder_service.py is the unified server
 COPY shellder_service.py .
+COPY debug_logger.py .
 COPY gui_templates/ ./gui_templates/
 COPY gui_static/ ./gui_static/
 

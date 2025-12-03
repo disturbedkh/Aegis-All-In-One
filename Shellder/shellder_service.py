@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.32"  # 2025-12-03: Debug metrics collection - better logging, /api/metrics/debug
-SHELLDER_BUILD = "20251203-8"  # Date-based build number
+SHELLDER_VERSION = "1.0.33"  # 2025-12-03: Fix debug_logger path + add to Docker, fix file permissions
+SHELLDER_BUILD = "20251203-9"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
