@@ -285,6 +285,51 @@
                         </div>
                     </div>
                     
+                    <!-- Memory Manager Panel -->
+                    <div class="card memory-health-card" id="memoryHealthCard">
+                        <div class="card-header">
+                            <h2 title="Monitor RAM usage and manage processes">🧠 Memory Manager</h2>
+                            <div class="card-actions">
+                                <span id="memoryHealthStatus" class="badge badge-success">Healthy</span>
+                                <button class="btn btn-sm" onclick="loadMemoryHealth()" title="Refresh memory info">🔄</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div class="memory-health-overview">
+                                <div class="memory-section">
+                                    <div class="memory-label">RAM</div>
+                                    <div class="memory-usage-bar-container">
+                                        <div class="memory-usage-bar" id="ramUsageBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="memory-usage-stats">
+                                        <span id="ramUsed">--</span> / <span id="ramTotal">--</span>
+                                        <span class="memory-available">(<span id="ramAvailable">--</span> available)</span>
+                                    </div>
+                                </div>
+                                <div class="memory-section">
+                                    <div class="memory-label">Swap</div>
+                                    <div class="memory-usage-bar-container swap">
+                                        <div class="memory-usage-bar swap" id="swapUsageBar" style="width: 0%"></div>
+                                    </div>
+                                    <div class="memory-usage-stats">
+                                        <span id="swapUsed">--</span> / <span id="swapTotal">--</span>
+                                    </div>
+                                </div>
+                                <div class="memory-cache-info">
+                                    <span>💾 Clearable cache: <strong id="memoryClearable">--</strong></span>
+                                </div>
+                            </div>
+                            <div class="memory-actions">
+                                <button class="btn btn-sm" onclick="showProcessList()" title="View top processes">📊 Processes</button>
+                                <button class="btn btn-sm btn-warning" onclick="clearMemoryCache()" title="Clear RAM cache">🧹 Clear Cache</button>
+                                <button class="btn btn-sm btn-danger" onclick="emergencyMemoryCleanup()" title="Kill high memory processes">🚨 Emergency</button>
+                            </div>
+                            <div id="processListContainer" class="process-list-container" style="display: none;">
+                                <!-- Populated by JS -->
+                            </div>
+                        </div>
+                    </div>
+                    
                     <div class="card">
                         <div class="card-header">
                             <h2 title="System services required for the Aegis stack to function">🔌 System Services</h2>

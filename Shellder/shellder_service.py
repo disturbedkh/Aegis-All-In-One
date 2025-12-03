@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.27"  # 2025-12-03: Auto disk cleanup watchdog - prevents bloat buildup
-SHELLDER_BUILD = "20251203-3"  # Date-based build number
+SHELLDER_VERSION = "1.0.28"  # 2025-12-03: Memory Manager - process list, kill, cache clear, emergency cleanup
+SHELLDER_BUILD = "20251203-4"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -6471,6 +6471,402 @@ def api_disk_delete_file():
     except Exception as e:
         error('DISK', f'Failed to delete file: {e}')
         return jsonify({'error': str(e)}), 500
+
+# =============================================================================
+# MEMORY MANAGEMENT
+# =============================================================================
+
+# Memory thresholds
+MEMORY_THRESHOLD_WARNING = 70
+MEMORY_THRESHOLD_CRITICAL = 85
+MEMORY_THRESHOLD_EMERGENCY = 95
+
+def _get_memory_info():
+    """Get detailed memory information"""
+    if not PSUTIL_AVAILABLE:
+        return None
+    try:
+        mem = psutil.virtual_memory()
+        swap = psutil.swap_memory()
+        return {
+            'ram': {
+                'total': mem.total,
+                'available': mem.available,
+                'used': mem.used,
+                'free': mem.free,
+                'percent': mem.percent,
+                'cached': getattr(mem, 'cached', 0),
+                'buffers': getattr(mem, 'buffers', 0),
+            },
+            'swap': {
+                'total': swap.total,
+                'used': swap.used,
+                'free': swap.free,
+                'percent': swap.percent,
+            }
+        }
+    except Exception as e:
+        error('MEMORY', f'Failed to get memory info: {e}')
+        return None
+
+def _get_top_processes(sort_by='memory', limit=20):
+    """Get top processes by memory or CPU usage"""
+    if not PSUTIL_AVAILABLE:
+        return []
+    
+    processes = []
+    try:
+        for proc in psutil.process_iter(['pid', 'name', 'username', 'memory_percent', 'cpu_percent', 'memory_info', 'status', 'create_time']):
+            try:
+                info = proc.info
+                # Skip kernel processes and zombies with no memory
+                if info['memory_percent'] is None or info['memory_percent'] < 0.01:
+                    continue
+                
+                processes.append({
+                    'pid': info['pid'],
+                    'name': info['name'] or 'Unknown',
+                    'user': info['username'] or 'system',
+                    'memory_percent': round(info['memory_percent'], 2),
+                    'cpu_percent': round(info['cpu_percent'] or 0, 2),
+                    'memory_mb': round((info['memory_info'].rss if info['memory_info'] else 0) / (1024 * 1024), 1),
+                    'status': info['status'],
+                    'uptime': int(time.time() - info['create_time']) if info['create_time'] else 0,
+                })
+            except (psutil.NoSuchProcess, psutil.AccessDenied, psutil.ZombieProcess):
+                continue
+        
+        # Sort by requested field
+        if sort_by == 'cpu':
+            processes.sort(key=lambda x: x['cpu_percent'], reverse=True)
+        else:
+            processes.sort(key=lambda x: x['memory_percent'], reverse=True)
+        
+        return processes[:limit]
+    except Exception as e:
+        error('MEMORY', f'Failed to get processes: {e}')
+        return []
+
+# Protected processes that should not be killed
+PROTECTED_PROCESSES = {
+    'systemd', 'init', 'kthreadd', 'ksoftirqd', 'kworker', 'migration',
+    'rcu_sched', 'watchdog', 'cpuhp', 'netns', 'kauditd', 'khungtaskd',
+    'oom_reaper', 'writeback', 'kcompactd', 'ksmd', 'khugepaged',
+    'kintegrityd', 'kblockd', 'tpm_dev_wq', 'ata_sff', 'scsi_eh',
+    'scsi_tmf', 'dm_bufio_cache', 'kswapd', 'ecryptfs', 'kthrotld',
+    'acpi_thermal', 'nvme-wq', 'ipv6_addrconf', 'sshd', 'login',
+    'dockerd', 'containerd', 'docker', 'shellder'
+}
+
+@app.route('/api/memory/health')
+def api_memory_health():
+    """Get memory health status"""
+    mem_info = _get_memory_info()
+    if not mem_info:
+        return jsonify({'error': 'Could not get memory info'}), 500
+    
+    percent = mem_info['ram']['percent']
+    
+    # Determine status
+    if percent >= MEMORY_THRESHOLD_EMERGENCY:
+        status = 'emergency'
+        message = '🚨 EMERGENCY: Memory almost exhausted! System may become unstable.'
+    elif percent >= MEMORY_THRESHOLD_CRITICAL:
+        status = 'critical'
+        message = '🔴 CRITICAL: Memory usage very high. Consider killing processes.'
+    elif percent >= MEMORY_THRESHOLD_WARNING:
+        status = 'warning'
+        message = '⚠️ WARNING: Memory usage elevated.'
+    else:
+        status = 'healthy'
+        message = '✅ Memory usage is healthy.'
+    
+    # Calculate clearable cache
+    clearable = mem_info['ram']['cached'] + mem_info['ram']['buffers']
+    
+    return jsonify({
+        'status': status,
+        'message': message,
+        'ram': {
+            'total': format_bytes(mem_info['ram']['total']),
+            'used': format_bytes(mem_info['ram']['used']),
+            'available': format_bytes(mem_info['ram']['available']),
+            'free': format_bytes(mem_info['ram']['free']),
+            'cached': format_bytes(mem_info['ram']['cached']),
+            'buffers': format_bytes(mem_info['ram']['buffers']),
+            'percent': mem_info['ram']['percent'],
+            'total_bytes': mem_info['ram']['total'],
+            'used_bytes': mem_info['ram']['used'],
+            'available_bytes': mem_info['ram']['available'],
+        },
+        'swap': {
+            'total': format_bytes(mem_info['swap']['total']),
+            'used': format_bytes(mem_info['swap']['used']),
+            'free': format_bytes(mem_info['swap']['free']),
+            'percent': mem_info['swap']['percent'],
+        },
+        'clearable_cache': format_bytes(clearable),
+        'clearable_cache_bytes': clearable,
+        'thresholds': {
+            'warning': MEMORY_THRESHOLD_WARNING,
+            'critical': MEMORY_THRESHOLD_CRITICAL,
+            'emergency': MEMORY_THRESHOLD_EMERGENCY,
+        },
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/memory/processes')
+def api_memory_processes():
+    """Get top processes by memory usage"""
+    sort_by = request.args.get('sort', 'memory')
+    limit = request.args.get('limit', 20, type=int)
+    
+    processes = _get_top_processes(sort_by=sort_by, limit=limit)
+    
+    # Calculate total memory used by top processes
+    total_memory = sum(p['memory_percent'] for p in processes)
+    
+    return jsonify({
+        'processes': processes,
+        'count': len(processes),
+        'total_memory_percent': round(total_memory, 2),
+        'sort_by': sort_by,
+        'timestamp': datetime.now().isoformat()
+    })
+
+@app.route('/api/memory/clear-cache', methods=['POST'])
+def api_memory_clear_cache():
+    """Clear memory cache (sync and drop caches)"""
+    info('MEMORY', 'Clearing memory cache')
+    
+    try:
+        # First sync to flush file buffers
+        subprocess.run(['sync'], timeout=30)
+        
+        # Get memory before
+        mem_before = _get_memory_info()
+        cached_before = mem_before['ram']['cached'] + mem_before['ram']['buffers'] if mem_before else 0
+        
+        # Drop caches (requires root)
+        # 1 = page cache, 2 = dentries/inodes, 3 = all
+        result = subprocess.run(
+            'echo 3 | sudo tee /proc/sys/vm/drop_caches',
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            # Try without sudo (in case running as root)
+            result = subprocess.run(
+                'echo 3 > /proc/sys/vm/drop_caches',
+                shell=True,
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+        
+        # Get memory after
+        mem_after = _get_memory_info()
+        cached_after = mem_after['ram']['cached'] + mem_after['ram']['buffers'] if mem_after else 0
+        freed = cached_before - cached_after
+        
+        info('MEMORY', f'Cache cleared: freed {format_bytes(freed)}')
+        
+        return jsonify({
+            'success': True,
+            'freed': format_bytes(freed),
+            'freed_bytes': freed,
+            'memory_before': mem_before['ram']['percent'] if mem_before else 0,
+            'memory_after': mem_after['ram']['percent'] if mem_after else 0,
+            'timestamp': datetime.now().isoformat()
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Command timed out'}), 500
+    except Exception as e:
+        error('MEMORY', f'Failed to clear cache: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/memory/process/<int:pid>/kill', methods=['POST'])
+def api_memory_kill_process(pid):
+    """Kill a process by PID"""
+    if not PSUTIL_AVAILABLE:
+        return jsonify({'error': 'psutil not available'}), 500
+    
+    try:
+        proc = psutil.Process(pid)
+        proc_name = proc.name()
+        
+        # Check if protected
+        if proc_name.lower() in PROTECTED_PROCESSES or any(p in proc_name.lower() for p in PROTECTED_PROCESSES):
+            return jsonify({
+                'error': f'Cannot kill protected process: {proc_name}',
+                'protected': True
+            }), 403
+        
+        # Get memory before killing
+        mem_percent = proc.memory_percent()
+        
+        # Try graceful termination first
+        proc.terminate()
+        
+        # Wait up to 3 seconds for graceful shutdown
+        try:
+            proc.wait(timeout=3)
+        except psutil.TimeoutExpired:
+            # Force kill
+            proc.kill()
+            proc.wait(timeout=2)
+        
+        info('MEMORY', f'Killed process: {proc_name} (PID {pid}), freed ~{mem_percent:.1f}% memory')
+        
+        return jsonify({
+            'success': True,
+            'pid': pid,
+            'name': proc_name,
+            'memory_freed_percent': round(mem_percent, 2),
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except psutil.NoSuchProcess:
+        return jsonify({'error': f'Process {pid} not found'}), 404
+    except psutil.AccessDenied:
+        return jsonify({'error': f'Access denied to kill process {pid}. May need root.'}), 403
+    except Exception as e:
+        error('MEMORY', f'Failed to kill process {pid}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/memory/process/<int:pid>/restart', methods=['POST'])
+def api_memory_restart_process(pid):
+    """Restart a process (kill and let supervisor restart it)"""
+    if not PSUTIL_AVAILABLE:
+        return jsonify({'error': 'psutil not available'}), 500
+    
+    try:
+        proc = psutil.Process(pid)
+        proc_name = proc.name()
+        cmdline = proc.cmdline()
+        
+        # Check if protected
+        if proc_name.lower() in PROTECTED_PROCESSES:
+            return jsonify({
+                'error': f'Cannot restart protected process: {proc_name}',
+                'protected': True
+            }), 403
+        
+        # For Docker containers, use docker restart instead
+        if 'containerd' in proc_name.lower() or proc_name.startswith('docker'):
+            return jsonify({
+                'error': 'Use Docker commands to restart containers',
+                'suggestion': 'Use the Containers page to restart Docker containers'
+            }), 400
+        
+        # Get process info
+        mem_percent = proc.memory_percent()
+        
+        # Kill the process (supervisor/systemd should restart it)
+        proc.terminate()
+        try:
+            proc.wait(timeout=5)
+        except psutil.TimeoutExpired:
+            proc.kill()
+        
+        info('MEMORY', f'Restarted process: {proc_name} (PID {pid})')
+        
+        return jsonify({
+            'success': True,
+            'pid': pid,
+            'name': proc_name,
+            'cmdline': ' '.join(cmdline[:5]),  # First 5 parts of command
+            'message': f'Process {proc_name} terminated. If managed by systemd/supervisor, it will restart automatically.',
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except psutil.NoSuchProcess:
+        return jsonify({'error': f'Process {pid} not found'}), 404
+    except psutil.AccessDenied:
+        return jsonify({'error': f'Access denied. May need root.'}), 403
+    except Exception as e:
+        error('MEMORY', f'Failed to restart process {pid}: {e}')
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/memory/kill-high-memory', methods=['POST'])
+def api_memory_kill_high_memory():
+    """Emergency: Kill highest memory processes to free memory"""
+    data = request.get_json() or {}
+    target_percent = data.get('target_percent', 70)  # Target memory usage
+    max_kills = data.get('max_kills', 3)  # Maximum processes to kill
+    
+    if not PSUTIL_AVAILABLE:
+        return jsonify({'error': 'psutil not available'}), 500
+    
+    mem_info = _get_memory_info()
+    if not mem_info:
+        return jsonify({'error': 'Could not get memory info'}), 500
+    
+    current_percent = mem_info['ram']['percent']
+    
+    if current_percent <= target_percent:
+        return jsonify({
+            'success': True,
+            'message': f'Memory already at {current_percent}%, no action needed',
+            'killed': []
+        })
+    
+    info('MEMORY', f'Emergency cleanup: memory at {current_percent}%, target {target_percent}%')
+    
+    # Get processes sorted by memory
+    processes = _get_top_processes(sort_by='memory', limit=20)
+    killed = []
+    
+    for proc in processes:
+        if len(killed) >= max_kills:
+            break
+        
+        # Skip protected processes
+        if proc['name'].lower() in PROTECTED_PROCESSES:
+            continue
+        
+        # Skip low memory processes
+        if proc['memory_percent'] < 5:
+            continue
+        
+        try:
+            p = psutil.Process(proc['pid'])
+            p.terminate()
+            try:
+                p.wait(timeout=3)
+            except psutil.TimeoutExpired:
+                p.kill()
+            
+            killed.append({
+                'pid': proc['pid'],
+                'name': proc['name'],
+                'memory_percent': proc['memory_percent']
+            })
+            
+            info('MEMORY', f'Emergency killed: {proc["name"]} (PID {proc["pid"]})')
+            
+            # Check if we've freed enough
+            new_mem = _get_memory_info()
+            if new_mem and new_mem['ram']['percent'] <= target_percent:
+                break
+                
+        except (psutil.NoSuchProcess, psutil.AccessDenied):
+            continue
+    
+    # Get final memory state
+    final_mem = _get_memory_info()
+    
+    return jsonify({
+        'success': True,
+        'killed': killed,
+        'memory_before': current_percent,
+        'memory_after': final_mem['ram']['percent'] if final_mem else current_percent,
+        'total_freed_percent': sum(k['memory_percent'] for k in killed),
+        'timestamp': datetime.now().isoformat()
+    })
 
 @app.route('/api/containers')
 def api_containers():

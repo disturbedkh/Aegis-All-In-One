@@ -4565,3 +4565,309 @@ function startDiskHealthMonitoring() {
 if (document.getElementById('diskHealthCard')) {
     startDiskHealthMonitoring();
 }
+
+// =============================================================================
+// MEMORY MANAGER
+// =============================================================================
+
+let memoryHealthRefreshInterval = null;
+let currentProcessSort = 'memory';
+
+async function loadMemoryHealth() {
+    try {
+        const data = await fetchAPI('/api/memory/health');
+        
+        if (data.error) {
+            SHELLDER_DEBUG.error('MEMORY', 'Failed to get memory health', data);
+            return;
+        }
+        
+        // Update card styling
+        const card = document.getElementById('memoryHealthCard');
+        if (card) {
+            card.className = 'card memory-health-card status-' + data.status;
+        }
+        
+        // Update badge
+        const badge = document.getElementById('memoryHealthStatus');
+        if (badge) {
+            badge.textContent = data.status.charAt(0).toUpperCase() + data.status.slice(1);
+            badge.className = 'badge badge-' + (data.status === 'healthy' ? 'success' : 
+                                                data.status === 'warning' ? 'warning' : 'danger');
+        }
+        
+        // Update RAM bar
+        const ramBar = document.getElementById('ramUsageBar');
+        if (ramBar) {
+            ramBar.style.width = data.ram.percent + '%';
+            ramBar.className = 'memory-usage-bar' + (
+                data.status === 'emergency' || data.status === 'critical' ? ' critical' :
+                data.status === 'warning' ? ' warning' : ''
+            );
+        }
+        
+        // Update RAM stats
+        const ramUsed = document.getElementById('ramUsed');
+        const ramTotal = document.getElementById('ramTotal');
+        const ramAvailable = document.getElementById('ramAvailable');
+        if (ramUsed) ramUsed.textContent = data.ram.used;
+        if (ramTotal) ramTotal.textContent = data.ram.total;
+        if (ramAvailable) ramAvailable.textContent = data.ram.available;
+        
+        // Update Swap bar
+        const swapBar = document.getElementById('swapUsageBar');
+        if (swapBar) {
+            swapBar.style.width = data.swap.percent + '%';
+        }
+        
+        // Update Swap stats
+        const swapUsed = document.getElementById('swapUsed');
+        const swapTotal = document.getElementById('swapTotal');
+        if (swapUsed) swapUsed.textContent = data.swap.used;
+        if (swapTotal) swapTotal.textContent = data.swap.total;
+        
+        // Update clearable cache
+        const clearable = document.getElementById('memoryClearable');
+        if (clearable) clearable.textContent = data.clearable_cache;
+        
+        SHELLDER_DEBUG.info('MEMORY', 'Memory health loaded', {
+            status: data.status,
+            percent: data.ram.percent,
+            available: data.ram.available
+        });
+        
+    } catch (e) {
+        SHELLDER_DEBUG.error('MEMORY', 'Failed to load memory health', e);
+    }
+}
+
+async function showProcessList() {
+    const container = document.getElementById('processListContainer');
+    if (!container) return;
+    
+    // Toggle visibility
+    if (container.style.display === 'block') {
+        container.style.display = 'none';
+        return;
+    }
+    
+    container.style.display = 'block';
+    container.innerHTML = '<div class="loading">Loading processes...</div>';
+    
+    await loadProcessList();
+}
+
+async function loadProcessList(sortBy = currentProcessSort) {
+    const container = document.getElementById('processListContainer');
+    if (!container) return;
+    
+    currentProcessSort = sortBy;
+    
+    try {
+        const data = await fetchAPI(`/api/memory/processes?sort=${sortBy}&limit=15`);
+        
+        if (data.error) {
+            container.innerHTML = `<div class="cleanup-result error">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        let html = `
+            <div class="process-list-header">
+                <span class="process-list-title">📊 Top Processes (${data.count})</span>
+                <div class="process-sort-controls">
+                    <button class="process-sort-btn ${sortBy === 'memory' ? 'active' : ''}" 
+                            onclick="loadProcessList('memory')">Memory</button>
+                    <button class="process-sort-btn ${sortBy === 'cpu' ? 'active' : ''}" 
+                            onclick="loadProcessList('cpu')">CPU</button>
+                </div>
+            </div>
+        `;
+        
+        for (const proc of data.processes) {
+            const isProtected = isProtectedProcess(proc.name);
+            const uptimeStr = formatUptime(proc.uptime);
+            
+            html += `
+                <div class="process-item">
+                    <div class="process-info">
+                        <div class="process-name">${escapeHtml(proc.name)}</div>
+                        <div class="process-details">
+                            <span>PID: ${proc.pid}</span>
+                            <span>User: ${proc.user}</span>
+                            <span>Uptime: ${uptimeStr}</span>
+                        </div>
+                    </div>
+                    <div class="process-stats">
+                        <div class="process-stat">
+                            <span class="process-stat-value memory">${proc.memory_percent}%</span>
+                            <span class="process-stat-label">RAM</span>
+                        </div>
+                        <div class="process-stat">
+                            <span class="process-stat-value cpu">${proc.cpu_percent}%</span>
+                            <span class="process-stat-label">CPU</span>
+                        </div>
+                    </div>
+                    <div class="process-actions">
+                        ${isProtected ? 
+                            '<span class="process-protected">Protected</span>' :
+                            `<button class="btn-process-kill" onclick="killProcess(${proc.pid}, '${escapeHtml(proc.name)}')" title="Kill process">Kill</button>`
+                        }
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html;
+        
+    } catch (e) {
+        container.innerHTML = `<div class="cleanup-result error">Error: ${e.message}</div>`;
+        SHELLDER_DEBUG.error('MEMORY', 'Failed to load processes', e);
+    }
+}
+
+function isProtectedProcess(name) {
+    const protectedNames = [
+        'systemd', 'init', 'sshd', 'dockerd', 'containerd', 'shellder',
+        'kworker', 'migration', 'ksoftirqd', 'kthreadd', 'rcu_sched',
+        'watchdog', 'kauditd', 'kswapd', 'login', 'bash', 'sh', 'zsh'
+    ];
+    const lowerName = name.toLowerCase();
+    return protectedNames.some(p => lowerName.includes(p));
+}
+
+function formatUptime(seconds) {
+    if (seconds < 60) return `${seconds}s`;
+    if (seconds < 3600) return `${Math.floor(seconds / 60)}m`;
+    if (seconds < 86400) return `${Math.floor(seconds / 3600)}h`;
+    return `${Math.floor(seconds / 86400)}d`;
+}
+
+async function killProcess(pid, name) {
+    if (!confirm(`Are you sure you want to kill process "${name}" (PID ${pid})?\n\nThis may cause data loss if the process is doing important work.`)) {
+        return;
+    }
+    
+    showToast(`Killing process ${name}...`, 'info');
+    
+    try {
+        const data = await fetchAPI(`/api/memory/process/${pid}/kill`, { method: 'POST' });
+        
+        if (data.error) {
+            showToast(`❌ Failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        showToast(`✅ Killed ${data.name}, freed ~${data.memory_freed_percent}% memory`, 'success');
+        
+        // Refresh process list and memory health
+        await loadProcessList();
+        await loadMemoryHealth();
+        
+    } catch (e) {
+        showToast(`❌ Failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('MEMORY', 'Kill process failed', e);
+    }
+}
+
+async function clearMemoryCache() {
+    showToast('🧹 Clearing memory cache...', 'info');
+    
+    try {
+        const data = await fetchAPI('/api/memory/clear-cache', { method: 'POST' });
+        
+        if (data.error) {
+            showToast(`❌ Failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        showToast(`✅ Cache cleared! Freed ${data.freed}`, 'success');
+        
+        // Show result in container
+        const container = document.getElementById('processListContainer');
+        if (container) {
+            container.style.display = 'block';
+            container.innerHTML = `
+                <div class="memory-cleanup-result success">
+                    <strong>✅ Memory Cache Cleared</strong><br>
+                    Freed: ${data.freed}<br>
+                    Memory usage: ${data.memory_before}% → ${data.memory_after}%
+                </div>
+            `;
+        }
+        
+        // Refresh memory health
+        await loadMemoryHealth();
+        
+    } catch (e) {
+        showToast(`❌ Failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('MEMORY', 'Clear cache failed', e);
+    }
+}
+
+async function emergencyMemoryCleanup() {
+    if (!confirm('⚠️ EMERGENCY MEMORY CLEANUP\n\nThis will kill the top memory-consuming processes (up to 3) to free memory.\n\nThis may cause:\n- Service interruptions\n- Data loss\n- Unexpected behavior\n\nOnly use if system is unresponsive!\n\nContinue?')) {
+        return;
+    }
+    
+    showToast('🚨 Emergency cleanup running...', 'warning');
+    
+    try {
+        const data = await fetchAPI('/api/memory/kill-high-memory', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ target_percent: 70, max_kills: 3 })
+        });
+        
+        if (data.error) {
+            showToast(`❌ Failed: ${data.error}`, 'error');
+            return;
+        }
+        
+        if (data.killed && data.killed.length > 0) {
+            const killedNames = data.killed.map(k => k.name).join(', ');
+            showToast(`🚨 Killed ${data.killed.length} processes: ${killedNames}`, 'warning');
+            
+            // Show result
+            const container = document.getElementById('processListContainer');
+            if (container) {
+                container.style.display = 'block';
+                let html = `
+                    <div class="memory-cleanup-result warning">
+                        <strong>🚨 Emergency Cleanup Complete</strong><br>
+                        Memory: ${data.memory_before}% → ${data.memory_after}%<br>
+                        Freed: ~${data.total_freed_percent.toFixed(1)}%<br><br>
+                        <strong>Processes killed:</strong><br>
+                `;
+                for (const killed of data.killed) {
+                    html += `• ${killed.name} (PID ${killed.pid}) - ${killed.memory_percent}%<br>`;
+                }
+                html += '</div>';
+                container.innerHTML = html;
+            }
+        } else {
+            showToast(`Memory already at ${data.memory_after}%, no action needed`, 'info');
+        }
+        
+        // Refresh memory health
+        await loadMemoryHealth();
+        
+    } catch (e) {
+        showToast(`❌ Failed: ${e.message}`, 'error');
+        SHELLDER_DEBUG.error('MEMORY', 'Emergency cleanup failed', e);
+    }
+}
+
+// Start memory health monitoring on dashboard
+function startMemoryHealthMonitoring() {
+    // Initial load
+    loadMemoryHealth();
+    
+    // Refresh every 30 seconds
+    if (memoryHealthRefreshInterval) clearInterval(memoryHealthRefreshInterval);
+    memoryHealthRefreshInterval = setInterval(loadMemoryHealth, 30000);
+}
+
+// Initialize memory health on dashboard load
+if (document.getElementById('memoryHealthCard')) {
+    startMemoryHealthMonitoring();
+}
