@@ -8589,80 +8589,75 @@ def api_setup_scripts():
     return jsonify({'scripts': scripts})
 
 # =============================================================================
-# INTERACTIVE TERMINAL FOR SCRIPTS (PTY + WebSocket)
+# INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)
 # =============================================================================
 
 import pty
 import select
-import fcntl
-import termios
-import struct
 
 # Track active terminal sessions
 terminal_sessions = {}
 
 class TerminalSession:
-    """Manages an interactive PTY session for script execution"""
+    """Manages an interactive PTY session using subprocess"""
     
     def __init__(self, session_id, script_path, cwd):
         self.session_id = session_id
         self.script_path = script_path
         self.cwd = cwd
+        self.process = None
         self.master_fd = None
-        self.slave_fd = None
-        self.pid = None
         self.started = datetime.now().isoformat()
         self.active = False
         
     def start(self):
-        """Start the PTY process"""
-        # Create pseudo-terminal
-        self.master_fd, self.slave_fd = pty.openpty()
+        """Start the PTY process using subprocess"""
+        import pty
+        import subprocess
         
-        # Fork process
-        self.pid = os.fork()
+        # Create master/slave PTY pair
+        self.master_fd, slave_fd = pty.openpty()
         
-        if self.pid == 0:
-            # Child process
-            os.close(self.master_fd)
-            os.setsid()
-            os.dup2(self.slave_fd, 0)  # stdin
-            os.dup2(self.slave_fd, 1)  # stdout
-            os.dup2(self.slave_fd, 2)  # stderr
-            os.close(self.slave_fd)
-            
-            # Change to working directory
-            os.chdir(self.cwd)
-            
-            # Set environment
-            os.environ['TERM'] = 'xterm-256color'
-            os.environ['COLUMNS'] = '120'
-            os.environ['LINES'] = '30'
-            
-            # Execute script
-            os.execvp('sudo', ['sudo', 'bash', self.script_path])
-        else:
-            # Parent process
-            os.close(self.slave_fd)
-            self.active = True
-            
-            # Set non-blocking
-            flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
-            fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
-            
+        # Set up environment
+        env = os.environ.copy()
+        env['TERM'] = 'xterm-256color'
+        env['COLUMNS'] = '120'
+        env['LINES'] = '30'
+        
+        # Start process with PTY
+        self.process = subprocess.Popen(
+            ['sudo', '-S', 'bash', self.script_path],
+            stdin=slave_fd,
+            stdout=slave_fd,
+            stderr=slave_fd,
+            cwd=self.cwd,
+            env=env,
+            preexec_fn=os.setsid
+        )
+        
+        # Close slave in parent
+        os.close(slave_fd)
+        self.active = True
+        
     def read_output(self):
         """Read available output from PTY"""
         if not self.active or self.master_fd is None:
             return None
             
         try:
+            # Check if data available (non-blocking)
+            import select
             ready, _, _ = select.select([self.master_fd], [], [], 0.1)
             if ready:
                 data = os.read(self.master_fd, 4096)
                 if data:
                     return data.decode('utf-8', errors='replace')
-        except (OSError, IOError):
-            self.active = False
+                else:
+                    # EOF - process ended
+                    self.active = False
+        except (OSError, IOError) as e:
+            if e.errno != 11:  # EAGAIN is ok
+                self.active = False
         return None
         
     def write_input(self, data):
@@ -8676,29 +8671,16 @@ class TerminalSession:
         except (OSError, IOError):
             self.active = False
             return False
-            
-    def resize(self, cols, rows):
-        """Resize PTY window"""
-        if self.master_fd is not None:
-            try:
-                winsize = struct.pack('HHHH', rows, cols, 0, 0)
-                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
-            except:
-                pass
                 
     def is_alive(self):
         """Check if process is still running"""
-        if self.pid is None:
+        if self.process is None:
             return False
-        try:
-            pid, status = os.waitpid(self.pid, os.WNOHANG)
-            if pid == 0:
-                return True
+        poll = self.process.poll()
+        if poll is not None:
             self.active = False
             return False
-        except:
-            self.active = False
-            return False
+        return True
             
     def terminate(self):
         """Terminate the session"""
@@ -8708,32 +8690,54 @@ class TerminalSession:
                 os.close(self.master_fd)
             except:
                 pass
-        if self.pid is not None:
+            self.master_fd = None
+        if self.process is not None:
             try:
-                os.kill(self.pid, 9)
+                self.process.terminate()
+                self.process.wait(timeout=2)
             except:
-                pass
+                try:
+                    self.process.kill()
+                except:
+                    pass
 
 def terminal_output_reader(session_id):
     """Background thread to read terminal output and emit via WebSocket"""
     session = terminal_sessions.get(session_id)
     if not session:
         return
-        
+    
     while session.active and session.is_alive():
-        output = session.read_output()
-        if output and socketio and SOCKETIO_AVAILABLE:
+        try:
+            output = session.read_output()
+            if output and socketio and SOCKETIO_AVAILABLE:
+                socketio.emit('terminal_output', {
+                    'session_id': session_id,
+                    'data': output
+                })
+        except Exception as e:
+            info('TERMINAL', f'Read error: {e}')
+            break
+        time.sleep(0.02)  # Small delay
+    
+    # Give a moment for final output
+    time.sleep(0.2)
+    try:
+        final_output = session.read_output()
+        if final_output and socketio and SOCKETIO_AVAILABLE:
             socketio.emit('terminal_output', {
                 'session_id': session_id,
-                'data': output
+                'data': final_output
             })
-        time.sleep(0.05)  # Small delay to prevent CPU spinning
+    except:
+        pass
     
     # Session ended
     if socketio and SOCKETIO_AVAILABLE:
+        exit_code = session.process.returncode if session.process else 'unknown'
         socketio.emit('terminal_output', {
             'session_id': session_id,
-            'data': '\r\n\033[32m[Session ended]\033[0m\r\n',
+            'data': f'\r\n\033[33m[Script exited with code: {exit_code}]\033[0m\r\n',
             'ended': True
         })
     
@@ -8767,7 +8771,11 @@ def api_terminal_start(script):
     
     # Check if same script already has active session
     for sid, session in list(terminal_sessions.items()):
-        if session.script_path == script_path and session.is_alive():
+        if not session.is_alive():
+            # Clean up dead sessions
+            session.terminate()
+            del terminal_sessions[sid]
+        elif session.script_path == script_path:
             return jsonify({
                 'error': f'{script} already has an active session',
                 'session_id': sid
@@ -8778,6 +8786,8 @@ def api_terminal_start(script):
         session = TerminalSession(session_id, script_path, aegis_root)
         session.start()
         terminal_sessions[session_id] = session
+        
+        info('TERMINAL', f'Started session {session_id} for {script}')
         
         # Start output reader thread
         thread = threading.Thread(
@@ -8794,6 +8804,8 @@ def api_terminal_start(script):
         })
         
     except Exception as e:
+        import traceback
+        error('TERMINAL', f'Failed to start: {e}', {'traceback': traceback.format_exc()})
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/terminal/input/<session_id>', methods=['POST'])
@@ -8807,18 +8819,6 @@ def api_terminal_input(session_id):
     if session.write_input(data):
         return jsonify({'success': True})
     return jsonify({'error': 'Failed to write'}), 500
-
-@app.route('/api/terminal/resize/<session_id>', methods=['POST'])
-def api_terminal_resize(session_id):
-    """Resize terminal"""
-    session = terminal_sessions.get(session_id)
-    if not session:
-        return jsonify({'error': 'Session not found'}), 404
-        
-    cols = request.json.get('cols', 120)
-    rows = request.json.get('rows', 30)
-    session.resize(cols, rows)
-    return jsonify({'success': True})
 
 @app.route('/api/terminal/stop/<session_id>', methods=['POST'])
 def api_terminal_stop(session_id):
