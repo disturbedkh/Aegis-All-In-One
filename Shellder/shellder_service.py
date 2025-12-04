@@ -7997,6 +7997,173 @@ def api_docker_config_validate(config_type):
         return jsonify({'valid': False, 'error': str(e)})
 
 # =============================================================================
+# DOCKER LOGGING CONFIGURATION (daemon.json editor)
+# =============================================================================
+
+DOCKER_DAEMON_DEFAULTS = {
+    'log-driver': 'json-file',
+    'log-opts': {
+        'max-size': '100m',
+        'max-file': '3',
+        'compress': 'true'
+    }
+}
+
+@app.route('/api/docker/logging/config')
+def api_docker_logging_config():
+    """Get current Docker daemon.json logging configuration"""
+    daemon_json_path = '/etc/docker/daemon.json'
+    
+    result = {
+        'exists': os.path.exists(daemon_json_path),
+        'path': daemon_json_path,
+        'current': {},
+        'defaults': DOCKER_DAEMON_DEFAULTS,
+        'can_read': False,
+        'docker_running': False
+    }
+    
+    # Check if Docker is running
+    try:
+        docker_check = subprocess.run(['systemctl', 'is-active', 'docker'], 
+                                      capture_output=True, text=True, timeout=5)
+        result['docker_running'] = docker_check.returncode == 0
+    except:
+        pass
+    
+    # Try to read current config
+    if os.path.exists(daemon_json_path):
+        try:
+            # First try direct read
+            with open(daemon_json_path, 'r') as f:
+                result['current'] = json.load(f)
+                result['can_read'] = True
+        except PermissionError:
+            # Try with sudo
+            try:
+                cat_result = subprocess.run(['sudo', 'cat', daemon_json_path],
+                                           capture_output=True, text=True, timeout=10)
+                if cat_result.returncode == 0:
+                    result['current'] = json.loads(cat_result.stdout)
+                    result['can_read'] = True
+            except:
+                pass
+        except json.JSONDecodeError:
+            result['parse_error'] = 'Invalid JSON in daemon.json'
+        except Exception as e:
+            result['error'] = str(e)
+    
+    # Merge current with defaults to show complete config
+    merged = DOCKER_DAEMON_DEFAULTS.copy()
+    if result['current']:
+        merged.update(result['current'])
+        if 'log-opts' in result['current']:
+            merged['log-opts'] = {**DOCKER_DAEMON_DEFAULTS.get('log-opts', {}), 
+                                  **result['current'].get('log-opts', {})}
+    result['merged'] = merged
+    
+    return jsonify(result)
+
+@app.route('/api/docker/logging/config', methods=['POST'])
+def api_docker_logging_config_save():
+    """Save Docker daemon.json logging configuration"""
+    data = request.get_json()
+    daemon_json_path = '/etc/docker/daemon.json'
+    
+    # Build the config from form data
+    new_config = {}
+    
+    # Read existing config to preserve other settings
+    if os.path.exists(daemon_json_path):
+        try:
+            cat_result = subprocess.run(['sudo', 'cat', daemon_json_path],
+                                       capture_output=True, text=True, timeout=10)
+            if cat_result.returncode == 0 and cat_result.stdout.strip():
+                new_config = json.loads(cat_result.stdout)
+        except:
+            pass
+    
+    # Update logging settings from form
+    if 'log_driver' in data:
+        new_config['log-driver'] = data['log_driver']
+    
+    log_opts = new_config.get('log-opts', {})
+    if 'max_size' in data:
+        log_opts['max-size'] = data['max_size']
+    if 'max_file' in data:
+        log_opts['max-file'] = str(data['max_file'])
+    if 'compress' in data:
+        log_opts['compress'] = 'true' if data['compress'] else 'false'
+    
+    if log_opts:
+        new_config['log-opts'] = log_opts
+    
+    # Convert to JSON
+    config_json = json.dumps(new_config, indent=2)
+    
+    try:
+        # Write using sudo tee (system file, keep root ownership)
+        result = subprocess.run(
+            ['sudo', 'tee', daemon_json_path],
+            input=config_json,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to write: {result.stderr}'
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'config': new_config,
+            'restart_required': True,
+            'restart_command': 'sudo systemctl restart docker'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+@app.route('/api/docker/logging/restart', methods=['POST'])
+def api_docker_logging_restart():
+    """Restart Docker service to apply logging changes"""
+    try:
+        result = subprocess.run(
+            ['sudo', 'systemctl', 'restart', 'docker'],
+            capture_output=True,
+            text=True,
+            timeout=60
+        )
+        
+        if result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': result.stderr or 'Failed to restart Docker'
+            }), 500
+        
+        return jsonify({
+            'success': True,
+            'message': 'Docker service restarted successfully'
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Docker restart timed out'
+        }), 500
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e)
+        }), 500
+
+# =============================================================================
 # XILRIWS ENDPOINTS
 # =============================================================================
 

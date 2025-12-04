@@ -8048,21 +8048,229 @@ async function optimizeMariaDBStep() {
 }
 
 async function configureLoggingStep() {
-    appendWizardOutput('Docker log configuration requires root access.\\n');
-    appendWizardOutput('\\nRecommended configuration for /etc/docker/daemon.json:\\n\\n');
-    appendWizardOutput('{\\n', 'code');
-    appendWizardOutput('  "log-driver": "json-file",\\n', 'code');
-    appendWizardOutput('  "log-opts": {\\n', 'code');
-    appendWizardOutput('    "max-size": "50m",\\n', 'code');
-    appendWizardOutput('    "max-file": "3",\\n', 'code');
-    appendWizardOutput('    "compress": "true"\\n', 'code');
-    appendWizardOutput('  }\\n', 'code');
-    appendWizardOutput('}\\n', 'code');
-    appendWizardOutput('\\nRun this in terminal:\\n');
-    appendWizardOutput('  sudo nano /etc/docker/daemon.json\\n', 'code');
-    appendWizardOutput('  sudo systemctl restart docker\\n', 'code');
+    appendWizardOutput('Loading Docker logging configuration...\\n');
     
-    updateStepStatus('logging', false, 'Manual configuration');
+    try {
+        const response = await fetch('/api/docker/logging/config');
+        if (!response.ok) throw new Error('Failed to load config');
+        const data = await response.json();
+        
+        // Show current status
+        if (data.exists) {
+            appendWizardOutput('✓ /etc/docker/daemon.json exists\\n', 'success');
+        } else {
+            appendWizardOutput('⚠️ /etc/docker/daemon.json does not exist (will be created)\\n', 'warning');
+        }
+        
+        if (data.docker_running) {
+            appendWizardOutput('✓ Docker service is running\\n', 'success');
+        } else {
+            appendWizardOutput('⚠️ Docker service is not running\\n', 'warning');
+        }
+        
+        // Get current/default values
+        const merged = data.merged || data.defaults;
+        const logOpts = merged['log-opts'] || {};
+        
+        // Show form panel
+        showDockerLoggingPanel(merged, logOpts, data.docker_running);
+        
+    } catch (e) {
+        appendWizardOutput(`\\n❌ Error: ${e.message}\\n`, 'error');
+    }
+}
+
+function showDockerLoggingPanel(config, logOpts, dockerRunning) {
+    // Check if panel already exists
+    let panel = document.getElementById('dockerLoggingPanel');
+    if (panel) {
+        panel.remove();
+    }
+    
+    // Create the panel
+    const html = `
+        <div id="dockerLoggingPanel" class="wizard-popout-panel" style="margin-top: 15px;">
+            <div class="popout-header">
+                <h4>🐳 Docker Logging Configuration</h4>
+                <button class="btn btn-sm" onclick="closeDockerLoggingPanel()">✖ Close</button>
+            </div>
+            <div class="popout-body">
+                <p class="popout-hint">Configure Docker log rotation to prevent disk space issues. These settings apply to all containers.</p>
+                
+                <div class="config-fields-form">
+                    <div class="config-field-item">
+                        <label class="field-label">Log Driver</label>
+                        <div class="field-description">The logging driver for containers (json-file recommended)</div>
+                        <select id="docker-log-driver" class="form-input">
+                            <option value="json-file" ${config['log-driver'] === 'json-file' ? 'selected' : ''}>json-file (recommended)</option>
+                            <option value="local" ${config['log-driver'] === 'local' ? 'selected' : ''}>local</option>
+                            <option value="journald" ${config['log-driver'] === 'journald' ? 'selected' : ''}>journald</option>
+                            <option value="syslog" ${config['log-driver'] === 'syslog' ? 'selected' : ''}>syslog</option>
+                            <option value="none" ${config['log-driver'] === 'none' ? 'selected' : ''}>none (disable logging)</option>
+                        </select>
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Max Log Size</label>
+                        <div class="field-description">Maximum size of each log file before rotation (e.g., 50m, 100m, 1g)</div>
+                        <input type="text" id="docker-log-max-size" class="form-input" 
+                               value="${logOpts['max-size'] || '100m'}" placeholder="100m">
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Max Log Files</label>
+                        <div class="field-description">Number of rotated log files to keep per container</div>
+                        <input type="number" id="docker-log-max-file" class="form-input" 
+                               value="${logOpts['max-file'] || '3'}" min="1" max="10" placeholder="3">
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Compress Logs</label>
+                        <div class="field-description">Compress rotated log files to save disk space</div>
+                        <label class="switch">
+                            <input type="checkbox" id="docker-log-compress" 
+                                   ${logOpts['compress'] === 'true' || logOpts['compress'] === true ? 'checked' : ''}>
+                            <span class="slider round"></span>
+                        </label>
+                    </div>
+                </div>
+                
+                <div class="popout-info" style="margin-top: 15px; padding: 10px; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                    <strong>💡 Tip:</strong> With these settings, each container will use max <span id="docker-log-total">300MB</span> of disk space for logs.
+                    <br><small>Docker restart required after saving changes.</small>
+                </div>
+            </div>
+            <div class="popout-footer">
+                <button class="btn btn-secondary" onclick="resetDockerLoggingDefaults()">↩️ Reset to Defaults</button>
+                <div class="popout-actions">
+                    <button class="btn btn-success" onclick="saveDockerLoggingConfig(${dockerRunning})">💾 Save & Apply</button>
+                </div>
+            </div>
+        </div>
+    `;
+    
+    // Insert after the wizard steps grid
+    const stepsGrid = document.querySelector('.wizard-steps-grid');
+    if (stepsGrid) {
+        stepsGrid.insertAdjacentHTML('afterend', html);
+    } else {
+        // Fallback - append to wizard content
+        const wizardContent = document.getElementById('wizardContent');
+        if (wizardContent) {
+            wizardContent.insertAdjacentHTML('beforeend', html);
+        }
+    }
+    
+    // Update disk usage calculation when values change
+    document.getElementById('docker-log-max-size')?.addEventListener('input', updateDockerLogDiskUsage);
+    document.getElementById('docker-log-max-file')?.addEventListener('input', updateDockerLogDiskUsage);
+    updateDockerLogDiskUsage();
+    
+    // Scroll panel into view
+    document.getElementById('dockerLoggingPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function updateDockerLogDiskUsage() {
+    const maxSize = document.getElementById('docker-log-max-size')?.value || '100m';
+    const maxFile = parseInt(document.getElementById('docker-log-max-file')?.value || '3');
+    
+    // Parse size
+    let sizeNum = parseInt(maxSize);
+    let unit = maxSize.replace(/[0-9]/g, '').toLowerCase() || 'm';
+    
+    // Calculate total in MB
+    let totalMB = sizeNum * maxFile;
+    if (unit === 'g') totalMB = sizeNum * 1024 * maxFile;
+    if (unit === 'k') totalMB = (sizeNum / 1024) * maxFile;
+    
+    const totalEl = document.getElementById('docker-log-total');
+    if (totalEl) {
+        if (totalMB >= 1024) {
+            totalEl.textContent = `${(totalMB / 1024).toFixed(1)}GB`;
+        } else {
+            totalEl.textContent = `${totalMB}MB`;
+        }
+    }
+}
+
+function resetDockerLoggingDefaults() {
+    document.getElementById('docker-log-driver').value = 'json-file';
+    document.getElementById('docker-log-max-size').value = '100m';
+    document.getElementById('docker-log-max-file').value = '3';
+    document.getElementById('docker-log-compress').checked = true;
+    updateDockerLogDiskUsage();
+    showToast('Reset to recommended defaults', 'info');
+}
+
+function closeDockerLoggingPanel() {
+    const panel = document.getElementById('dockerLoggingPanel');
+    if (panel) panel.remove();
+}
+
+async function saveDockerLoggingConfig(dockerRunning) {
+    const config = {
+        log_driver: document.getElementById('docker-log-driver')?.value || 'json-file',
+        max_size: document.getElementById('docker-log-max-size')?.value || '100m',
+        max_file: document.getElementById('docker-log-max-file')?.value || '3',
+        compress: document.getElementById('docker-log-compress')?.checked || false
+    };
+    
+    showToast('Saving Docker logging configuration...', 'info');
+    appendWizardOutput('\\nSaving Docker logging configuration...\\n');
+    
+    try {
+        const response = await fetch('/api/docker/logging/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            appendWizardOutput('✅ Configuration saved to /etc/docker/daemon.json\\n', 'success');
+            
+            // Ask to restart Docker
+            if (dockerRunning && data.restart_required) {
+                appendWizardOutput('\\n⚠️ Docker restart required to apply changes.\\n', 'warning');
+                
+                if (confirm('Docker needs to restart to apply changes. This will briefly stop all containers.\\n\\nRestart Docker now?')) {
+                    appendWizardOutput('Restarting Docker service...\\n');
+                    
+                    const restartResponse = await fetch('/api/docker/logging/restart', { method: 'POST' });
+                    const restartData = await restartResponse.json();
+                    
+                    if (restartData.success) {
+                        appendWizardOutput('✅ Docker service restarted successfully!\\n', 'success');
+                        showToast('Docker logging configured and service restarted', 'success');
+                        updateStepStatus('logging', true, 'Log rotation enabled');
+                    } else {
+                        appendWizardOutput(`❌ Restart failed: ${restartData.error}\\n`, 'error');
+                        showToast('Config saved but restart failed', 'warning');
+                    }
+                } else {
+                    appendWizardOutput('\\nℹ️ Remember to restart Docker manually:\\n');
+                    appendWizardOutput('  sudo systemctl restart docker\\n', 'code');
+                    showToast('Config saved - restart Docker to apply', 'info');
+                    updateStepStatus('logging', true, 'Restart required');
+                }
+            } else {
+                showToast('Docker logging configuration saved', 'success');
+                updateStepStatus('logging', true, 'Log rotation enabled');
+            }
+            
+            closeDockerLoggingPanel();
+            await refreshWizardStatus();
+            
+        } else {
+            appendWizardOutput(`❌ Failed to save: ${data.error}\\n`, 'error');
+            showToast(`Save failed: ${data.error}`, 'error');
+        }
+        
+    } catch (e) {
+        appendWizardOutput(`❌ Error: ${e.message}\\n`, 'error');
+        showToast(`Error: ${e.message}`, 'error');
+    }
 }
 
 async function startStackStep() {
