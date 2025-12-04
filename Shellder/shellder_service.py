@@ -200,6 +200,17 @@ try:
     
     info('FLASK', 'HTTP request/response logging enabled')
 except ImportError:
+    pass
+
+# Track API requests for adaptive polling (keeps polling active when UI is used)
+@app.before_request
+def track_api_activity():
+    """Track API activity to keep adaptive polling active"""
+    # Only track /api/ requests (not static files)
+    if request.path.startswith('/api/') and stats_collector:
+        stats_collector.record_api_request()
+
+try:
     pass  # Debug logger not available
 
 if SOCKETIO_AVAILABLE:
@@ -2421,7 +2432,7 @@ class DeviceMonitor:
                 except Exception as e:
                     print(f"[DeviceMonitor] Error checking {container_name}: {e}")
             
-            time.sleep(10)
+            time.sleep(30)  # Increased from 10s to 30s for CPU optimization
     
     def _poll_database_devices(self):
         """Poll the Dragonite database for device status - cross-reference with logs"""
@@ -3926,7 +3937,22 @@ device_monitor = DeviceMonitor(device_manager, shellder_db)
 # =============================================================================
 
 class StatsCollector:
-    """Collects and stores live statistics for all Aegis AIO components"""
+    """Collects and stores live statistics for all Aegis AIO components
+    
+    CPU Optimization: Uses adaptive polling intervals based on client connections.
+    - When clients connected: faster polling (15-30s)
+    - When idle: slower polling (60-120s) to save CPU
+    """
+    
+    # Polling intervals (seconds) - OPTIMIZED for lower CPU usage
+    POLL_FAST_CONTAINER = 15      # Was 5s - container stats when clients connected
+    POLL_SLOW_CONTAINER = 60     # Container stats when idle
+    POLL_FAST_SYSTEM = 30        # Was 10s - system stats when clients connected  
+    POLL_SLOW_SYSTEM = 120       # System stats when idle
+    POLL_FAST_LOGS = 15          # Was 5-10s - log parsing when clients connected
+    POLL_SLOW_LOGS = 60          # Log parsing when idle
+    POLL_PORTS = 60              # Was 30s - port scanning
+    POLL_SERVICES = 120          # Was 60s - system services check
     
     def __init__(self):
         self.container_stats = {}
@@ -4002,6 +4028,30 @@ class StatsCollector:
         self.running = False
         self.lock = threading.Lock()
         
+        # Client tracking for adaptive polling
+        self.connected_clients = 0
+        self.last_api_request = time.time()
+        self._api_request_timeout = 120  # Consider idle after 2 min no requests
+    
+    def has_active_clients(self):
+        """Check if there are active clients (WebSocket or recent API requests)"""
+        if self.connected_clients > 0:
+            return True
+        # Also check for recent API activity
+        return (time.time() - self.last_api_request) < self._api_request_timeout
+    
+    def record_api_request(self):
+        """Record that an API request was made (keeps polling active)"""
+        self.last_api_request = time.time()
+    
+    def client_connected(self):
+        """Called when a WebSocket client connects"""
+        self.connected_clients += 1
+    
+    def client_disconnected(self):
+        """Called when a WebSocket client disconnects"""
+        self.connected_clients = max(0, self.connected_clients - 1)
+        
     def start(self):
         """Start background collection threads"""
         self.running = True
@@ -4041,6 +4091,9 @@ class StatsCollector:
         
         print("Stats collector started with parsers for: Xilriws, Rotom, Koji, Reactmap, Database")
         print("Disk watchdog started - will auto-clean known bloat sources")
+        print(f"CPU Optimization: Adaptive polling enabled")
+        print(f"  - Fast mode (clients connected): {self.POLL_FAST_CONTAINER}s containers, {self.POLL_FAST_SYSTEM}s system, {self.POLL_FAST_LOGS}s logs")
+        print(f"  - Slow mode (idle): {self.POLL_SLOW_CONTAINER}s containers, {self.POLL_SLOW_SYSTEM}s system, {self.POLL_SLOW_LOGS}s logs")
     
     def stop(self):
         self.running = False
@@ -4129,7 +4182,9 @@ class StatsCollector:
             if socketio and SOCKETIO_AVAILABLE:
                 socketio.emit('container_stats', stats)
             
-            time.sleep(5)
+            # Adaptive polling: faster when clients connected, slower when idle
+            poll_interval = self.POLL_FAST_CONTAINER if self.has_active_clients() else self.POLL_SLOW_CONTAINER
+            time.sleep(poll_interval)
     
     def _collect_system_stats(self):
         """Collect system resource statistics"""
@@ -4198,16 +4253,18 @@ class StatsCollector:
             if socketio and SOCKETIO_AVAILABLE:
                 socketio.emit('system_stats', stats)
             
-            # Record metrics to history database (every 30 seconds)
+            # Record metrics to history database (every 60 seconds - reduced from 30s)
             if hasattr(self, '_last_metric_record'):
-                if time.time() - self._last_metric_record >= 30:
+                if time.time() - self._last_metric_record >= 60:
                     self._record_system_metrics(stats)
                     self._last_metric_record = time.time()
             else:
                 self._last_metric_record = time.time()
                 self._record_system_metrics(stats)
             
-            time.sleep(10)
+            # Adaptive polling: faster when clients connected, slower when idle
+            poll_interval = self.POLL_FAST_SYSTEM if self.has_active_clients() else self.POLL_SLOW_SYSTEM
+            time.sleep(poll_interval)
     
     def _record_system_metrics(self, stats):
         """Record system metrics to history database"""
@@ -4496,7 +4553,9 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Xilriws logs: {e}")
             
-            time.sleep(5)  # More frequent updates for live monitoring
+            # Adaptive polling for log parsing
+            poll_interval = self.POLL_FAST_LOGS if self.has_active_clients() else self.POLL_SLOW_LOGS
+            time.sleep(poll_interval)
     
     def _parse_rotom_logs(self):
         """
@@ -4676,7 +4735,9 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Rotom logs: {e}")
             
-            time.sleep(10)
+            # Adaptive polling for log parsing
+            poll_interval = self.POLL_FAST_LOGS if self.has_active_clients() else self.POLL_SLOW_LOGS
+            time.sleep(poll_interval)
     
     def _parse_koji_logs(self):
         """
@@ -4837,7 +4898,9 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Koji logs: {e}")
             
-            time.sleep(15)
+            # Adaptive polling for log parsing
+            poll_interval = self.POLL_FAST_LOGS if self.has_active_clients() else self.POLL_SLOW_LOGS
+            time.sleep(poll_interval)
     
     def _parse_reactmap_logs(self):
         """
@@ -4966,7 +5029,9 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Reactmap logs: {e}")
             
-            time.sleep(30)  # Reactmap logs don't change frequently
+            # Reactmap logs don't change frequently - use slower polling
+            poll_interval = self.POLL_SLOW_LOGS  # Always use slow polling for Reactmap
+            time.sleep(poll_interval)
     
     def _parse_database_logs(self):
         """
@@ -5164,7 +5229,9 @@ class StatsCollector:
                 except Exception as e:
                     print(f"Error parsing Database logs: {e}")
             
-            time.sleep(15)
+            # Adaptive polling for log parsing
+            poll_interval = self.POLL_FAST_LOGS if self.has_active_clients() else self.POLL_SLOW_LOGS
+            time.sleep(poll_interval)
     
     def _scan_ports(self):
         """Scan important ports"""
@@ -5205,7 +5272,7 @@ class StatsCollector:
             if socketio and SOCKETIO_AVAILABLE:
                 socketio.emit('port_status', status)
             
-            time.sleep(30)
+            time.sleep(self.POLL_PORTS)  # 60 seconds
     
     def _check_system_services(self):
         """Check system services status"""
@@ -5228,7 +5295,7 @@ class StatsCollector:
             if socketio and SOCKETIO_AVAILABLE:
                 socketio.emit('service_status', services)
             
-            time.sleep(60)
+            time.sleep(self.POLL_SERVICES)  # 120 seconds
     
     def _disk_watchdog(self):
         """
@@ -13629,12 +13696,18 @@ if SOCKETIO_AVAILABLE:
     def handle_connect():
         """Client connected"""
         track_websocket('connect', request.sid)
+        # Track connected clients for adaptive polling
+        if stats_collector:
+            stats_collector.client_connected()
         emit('connected', {'status': 'connected', 'timestamp': datetime.now().isoformat()})
 
     @socketio.on('disconnect')
     def handle_disconnect():
         """Client disconnected"""
         track_websocket('disconnect', request.sid)
+        # Track disconnected clients for adaptive polling
+        if stats_collector:
+            stats_collector.client_disconnected()
 
     @socketio.on('subscribe')
     def handle_subscribe(data):
