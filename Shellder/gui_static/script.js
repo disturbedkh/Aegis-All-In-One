@@ -5472,15 +5472,56 @@ async function loadSetupStatus() {
             configsEl.textContent = `${data.summary.configs_present}/${data.summary.configs_present + data.summary.configs_missing}`;
         }
         
-        // Update env vars status
-        const envEl = document.getElementById('envVarsStatus');
-        if (envEl) {
-            envEl.textContent = `${data.summary.env_vars_set}/${data.summary.env_vars_set + data.summary.env_vars_missing}`;
-        }
+        // Load config variables status (separate API call for detailed sync info)
+        loadConfigVarsQuickStatus();
         
         return data;
     } catch (e) {
         console.error('Failed to load setup status:', e);
+    }
+}
+
+// Quick load of config variables count and sync status for the stat card
+async function loadConfigVarsQuickStatus() {
+    const countEl = document.getElementById('configVarsStatusCount');
+    const syncLight = document.getElementById('configVarsSyncLight');
+    
+    if (!countEl) return;
+    
+    try {
+        const data = await fetchAPI('/api/config/variables-status');
+        
+        // Update count: configured/total
+        const configured = data.summary.configured || 0;
+        const total = data.summary.total_variables || 0;
+        countEl.textContent = `${configured}/${total}`;
+        
+        // Update sync light based on mismatch status
+        if (syncLight) {
+            const mismatched = data.summary.mismatched || 0;
+            const missing = data.summary.missing || 0;
+            
+            if (mismatched > 0) {
+                syncLight.className = 'sync-light mismatch';
+                syncLight.title = `${mismatched} variable(s) have mismatched values across configs`;
+            } else if (missing > 0) {
+                syncLight.className = 'sync-light partial';
+                syncLight.title = `${missing} required variable(s) not set`;
+            } else if (configured === total) {
+                syncLight.className = 'sync-light synced';
+                syncLight.title = 'All variables configured and synced';
+            } else {
+                syncLight.className = 'sync-light partial';
+                syncLight.title = `${total - configured} variable(s) not configured`;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load config vars status:', e);
+        if (countEl) countEl.textContent = '-/-';
+        if (syncLight) {
+            syncLight.className = 'sync-light checking';
+            syncLight.title = 'Failed to load status';
+        }
     }
 }
 

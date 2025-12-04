@@ -558,6 +558,45 @@ html, body {
     font-size: 28px;
     font-weight: 700;
     line-height: 1.2;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+/* Sync status light for config variables */
+.sync-light {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.sync-light.checking {
+    background: #6b7280;
+    animation: pulse-light 1.5s infinite;
+}
+
+.sync-light.synced {
+    background: #10b981;
+    box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
+}
+
+.sync-light.mismatch {
+    background: #ef4444;
+    box-shadow: 0 0 8px rgba(239, 68, 68, 0.6);
+    animation: pulse-error 1.5s infinite;
+}
+
+.sync-light.partial {
+    background: #f59e0b;
+    box-shadow: 0 0 8px rgba(245, 158, 11, 0.6);
+}
+
+@keyframes pulse-light {
+    0%, 100% { opacity: 0.5; }
+    50% { opacity: 1; }
 }
 
 .stat-label {

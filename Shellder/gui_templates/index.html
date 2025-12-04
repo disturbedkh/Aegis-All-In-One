@@ -742,11 +742,14 @@
                             <div class="stat-label">Config Files</div>
                         </div>
                     </div>
-                    <div class="stat-card">
-                        <div class="stat-icon">🔑</div>
+                    <div class="stat-card" id="configVarsCard">
+                        <div class="stat-icon">⚙️</div>
                         <div class="stat-info">
-                            <div class="stat-value" id="envVarsStatus">-/-</div>
-                            <div class="stat-label">Env Variables</div>
+                            <div class="stat-value">
+                                <span id="configVarsStatusCount">-/-</span>
+                                <span id="configVarsSyncLight" class="sync-light checking" title="Checking sync status..."></span>
+                            </div>
+                            <div class="stat-label">Config Variables</div>
                         </div>
                     </div>
                     <div class="stat-card" id="gitStatusCard">
