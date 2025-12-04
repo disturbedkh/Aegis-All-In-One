@@ -8799,33 +8799,103 @@ def api_wizard_detect_resources():
         resources['storage_type'] = 'ssd'  # Default assumption
     
     # Calculate recommended MariaDB settings
+    # Rule: 25-40% of RAM when sharing with other services (Golbat, etc.)
+    # We use 30% as a safe default, matching the setup.sh script
     ram_mb = resources['ram_mb']
+    ram_gb = resources['ram_gb']
     buffer_pool_mb = ram_mb * 30 // 100
     
+    # Calculate buffer pool size with granular thresholds matching setup.sh
     if buffer_pool_mb < 512:
         buffer_pool = '512M'
+        buffer_pool_gb = 0
     elif buffer_pool_mb < 1024:
         buffer_pool = '512M'
-    elif buffer_pool_mb < 2048:
+        buffer_pool_gb = 0
+    elif buffer_pool_mb < 1536:
         buffer_pool = '1G'
-    elif buffer_pool_mb < 4096:
+        buffer_pool_gb = 1
+    elif buffer_pool_mb < 2560:
         buffer_pool = '2G'
-    elif buffer_pool_mb < 8192:
+        buffer_pool_gb = 2
+    elif buffer_pool_mb < 3584:
+        buffer_pool = '3G'
+        buffer_pool_gb = 3
+    elif buffer_pool_mb < 4608:
         buffer_pool = '4G'
-    elif buffer_pool_mb < 16384:
+        buffer_pool_gb = 4
+    elif buffer_pool_mb < 6144:
+        buffer_pool = '5G'
+        buffer_pool_gb = 5
+    elif buffer_pool_mb < 7168:
+        buffer_pool = '6G'
+        buffer_pool_gb = 6
+    elif buffer_pool_mb < 8192:
+        buffer_pool = '7G'
+        buffer_pool_gb = 7
+    elif buffer_pool_mb < 10240:
         buffer_pool = '8G'
+        buffer_pool_gb = 8
+    elif buffer_pool_mb < 12288:
+        buffer_pool = '10G'
+        buffer_pool_gb = 10
+    elif buffer_pool_mb < 16384:
+        buffer_pool = '12G'
+        buffer_pool_gb = 12
     else:
         buffer_pool = '16G'
+        buffer_pool_gb = 16
     
+    # Calculate I/O threads (CPU cores / 2, minimum 2, maximum 8)
     io_threads = max(2, min(8, resources['cpu_cores'] // 2))
-    max_connections = 100 if resources['ram_gb'] <= 2 else 200 if resources['ram_gb'] <= 4 else 300 if resources['ram_gb'] <= 8 else 500
+    
+    # Calculate max connections based on RAM
+    if ram_gb <= 2:
+        max_connections = 100
+    elif ram_gb <= 4:
+        max_connections = 200
+    elif ram_gb <= 8:
+        max_connections = 300
+    elif ram_gb <= 16:
+        max_connections = 500
+    else:
+        max_connections = 750
+    
+    # Calculate tmp_table_size based on RAM
+    if ram_gb <= 2:
+        tmp_table_size = '64M'
+    elif ram_gb <= 4:
+        tmp_table_size = '128M'
+    elif ram_gb <= 8:
+        tmp_table_size = '256M'
+    else:
+        tmp_table_size = '512M'
+    
+    # Calculate log file size based on RAM
+    if ram_gb <= 4:
+        log_file_size = '256M'
+    elif ram_gb <= 8:
+        log_file_size = '512M'
+    elif ram_gb <= 16:
+        log_file_size = '768M'
+    else:
+        log_file_size = '1G'
+    
+    # Calculate buffer pool instances (1 per GB, max 8)
+    if buffer_pool_gb <= 1:
+        buffer_pool_instances = 1
+    elif buffer_pool_gb >= 8:
+        buffer_pool_instances = 8
+    else:
+        buffer_pool_instances = buffer_pool_gb
     
     resources['recommended'] = {
         'innodb_buffer_pool_size': buffer_pool,
-        'innodb_buffer_pool_instances': min(8, max(1, buffer_pool_mb // 1024)),
+        'innodb_buffer_pool_instances': buffer_pool_instances,
         'innodb_io_threads': io_threads,
         'max_connections': max_connections,
-        'tmp_table_size': '64M' if resources['ram_gb'] <= 2 else '128M' if resources['ram_gb'] <= 4 else '256M'
+        'tmp_table_size': tmp_table_size,
+        'innodb_log_file_size': log_file_size
     }
     
     return jsonify(resources)
