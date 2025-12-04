@@ -200,7 +200,7 @@ try:
     
     info('FLASK', 'HTTP request/response logging enabled')
 except ImportError:
-    pass
+    pass  # Debug logger not available
 
 # Track API requests for adaptive polling (keeps polling active when UI is used)
 @app.before_request
@@ -209,9 +209,6 @@ def track_api_activity():
     # Only track /api/ requests (not static files)
     if request.path.startswith('/api/') and stats_collector:
         stats_collector.record_api_request()
-
-try:
-    pass  # Debug logger not available
 
 if SOCKETIO_AVAILABLE:
     socketio = SocketIO(app, cors_allowed_origins="*", async_mode=ASYNC_MODE)
