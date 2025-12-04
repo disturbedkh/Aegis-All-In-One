@@ -8464,7 +8464,7 @@ REQUIRED_ENV_VARS = {
 @app.route('/api/setup/status')
 def api_setup_status():
     """Get overall setup status - what's configured and what's missing"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     status = {
         'configs': {},
@@ -8568,7 +8568,7 @@ def api_setup_status():
 @app.route('/api/setup/scripts')
 def api_setup_scripts():
     """Get list of available setup scripts"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     shellder_dir = os.path.join(aegis_root, 'Shellder')
     
     scripts = [
@@ -8591,7 +8591,7 @@ def api_setup_scripts():
 @app.route('/api/setup/run/<script>', methods=['POST'])
 def api_setup_run_script(script):
     """Run a setup script (streams output)"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     # Whitelist allowed scripts
     allowed_scripts = ['setup.sh', 'dbsetup.sh', 'nginx-setup.sh', 'check.sh', 'fletchling.sh', 'poracle.sh']
@@ -8626,7 +8626,7 @@ def api_setup_run_script(script):
 @app.route('/api/config/files')
 def api_config_files():
     """Get list of all config files with their status"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     files = []
     for config_path, config_info in REQUIRED_CONFIGS.items():
@@ -8651,7 +8651,7 @@ def api_config_file_read():
     if not path:
         return jsonify({'error': 'Path is required'}), 400
     
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     # Security: ensure path is within aegis root
     full_path = os.path.normpath(os.path.join(aegis_root, path))
@@ -8697,7 +8697,7 @@ def api_config_file_write():
     if not path or content is None:
         return jsonify({'error': 'Path and content are required'}), 400
     
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     # Security: ensure path is within aegis root
     full_path = os.path.normpath(os.path.join(aegis_root, path))
@@ -8727,7 +8727,7 @@ def api_config_file_write():
 @app.route('/api/config/env')
 def api_config_env_read():
     """Read environment variables from .env file"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     env_file = os.path.join(aegis_root, '.env')
     
     variables = {}
@@ -8781,7 +8781,7 @@ def api_config_env_write():
     if not updates:
         return jsonify({'error': 'No variables to update'}), 400
     
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     env_file = os.path.join(aegis_root, '.env')
     
     try:
@@ -8839,7 +8839,7 @@ def api_config_create_from_template():
     if not config_info or not config_info.get('template'):
         return jsonify({'error': 'No template available for this config'}), 404
     
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     template_path = os.path.join(aegis_root, config_info['template'])
     target_path = os.path.join(aegis_root, path)
     
@@ -8876,7 +8876,7 @@ def api_config_create_from_template():
 @app.route('/api/github/status')
 def api_github_status():
     """Get git repository status"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     status = {
         'is_repo': False,
@@ -8967,7 +8967,7 @@ def api_github_status():
 @app.route('/api/github/pull', methods=['POST'])
 def api_github_pull():
     """Pull latest changes from remote"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     try:
         # Stash any local changes first
@@ -9006,7 +9006,7 @@ def api_github_pull():
 @app.route('/api/github/pull-restart', methods=['POST'])
 def api_github_pull_restart():
     """Pull latest changes and restart Shellder service"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     steps = []
     
@@ -9067,7 +9067,7 @@ def api_github_pull_restart():
 @app.route('/api/github/changes')
 def api_github_changes():
     """Get list of changed files"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     
     try:
         result = subprocess.run(
@@ -9097,7 +9097,7 @@ def api_github_changes():
 @app.route('/api/github/commits')
 def api_github_commits():
     """Get recent commits"""
-    aegis_root = os.environ.get('AEGIS_ROOT', '/aegis')
+    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
     limit = request.args.get('limit', 10, type=int)
     
     try:
