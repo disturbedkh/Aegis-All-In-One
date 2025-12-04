@@ -761,7 +761,7 @@
                 <div class="setup-tabs">
                     <button class="setup-tab active" onclick="showSetupTab('github')">📦 GitHub</button>
                     <button class="setup-tab" onclick="showSetupTab('configs')">📄 Configs</button>
-                    <button class="setup-tab" onclick="showSetupTab('env')">🔑 Environment</button>
+                    <button class="setup-tab" onclick="showSetupTab('env')">⚙️ Config Status</button>
                     <button class="setup-tab" onclick="showSetupTab('scripts')">🚀 Setup Scripts</button>
                 </div>
                 
@@ -880,22 +880,56 @@
                     </div>
                 </div>
                 
-                <!-- Environment Variables Tab -->
+                <!-- Config Variables Status Tab -->
                 <div id="setup-tab-env" class="setup-tab-content">
                     <div class="card">
                         <div class="card-header">
-                            <h2>🔑 Environment Variables (.env)</h2>
+                            <h2>⚙️ Config Variables Status</h2>
                             <div class="card-actions">
-                                <button class="btn btn-success btn-sm" onclick="saveEnvVars()">💾 Save All</button>
-                                <button class="btn btn-sm" onclick="loadEnvVars()">🔄 Refresh</button>
+                                <button class="btn btn-sm" onclick="loadConfigVariablesStatus()">🔄 Refresh</button>
                             </div>
                         </div>
                         <div class="card-body">
-                            <p class="text-muted" style="margin-bottom: 15px;">
-                                ⚠️ These variables are used by all services. Changes require a container restart to take effect.
-                            </p>
-                            <div id="envVarsList" class="env-vars-list">
-                                <div class="loading">Loading...</div>
+                            <!-- Summary Stats -->
+                            <div id="configVarsSummary" class="config-vars-summary">
+                                <div class="summary-item">
+                                    <span class="summary-icon">📊</span>
+                                    <span id="configVarsTotal">-</span>
+                                    <span class="summary-label">Total</span>
+                                </div>
+                                <div class="summary-item success">
+                                    <span class="summary-icon">✅</span>
+                                    <span id="configVarsConfigured">-</span>
+                                    <span class="summary-label">Configured</span>
+                                </div>
+                                <div class="summary-item warning">
+                                    <span class="summary-icon">⚠️</span>
+                                    <span id="configVarsMissing">-</span>
+                                    <span class="summary-label">Missing</span>
+                                </div>
+                                <div class="summary-item synced">
+                                    <span class="summary-icon">🔗</span>
+                                    <span id="configVarsSynced">-</span>
+                                    <span class="summary-label">Synced</span>
+                                </div>
+                                <div class="summary-item error">
+                                    <span class="summary-icon">❌</span>
+                                    <span id="configVarsMismatched">-</span>
+                                    <span class="summary-label">Mismatched</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Legend -->
+                            <div class="config-vars-legend">
+                                <span class="legend-item"><span class="status-dot synced"></span> Synced across configs</span>
+                                <span class="legend-item"><span class="status-dot mismatch"></span> Values don't match</span>
+                                <span class="legend-item"><span class="status-dot empty"></span> Not set</span>
+                                <span class="legend-item">🔗 = Shared variable</span>
+                            </div>
+                            
+                            <!-- Config Variables by Category -->
+                            <div id="configVarsCategories" class="config-vars-categories">
+                                <div class="loading">Loading configuration status...</div>
                             </div>
                         </div>
                     </div>

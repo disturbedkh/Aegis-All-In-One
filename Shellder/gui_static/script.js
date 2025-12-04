@@ -5441,7 +5441,7 @@ function showSetupTab(tabName) {
             loadConfigFiles();
             break;
         case 'env':
-            loadEnvVars();
+            loadConfigVariablesStatus();  // New comprehensive config variables status
             break;
     }
 }
@@ -6174,7 +6174,187 @@ async function createConfigFromTemplate(path) {
 }
 
 // =============================================================================
-// ENVIRONMENT VARIABLES MANAGER
+// CONFIG VARIABLES STATUS
+// =============================================================================
+
+async function loadConfigVariablesStatus() {
+    const container = document.getElementById('configVarsCategories');
+    if (!container) return;
+    
+    container.innerHTML = '<div class="loading">Loading configuration status...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/config/variables-status');
+        
+        // Update summary stats
+        document.getElementById('configVarsTotal').textContent = data.summary.total_variables || 0;
+        document.getElementById('configVarsConfigured').textContent = data.summary.configured || 0;
+        document.getElementById('configVarsMissing').textContent = data.summary.missing || 0;
+        document.getElementById('configVarsSynced').textContent = data.summary.synced || 0;
+        document.getElementById('configVarsMismatched').textContent = data.summary.mismatched || 0;
+        
+        let html = '';
+        
+        for (const [catKey, cat] of Object.entries(data.categories)) {
+            const vars = Object.entries(cat.variables);
+            const configuredCount = vars.filter(([_, v]) => v.has_value).length;
+            const missingCount = vars.filter(([_, v]) => !v.has_value && v.required).length;
+            const mismatchCount = vars.filter(([_, v]) => v.sync_status === 'mismatch').length;
+            
+            html += `
+                <div class="config-var-category" data-category="${catKey}">
+                    <div class="config-var-category-header" onclick="toggleConfigCategory('${catKey}')">
+                        <h4>${cat.title}</h4>
+                        <div class="category-stats">
+                            <span class="stat ok">${configuredCount}/${vars.length} set</span>
+                            ${missingCount > 0 ? `<span class="stat warn">${missingCount} missing</span>` : ''}
+                            ${mismatchCount > 0 ? `<span class="stat error">${mismatchCount} mismatch</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="config-var-category-body" id="category-body-${catKey}">
+            `;
+            
+            for (const [varName, varInfo] of vars) {
+                // Determine status indicator
+                let statusClass = 'empty';
+                if (varInfo.sync_status === 'synced') {
+                    statusClass = 'synced';
+                } else if (varInfo.sync_status === 'mismatch') {
+                    statusClass = 'mismatch';
+                } else if (varInfo.has_value) {
+                    statusClass = 'set';
+                } else if (varInfo.required) {
+                    statusClass = 'missing';
+                }
+                
+                // Show value or placeholder
+                let displayValue = '';
+                if (varInfo.secret) {
+                    displayValue = varInfo.has_value ? '••••••••' : '<span class="empty">(not set)</span>';
+                } else {
+                    displayValue = varInfo.value || varInfo.default || '<span class="empty">(not set)</span>';
+                }
+                
+                // Shared badge
+                const sharedBadge = varInfo.shared ? '<span class="shared-badge">🔗 shared</span>' : '';
+                
+                html += `
+                    <div class="config-var-item" data-var="${varName}">
+                        <div class="config-var-status ${statusClass}" title="${getStatusTitle(statusClass)}"></div>
+                        <div class="config-var-label">
+                            ${varInfo.label}
+                            ${sharedBadge}
+                        </div>
+                        <div class="config-var-value ${varInfo.secret ? 'secret' : ''}">${displayValue}</div>
+                        <div class="config-var-source">${varInfo.source}</div>
+                `;
+                
+                // Show sync details for mismatched variables
+                if (varInfo.sync_status === 'mismatch' && data.shared_sync[varName]) {
+                    const syncData = data.shared_sync[varName];
+                    html += `
+                        <div class="config-var-sync-details">
+                            <strong>⚠️ Values don't match across configs:</strong>
+                            ${Object.entries(syncData.values).map(([file, val]) => `
+                                <div class="sync-row">
+                                    <span class="sync-file">${file}</span>
+                                    <span class="sync-value">${val ? (varInfo.secret ? '••••' : truncateValue(val)) : '(empty)'}</span>
+                                </div>
+                            `).join('')}
+                            <button class="btn btn-xs btn-warning" style="margin-top: 8px;" 
+                                    onclick="syncConfigVariable('${varName}')">
+                                🔄 Sync All to Match
+                            </button>
+                        </div>
+                    `;
+                }
+                
+                html += `</div>`;
+            }
+            
+            html += `
+                    </div>
+                </div>
+            `;
+        }
+        
+        container.innerHTML = html || '<div class="info-msg">No configuration data available</div>';
+        
+    } catch (e) {
+        container.innerHTML = `<div class="error-msg">Failed to load config status: ${e.message}</div>`;
+        console.error('Config status error:', e);
+    }
+}
+
+function getStatusTitle(status) {
+    const titles = {
+        'synced': 'All configs have matching values',
+        'mismatch': 'Values differ across configs - click to see details',
+        'set': 'Value is configured',
+        'missing': 'Required value is not set',
+        'empty': 'Optional value not set'
+    };
+    return titles[status] || '';
+}
+
+function truncateValue(val) {
+    if (!val) return '';
+    const str = String(val);
+    return str.length > 30 ? str.substring(0, 30) + '...' : str;
+}
+
+function toggleConfigCategory(catKey) {
+    const body = document.getElementById(`category-body-${catKey}`);
+    if (body) {
+        body.style.display = body.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+async function syncConfigVariable(varName) {
+    // Get the .env value and sync it to all configs
+    try {
+        const response = await fetch('/api/config/variables-status');
+        const data = await response.json();
+        
+        if (!data.shared_sync[varName]) {
+            showToast('Variable not found', 'error');
+            return;
+        }
+        
+        // Get the value from .env as the source of truth
+        const envValue = data.shared_sync[varName].values['.env'];
+        if (!envValue) {
+            showToast('No value in .env to sync from', 'warning');
+            return;
+        }
+        
+        showToast(`Syncing ${varName} across all configs...`, 'info');
+        
+        // Use the existing sync endpoint
+        const syncResponse = await fetch('/api/config/sync-field', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                shared_key: varName.toLowerCase().replace(/_/g, '_'),
+                value: envValue,
+                source_config: '.env'
+            })
+        });
+        
+        if (syncResponse.ok) {
+            showToast(`${varName} synced successfully!`, 'success');
+            loadConfigVariablesStatus();
+        } else {
+            const err = await syncResponse.json();
+            showToast(`Sync failed: ${err.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+// =============================================================================
+// ENVIRONMENT VARIABLES MANAGER (Legacy)
 // =============================================================================
 
 async function loadEnvVars() {

@@ -8899,6 +8899,100 @@ AEGIS_SECRETS = {
     },
 }
 
+# =============================================================================
+# CONFIG VARIABLES STATUS - All variables needed for stack operation
+# =============================================================================
+
+# Categories of config variables with sources
+CONFIG_VARIABLE_CATEGORIES = {
+    'database': {
+        'title': '🗄️ Database Connection',
+        'icon': '🗄️',
+        'variables': {
+            'MYSQL_ROOT_PASSWORD': {'label': 'Root Password', 'required': True, 'source': '.env', 'secret': True},
+            'MYSQL_USER': {'label': 'Username', 'required': True, 'source': '.env', 'shared': ['dragonite', 'golbat', 'reactmap']},
+            'MYSQL_PASSWORD': {'label': 'User Password', 'required': True, 'source': '.env', 'secret': True, 'shared': ['dragonite', 'golbat', 'reactmap']},
+            'MYSQL_DATABASE': {'label': 'Default Database', 'required': False, 'source': '.env'},
+        }
+    },
+    'security': {
+        'title': '🔐 Security & Tokens',
+        'icon': '🔐',
+        'variables': {
+            'BEARER_TOKEN': {'label': 'Dragonite Bearer', 'required': True, 'source': '.env', 'secret': True},
+            'DRAGONITE_SECRET': {'label': 'Dragonite Secret', 'required': True, 'source': '.env', 'secret': True},
+            'GOLBAT_API_SECRET': {'label': 'Golbat API Secret', 'required': True, 'source': '.env', 'secret': True, 'shared': ['dragonite', 'golbat', 'reactmap']},
+            'GOLBAT_RAW_SECRET': {'label': 'Golbat Raw Bearer', 'required': True, 'source': '.env', 'secret': True, 'shared': ['dragonite', 'golbat']},
+            'KOJI_SECRET': {'label': 'Koji Secret', 'required': True, 'source': '.env', 'secret': True, 'shared': ['dragonite', 'golbat', 'reactmap']},
+            'REACTMAP_SECRET': {'label': 'ReactMap Secret', 'required': True, 'source': '.env', 'secret': True},
+            'ROTOM_AUTH_BEARER': {'label': 'Rotom Device Auth', 'required': False, 'source': '.env', 'secret': True},
+        }
+    },
+    'services': {
+        'title': '🔗 Service Connections',
+        'icon': '🔗',
+        'variables': {
+            'rotom_endpoint': {'label': 'Rotom Endpoint', 'required': True, 'source': 'dragonite', 'default': 'ws://rotom:7071'},
+            'golbat_endpoint': {'label': 'Golbat HTTP', 'required': True, 'source': 'dragonite', 'default': 'http://golbat:9001'},
+            'koji_url': {'label': 'Koji URL', 'required': True, 'source': 'dragonite', 'default': 'http://koji:8080'},
+            'xilriws_url': {'label': 'Xilriws Auth URL', 'required': True, 'source': 'dragonite', 'default': 'http://xilriws:5090/api/v1/login-code'},
+        }
+    },
+    'scanning': {
+        'title': '📍 Scanning Settings',
+        'icon': '📍',
+        'variables': {
+            'ptc_enabled': {'label': 'PTC Accounts', 'required': False, 'source': 'dragonite', 'type': 'boolean'},
+            'ptc_login_delay': {'label': 'PTC Login Delay', 'required': False, 'source': 'dragonite', 'type': 'number', 'default': 120},
+            'account_reuse_hours': {'label': 'Account Reuse Hours', 'required': False, 'source': 'dragonite', 'type': 'number', 'default': 72},
+        }
+    },
+    'docker': {
+        'title': '🐳 Docker/System',
+        'icon': '🐳',
+        'variables': {
+            'TZ': {'label': 'Timezone', 'required': True, 'source': '.env', 'default': 'UTC'},
+            'PUID': {'label': 'User ID', 'required': False, 'source': '.env', 'default': '1000'},
+            'PGID': {'label': 'Group ID', 'required': False, 'source': '.env', 'default': '1000'},
+        }
+    }
+}
+
+# Mapping of where shared variables appear in each config file
+SHARED_VARIABLE_PATHS = {
+    'MYSQL_USER': {
+        '.env': 'MYSQL_USER',
+        'unown/dragonite_config.toml': 'db.dragonite.user',
+        'unown/golbat_config.toml': 'database.user',
+        'reactmap/local.json': 'database.username',
+        'init/01.sql': None  # Special handling
+    },
+    'MYSQL_PASSWORD': {
+        '.env': 'MYSQL_PASSWORD',
+        'unown/dragonite_config.toml': 'db.dragonite.password',
+        'unown/golbat_config.toml': 'database.password',
+        'reactmap/local.json': 'database.password',
+        'init/01.sql': None
+    },
+    'GOLBAT_API_SECRET': {
+        '.env': 'GOLBAT_API_SECRET',
+        'unown/dragonite_config.toml': 'processors.golbat_api_secret',
+        'unown/golbat_config.toml': 'api_secret',
+        'reactmap/local.json': 'api.golbatSecret'
+    },
+    'GOLBAT_RAW_SECRET': {
+        '.env': 'GOLBAT_RAW_SECRET',
+        'unown/dragonite_config.toml': 'processors.golbat_raw_bearer',
+        'unown/golbat_config.toml': 'raw_bearer'
+    },
+    'KOJI_SECRET': {
+        '.env': 'KOJI_SECRET',
+        'unown/dragonite_config.toml': 'koji.bearer_token',
+        'unown/golbat_config.toml': 'koji.bearer_token',
+        'reactmap/local.json': 'api.kojiSecret'
+    }
+}
+
 # Shared field indicators (simplified for config editor display)
 SHARED_FIELDS = {
     'db_user': {
@@ -10972,6 +11066,145 @@ def api_config_schema(config_path):
         'shared_fields': shared_fields_info,
         'all_shared_definitions': SHARED_FIELDS
     })
+
+@app.route('/api/config/variables-status')
+def api_config_variables_status():
+    """Get comprehensive status of ALL config variables with sync checking"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    # Load .env values
+    env_values = {}
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        env_values[key] = value
+        except:
+            pass
+    
+    # Check shared variable sync status
+    shared_sync_status = {}
+    for var_name, paths in SHARED_VARIABLE_PATHS.items():
+        values = {}
+        
+        # Get value from each config file
+        for config_file, field_path in paths.items():
+            if field_path is None:
+                continue
+                
+            full_path = os.path.join(aegis_root, config_file)
+            
+            if config_file == '.env':
+                values['.env'] = env_values.get(var_name, '')
+            elif os.path.exists(full_path):
+                try:
+                    if config_file.endswith('.toml'):
+                        import tomli
+                        with open(full_path, 'rb') as f:
+                            data = tomli.load(f)
+                        # Navigate to field
+                        parts = field_path.split('.')
+                        current = data
+                        for part in parts:
+                            if isinstance(current, dict) and part in current:
+                                current = current[part]
+                            else:
+                                current = None
+                                break
+                        values[config_file] = current if current else ''
+                    elif config_file.endswith('.json'):
+                        with open(full_path) as f:
+                            data = json.load(f)
+                        parts = field_path.split('.')
+                        current = data
+                        for part in parts:
+                            if isinstance(current, dict) and part in current:
+                                current = current[part]
+                            else:
+                                current = None
+                                break
+                        values[config_file] = current if current else ''
+                except Exception as e:
+                    values[config_file] = f'(error: {e})'
+        
+        # Check if all values match
+        unique_values = set(v for v in values.values() if v and v not in ['', None, '(not set)'])
+        all_match = len(unique_values) <= 1
+        has_value = len(unique_values) > 0
+        
+        shared_sync_status[var_name] = {
+            'values': values,
+            'all_match': all_match,
+            'has_value': has_value,
+            'unique_count': len(unique_values),
+            'status': 'synced' if all_match and has_value else ('empty' if not has_value else 'mismatch')
+        }
+    
+    # Build response with all categories
+    result = {
+        'categories': {},
+        'shared_sync': shared_sync_status,
+        'summary': {
+            'total_variables': 0,
+            'configured': 0,
+            'missing': 0,
+            'mismatched': 0,
+            'synced': 0
+        }
+    }
+    
+    for cat_key, cat_info in CONFIG_VARIABLE_CATEGORIES.items():
+        cat_result = {
+            'title': cat_info['title'],
+            'icon': cat_info['icon'],
+            'variables': {}
+        }
+        
+        for var_name, var_info in cat_info['variables'].items():
+            result['summary']['total_variables'] += 1
+            
+            # Get current value
+            current_value = ''
+            if var_info['source'] == '.env':
+                current_value = env_values.get(var_name, '')
+            
+            # Check if value is set (non-empty and not a placeholder)
+            is_set = bool(current_value) and current_value.lower() not in ['changeme', 'your_password', 'your_secret', '']
+            
+            # Check shared sync status
+            sync_status = None
+            if 'shared' in var_info and var_name in shared_sync_status:
+                sync_info = shared_sync_status[var_name]
+                sync_status = sync_info['status']
+                if sync_status == 'mismatch':
+                    result['summary']['mismatched'] += 1
+                elif sync_status == 'synced':
+                    result['summary']['synced'] += 1
+            
+            if is_set:
+                result['summary']['configured'] += 1
+            elif var_info.get('required', False):
+                result['summary']['missing'] += 1
+            
+            cat_result['variables'][var_name] = {
+                'label': var_info['label'],
+                'required': var_info.get('required', False),
+                'source': var_info['source'],
+                'secret': var_info.get('secret', False),
+                'value': current_value if not var_info.get('secret') else ('***' if current_value else ''),
+                'has_value': is_set,
+                'shared': var_info.get('shared'),
+                'sync_status': sync_status,
+                'default': var_info.get('default')
+            }
+        
+        result['categories'][cat_key] = cat_result
+    
+    return jsonify(result)
 
 @app.route('/api/config/sync-field', methods=['POST'])
 def api_config_sync_field():
