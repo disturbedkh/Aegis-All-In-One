@@ -5910,7 +5910,7 @@ async function saveEnvVars() {
     document.querySelectorAll('.env-input').forEach(input => {
         const name = input.id.replace('env-', '');
         const value = input.value;
-        if (value && value !== '***') {
+        if (value) {
             variables[name] = value;
         }
     });
@@ -7358,34 +7358,252 @@ async function copyConfigsStep() {
 }
 
 async function generatePasswordsStep() {
-    appendWizardOutput('Generating secure passwords and tokens...\\n');
+    appendWizardOutput('Checking current password configuration...\\n');
     
-    // Generate passwords
-    const genResponse = await fetch('/api/wizard/generate-passwords', { method: 'POST' });
-    if (!genResponse.ok) throw new Error('Failed to generate passwords');
-    generatedPasswords = await genResponse.json();
+    // Check current password status
+    const statusResponse = await fetch('/api/wizard/password-status');
+    if (!statusResponse.ok) throw new Error('Failed to check password status');
+    const passwordStatus = await statusResponse.json();
     
-    appendWizardOutput('\\nGenerated credentials (stored in .env):\\n');
-    appendWizardOutput('─'.repeat(50) + '\\n');
-    for (const [key, value] of Object.entries(generatedPasswords)) {
-        // Show masked version for security
-        const masked = value.substring(0, 4) + '•'.repeat(12) + value.substring(value.length - 4);
-        appendWizardOutput(`  ${key}: ${masked}\\n`);
+    // Show password management modal
+    showPasswordModal(passwordStatus);
+}
+
+// Password modal state
+let currentPasswordStatus = null;
+let passwordFieldChoices = {};
+
+function showPasswordModal(status) {
+    currentPasswordStatus = status;
+    passwordFieldChoices = {};
+    
+    const modal = document.getElementById('passwordModal');
+    const statusMsg = document.getElementById('passwordStatusMessage');
+    const container = document.getElementById('passwordFieldsContainer');
+    
+    // Set status message
+    if (!status.env_exists) {
+        statusMsg.className = 'password-status-message warning';
+        statusMsg.innerHTML = '⚠️ No .env file found. All passwords will be newly generated.';
+    } else if (status.has_defaults) {
+        statusMsg.className = 'password-status-message warning';
+        statusMsg.innerHTML = '⚠️ Some passwords appear to be default/placeholder values. We recommend generating secure replacements.';
+    } else if (status.all_configured) {
+        statusMsg.className = 'password-status-message success';
+        statusMsg.innerHTML = '✅ All passwords are configured with non-default values. You can keep them or generate new ones.';
+    } else {
+        statusMsg.className = 'password-status-message info';
+        statusMsg.innerHTML = 'ℹ️ Configure your passwords below. You can keep existing values, generate new secure ones, or enter custom values.';
     }
     
-    // Apply passwords
-    appendWizardOutput('\\nApplying passwords to .env file...\\n');
-    const applyResponse = await fetch('/api/wizard/apply-passwords', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ passwords: generatedPasswords })
+    // Build password field rows
+    container.innerHTML = '';
+    for (const [key, info] of Object.entries(status.fields)) {
+        const row = document.createElement('div');
+        row.className = 'password-field-row';
+        row.id = `pwd-row-${key}`;
+        
+        const hasGoodValue = info.has_value && !info.is_default;
+        
+        // Initialize choice
+        passwordFieldChoices[key] = {
+            mode: hasGoodValue ? 'keep' : 'generate',
+            custom: ''
+        };
+        
+        row.innerHTML = `
+            <div class="password-field-label">
+                ${info.label}
+                <small>${info.type === 'token' ? '32-char hex token' : '24-char password'}</small>
+            </div>
+            <div class="password-field-input-group">
+                <select class="password-mode-select" id="pwd-mode-${key}" onchange="onPasswordModeChange('${key}')">
+                    ${hasGoodValue ? `<option value="keep">Keep existing</option>` : ''}
+                    <option value="generate" ${!hasGoodValue ? 'selected' : ''}>Generate new</option>
+                    <option value="custom">Enter custom</option>
+                </select>
+                <input type="password" 
+                       id="pwd-input-${key}" 
+                       placeholder="${hasGoodValue ? info.current_masked : 'Will be auto-generated'}"
+                       ${hasGoodValue || passwordFieldChoices[key].mode !== 'custom' ? 'disabled' : ''}
+                       class="${hasGoodValue ? 'has-existing' : info.is_default ? 'is-default' : ''}"
+                       oninput="onPasswordInput('${key}')"
+                >
+                <button class="btn btn-sm btn-secondary" onclick="generateSinglePassword('${key}')" title="Generate random value">🎲</button>
+            </div>
+            <div class="password-strength-indicator" id="pwd-strength-${key}">
+                ${hasGoodValue ? `<span style="color: var(--success);">✓ ${info.length} chars</span>` : ''}
+            </div>
+        `;
+        
+        container.appendChild(row);
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closePasswordModal() {
+    document.getElementById('passwordModal').style.display = 'none';
+    currentPasswordStatus = null;
+}
+
+function onPasswordModeChange(key) {
+    const mode = document.getElementById(`pwd-mode-${key}`).value;
+    const input = document.getElementById(`pwd-input-${key}`);
+    const strengthEl = document.getElementById(`pwd-strength-${key}`);
+    
+    passwordFieldChoices[key].mode = mode;
+    
+    if (mode === 'custom') {
+        input.disabled = false;
+        input.placeholder = 'Enter your password...';
+        input.value = '';
+        input.focus();
+        strengthEl.innerHTML = '';
+    } else if (mode === 'keep') {
+        input.disabled = true;
+        input.value = '';
+        const info = currentPasswordStatus.fields[key];
+        input.placeholder = info.current_masked;
+        strengthEl.innerHTML = `<span style="color: var(--success);">✓ Keeping existing</span>`;
+    } else { // generate
+        input.disabled = true;
+        input.value = '';
+        input.placeholder = 'Will be auto-generated';
+        strengthEl.innerHTML = `<span style="color: var(--primary);">🎲 New secure value</span>`;
+    }
+}
+
+function onPasswordInput(key) {
+    const input = document.getElementById(`pwd-input-${key}`);
+    const strengthEl = document.getElementById(`pwd-strength-${key}`);
+    const value = input.value;
+    
+    passwordFieldChoices[key].custom = value;
+    
+    // Simple strength indicator
+    let strength = 'weak';
+    let strengthText = 'Too short';
+    if (value.length >= 16) {
+        strength = 'strong';
+        strengthText = 'Strong';
+    } else if (value.length >= 8) {
+        strength = 'medium';
+        strengthText = 'Medium';
+    }
+    
+    strengthEl.innerHTML = `
+        <div class="strength-bar"><div class="fill ${strength}"></div></div>
+        <span>${strengthText} (${value.length} chars)</span>
+    `;
+}
+
+async function generateSinglePassword(key) {
+    const input = document.getElementById(`pwd-input-${key}`);
+    const select = document.getElementById(`pwd-mode-${key}`);
+    const strengthEl = document.getElementById(`pwd-strength-${key}`);
+    
+    // Generate a random password
+    const isToken = currentPasswordStatus.fields[key].type === 'token';
+    let newValue;
+    
+    if (isToken) {
+        // Generate hex token
+        const array = new Uint8Array(16);
+        crypto.getRandomValues(array);
+        newValue = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
+    } else {
+        // Generate alphanumeric password
+        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+        newValue = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+            .map(b => chars[b % chars.length]).join('');
+    }
+    
+    // Set to custom mode with generated value
+    select.value = 'custom';
+    input.disabled = false;
+    input.type = document.getElementById('showPasswordsCheckbox').checked ? 'text' : 'password';
+    input.value = newValue;
+    passwordFieldChoices[key] = { mode: 'custom', custom: newValue };
+    
+    strengthEl.innerHTML = `<span style="color: var(--success);">✓ Generated (${newValue.length} chars)</span>`;
+}
+
+function togglePasswordVisibility() {
+    const show = document.getElementById('showPasswordsCheckbox').checked;
+    const inputs = document.querySelectorAll('.password-field-input-group input');
+    inputs.forEach(input => {
+        input.type = show ? 'text' : 'password';
     });
+}
+
+async function applyPasswordChoices() {
+    const custom = {};
+    const keepExisting = [];
     
-    if (!applyResponse.ok) throw new Error('Failed to apply passwords');
+    for (const [key, choice] of Object.entries(passwordFieldChoices)) {
+        if (choice.mode === 'keep') {
+            keepExisting.push(key);
+        } else if (choice.mode === 'custom' && choice.custom) {
+            // Map to the API field names
+            const fieldMap = {
+                'MYSQL_ROOT_PASSWORD': 'mysql_root_password',
+                'MYSQL_PASSWORD': 'mysql_password',
+                'BEARER_TOKEN': 'bearer_token',
+                'DRAGONITE_SECRET': 'dragonite_secret',
+                'GOLBAT_API_SECRET': 'golbat_api_secret',
+                'REACTMAP_SECRET': 'reactmap_secret',
+                'KOJI_SECRET': 'koji_secret'
+            };
+            custom[fieldMap[key]] = choice.custom;
+        }
+    }
     
-    appendWizardOutput('\\n✅ Passwords generated and saved to .env!\\n', 'success');
-    appendWizardOutput('⚠️ Keep these credentials safe!\\n', 'warning');
-    updateStepStatus('passwords', true, 'Credentials configured');
+    closePasswordModal();
+    appendWizardOutput('\\nGenerating and applying passwords...\\n');
+    
+    try {
+        // Generate passwords (will use custom values where provided, keep existing where specified)
+        const genResponse = await fetch('/api/wizard/generate-passwords', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ custom, keep_existing: keepExisting })
+        });
+        
+        if (!genResponse.ok) throw new Error('Failed to generate passwords');
+        generatedPasswords = await genResponse.json();
+        
+        appendWizardOutput('\\n✅ Credentials configured - COPY THESE NOW:\\n');
+        appendWizardOutput('═'.repeat(60) + '\\n');
+        for (const [key, value] of Object.entries(generatedPasswords)) {
+            const envKey = key.toUpperCase();
+            const source = custom[key] ? ' (custom)' : keepExisting.includes(envKey) ? ' (kept)' : ' (new)';
+            // Show FULL password - user needs to see and copy these!
+            appendWizardOutput(`  ${envKey}=${value}${source}\\n`);
+        }
+        appendWizardOutput('═'.repeat(60) + '\\n');
+        appendWizardOutput('\\n⚠️ IMPORTANT: Copy and save these passwords securely!\\n', 'warning');
+        appendWizardOutput('They are saved in your .env file but you should have a backup.\\n');
+        
+        // Apply passwords
+        appendWizardOutput('\\nSaving to .env file...\\n');
+        const applyResponse = await fetch('/api/wizard/apply-passwords', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ passwords: generatedPasswords })
+        });
+        
+        if (!applyResponse.ok) throw new Error('Failed to apply passwords');
+        
+        appendWizardOutput('\\n✅ Passwords saved to .env!\\n', 'success');
+        appendWizardOutput('⚠️ Keep these credentials safe!\\n', 'warning');
+        updateStepStatus('passwords', true, 'Credentials configured');
+        await refreshWizardStatus();
+        
+    } catch (e) {
+        appendWizardOutput(`\\n❌ Error: ${e.message}\\n`, 'error');
+        showToast(`Password configuration failed: ${e.message}`, 'error');
+    }
 }
 
 async function optimizeMariaDBStep() {

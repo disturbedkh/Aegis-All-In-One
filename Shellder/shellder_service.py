@@ -8900,9 +8900,85 @@ def api_wizard_detect_resources():
     
     return jsonify(resources)
 
+@app.route('/api/wizard/password-status')
+def api_wizard_password_status():
+    """Check current password status - detect if non-default values exist"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    # Default/placeholder values to detect
+    default_values = {
+        'changeme', 'your_password', 'your_root_password', 'password', 
+        'secret', 'your_secret', 'change_me', 'CHANGEME', 'PASSWORD',
+        'your-password', 'your-secret', 'example', 'test', ''
+    }
+    
+    # Password fields to check
+    password_fields = {
+        'MYSQL_ROOT_PASSWORD': {'label': 'MySQL Root Password', 'type': 'password'},
+        'MYSQL_PASSWORD': {'label': 'MySQL User Password', 'type': 'password'},
+        'BEARER_TOKEN': {'label': 'Bearer Token', 'type': 'token'},
+        'DRAGONITE_SECRET': {'label': 'Dragonite Secret', 'type': 'token'},
+        'GOLBAT_API_SECRET': {'label': 'Golbat API Secret', 'type': 'token'},
+        'REACTMAP_SECRET': {'label': 'ReactMap Secret', 'type': 'token'},
+        'KOJI_SECRET': {'label': 'Koji Secret', 'type': 'token'}
+    }
+    
+    result = {
+        'fields': {},
+        'all_configured': True,
+        'has_defaults': False,
+        'env_exists': os.path.exists(env_file)
+    }
+    
+    current_values = {}
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        current_values[key] = value
+        except Exception as e:
+            result['error'] = str(e)
+    
+    for key, info in password_fields.items():
+        current = current_values.get(key, '')
+        is_default = current.lower() in default_values or current == '' or len(current) < 8
+        
+        # Better masking that handles various lengths
+        if len(current) == 0:
+            masked = '(not set)'
+        elif len(current) < 4:
+            masked = '•' * len(current) + ' (too short!)'
+        elif len(current) < 8:
+            masked = current[:2] + '•' * (len(current) - 2) + ' (weak)'
+        elif len(current) < 12:
+            masked = current[:3] + '•' * (len(current) - 6) + current[-3:]
+        else:
+            masked = current[:4] + '•' * (len(current) - 8) + current[-4:]
+        
+        result['fields'][key] = {
+            'label': info['label'],
+            'type': info['type'],
+            'has_value': bool(current),
+            'is_default': is_default,
+            'current_masked': masked,
+            'current_value': current,  # Include actual value for "keep" option
+            'length': len(current)
+        }
+        
+        if is_default or not current:
+            result['all_configured'] = False
+        if is_default and current:
+            result['has_defaults'] = True
+    
+    return jsonify(result)
+
 @app.route('/api/wizard/generate-passwords', methods=['POST'])
 def api_wizard_generate_passwords():
-    """Generate secure random passwords"""
+    """Generate secure random passwords, with option for custom values"""
     def generate_password(length=24):
         chars = string.ascii_letters + string.digits
         return ''.join(secrets.choice(chars) for _ in range(length))
@@ -8910,15 +8986,50 @@ def api_wizard_generate_passwords():
     def generate_token(length=32):
         return secrets.token_hex(length // 2)
     
-    passwords = {
-        'mysql_root_password': generate_password(24),
-        'mysql_password': generate_password(24),
-        'bearer_token': generate_token(32),
-        'dragonite_secret': generate_token(32),
-        'golbat_api_secret': generate_token(32),
-        'reactmap_secret': generate_token(32),
-        'koji_secret': generate_token(32)
+    data = request.json or {}
+    custom = data.get('custom', {})  # User-provided custom passwords
+    keep_existing = data.get('keep_existing', [])  # Fields to keep unchanged
+    
+    # Get current values if we need to keep some
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    current_values = {}
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        current_values[key] = value
+        except:
+            pass
+    
+    # Field mapping
+    field_mapping = {
+        'mysql_root_password': 'MYSQL_ROOT_PASSWORD',
+        'mysql_password': 'MYSQL_PASSWORD',
+        'bearer_token': 'BEARER_TOKEN',
+        'dragonite_secret': 'DRAGONITE_SECRET',
+        'golbat_api_secret': 'GOLBAT_API_SECRET',
+        'reactmap_secret': 'REACTMAP_SECRET',
+        'koji_secret': 'KOJI_SECRET'
     }
+    
+    passwords = {}
+    for field, env_key in field_mapping.items():
+        if field in custom and custom[field]:
+            # Use custom value provided by user
+            passwords[field] = custom[field]
+        elif env_key in keep_existing and env_key in current_values:
+            # Keep existing value
+            passwords[field] = current_values[env_key]
+        else:
+            # Generate new value
+            if 'token' in field or 'secret' in field:
+                passwords[field] = generate_token(32)
+            else:
+                passwords[field] = generate_password(24)
     
     return jsonify(passwords)
 
@@ -9538,7 +9649,7 @@ def api_config_env_read():
                         # Check if it's a required var
                         var_info = REQUIRED_ENV_VARS.get(key, {})
                         variables[key] = {
-                            'value': '***' if var_info.get('secret', False) else value,
+                            'value': value,  # Send actual value - frontend will mask with password field
                             'is_secret': var_info.get('secret', False),
                             'description': var_info.get('description', 'Custom variable'),
                             'category': var_info.get('category', 'custom')

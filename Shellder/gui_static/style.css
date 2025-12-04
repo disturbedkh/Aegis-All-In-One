@@ -2384,6 +2384,156 @@ select:focus {
     flex: 1;
 }
 
+/* Password Modal Styles */
+.password-status-message {
+    padding: 12px 16px;
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    font-size: 0.95em;
+}
+
+.password-status-message.warning {
+    background: rgba(251, 191, 36, 0.1);
+    border: 1px solid var(--warning);
+    color: var(--warning);
+}
+
+.password-status-message.success {
+    background: rgba(16, 185, 129, 0.1);
+    border: 1px solid var(--success);
+    color: var(--success);
+}
+
+.password-status-message.info {
+    background: rgba(59, 130, 246, 0.1);
+    border: 1px solid var(--primary);
+    color: var(--primary);
+}
+
+.password-fields-container {
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+}
+
+.password-field-row {
+    display: grid;
+    grid-template-columns: 180px 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.password-field-label {
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.password-field-label small {
+    display: block;
+    font-weight: 400;
+    color: var(--text-muted);
+    font-size: 0.8em;
+    margin-top: 2px;
+}
+
+.password-field-input-group {
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.password-field-input-group input {
+    flex: 1;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.9em;
+}
+
+.password-field-input-group input:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.password-field-input-group input:disabled {
+    opacity: 0.6;
+    cursor: not-allowed;
+}
+
+.password-field-input-group input.has-existing {
+    border-color: var(--success);
+}
+
+.password-field-input-group input.is-default {
+    border-color: var(--warning);
+}
+
+.password-field-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.password-field-actions .btn {
+    padding: 6px 10px;
+    font-size: 0.85em;
+}
+
+.password-mode-select {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 6px 10px;
+    color: var(--text-primary);
+    font-size: 0.9em;
+    min-width: 120px;
+}
+
+.password-mode-select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.password-current-value {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    color: var(--text-muted);
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+}
+
+.password-strength-indicator {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.password-strength-indicator .strength-bar {
+    width: 60px;
+    height: 4px;
+    background: var(--bg-primary);
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.password-strength-indicator .strength-bar .fill {
+    height: 100%;
+    transition: width 0.2s;
+}
+
+.password-strength-indicator .strength-bar .fill.weak { width: 33%; background: var(--danger); }
+.password-strength-indicator .strength-bar .fill.medium { width: 66%; background: var(--warning); }
+.password-strength-indicator .strength-bar .fill.strong { width: 100%; background: var(--success); }
+
 .log-context-info {
     display: flex;
     gap: 20px;
