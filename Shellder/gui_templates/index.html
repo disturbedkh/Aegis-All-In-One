@@ -434,17 +434,137 @@
             
             <!-- Containers Page -->
             <div id="page-containers" class="page">
-                <div class="card full-height">
+                <!-- Docker Health Monitor -->
+                <div class="docker-health-card card">
                     <div class="card-header">
-                        <h2>Docker Containers</h2>
+                        <h2>🩺 Docker Health Monitor</h2>
                         <div class="card-actions">
-                            <button class="btn btn-sm" onclick="dockerAction('up')">Start All</button>
-                            <button class="btn btn-sm btn-danger" onclick="dockerAction('down')">Stop All</button>
+                            <button class="btn btn-sm" onclick="loadDockerHealth()" title="Refresh health status">🔄 Refresh</button>
                         </div>
                     </div>
                     <div class="card-body">
+                        <div class="docker-health-grid" id="dockerHealthGrid">
+                            <!-- Docker Daemon Status -->
+                            <div class="health-status-item" id="dockerDaemonStatus">
+                                <div class="health-icon">🐳</div>
+                                <div class="health-info">
+                                    <div class="health-title">Docker Daemon</div>
+                                    <div class="health-status-text">Checking...</div>
+                                </div>
+                                <div class="health-indicator checking"></div>
+                            </div>
+                            
+                            <!-- Docker Compose Status -->
+                            <div class="health-status-item" id="dockerComposeStatus">
+                                <div class="health-icon">📦</div>
+                                <div class="health-info">
+                                    <div class="health-title">Docker Compose</div>
+                                    <div class="health-status-text">Checking...</div>
+                                </div>
+                                <div class="health-indicator checking"></div>
+                            </div>
+                            
+                            <!-- Docker Network Status -->
+                            <div class="health-status-item" id="dockerNetworkStatus">
+                                <div class="health-icon">🌐</div>
+                                <div class="health-info">
+                                    <div class="health-title">Docker Networks</div>
+                                    <div class="health-status-text">Checking...</div>
+                                </div>
+                                <div class="health-indicator checking"></div>
+                            </div>
+                            
+                            <!-- Docker Volumes Status -->
+                            <div class="health-status-item" id="dockerVolumesStatus">
+                                <div class="health-icon">💾</div>
+                                <div class="health-info">
+                                    <div class="health-title">Docker Volumes</div>
+                                    <div class="health-status-text">Checking...</div>
+                                </div>
+                                <div class="health-indicator checking"></div>
+                            </div>
+                        </div>
+                        
+                        <!-- Port Accessibility Section -->
+                        <div class="port-health-section">
+                            <div class="port-health-header">
+                                <h3>🔌 Container Port Accessibility</h3>
+                                <button class="btn btn-sm" onclick="checkAllContainerPorts()" title="Check all container ports">🔍 Check Ports</button>
+                            </div>
+                            <div class="port-health-hint">
+                                <span class="hint-icon">💡</span>
+                                <span>Checks if each container's internal port is accessible. Green = healthy, Red = unreachable.</span>
+                            </div>
+                            <div class="port-health-grid" id="portHealthGrid">
+                                <div class="loading">Click "Check Ports" to scan container accessibility</div>
+                            </div>
+                        </div>
+                        
+                        <!-- Additional Docker Info -->
+                        <div class="docker-info-section" id="dockerInfoSection">
+                            <div class="docker-info-row">
+                                <span class="info-label">🏠 Docker Root:</span>
+                                <span class="info-value" id="dockerRoot">--</span>
+                            </div>
+                            <div class="docker-info-row">
+                                <span class="info-label">📊 Docker Version:</span>
+                                <span class="info-value" id="dockerVersion">--</span>
+                            </div>
+                            <div class="docker-info-row">
+                                <span class="info-label">🖥️ Compose File:</span>
+                                <span class="info-value" id="composeFile">--</span>
+                            </div>
+                            <div class="docker-info-row">
+                                <span class="info-label">📈 Total Images:</span>
+                                <span class="info-value" id="totalImages">--</span>
+                            </div>
+                            <div class="docker-info-row">
+                                <span class="info-label">💿 Docker Disk Usage:</span>
+                                <span class="info-value" id="dockerDiskUsage">--</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Container List Card -->
+                <div class="card full-height">
+                    <div class="card-header">
+                        <h2>🐳 Docker Containers</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm btn-success" onclick="dockerAction('up')" title="Start all containers (docker compose up -d)">▶️ Start All</button>
+                            <button class="btn btn-sm btn-danger" onclick="dockerAction('down')" title="Stop all containers (docker compose down)">⏹️ Stop All</button>
+                            <button class="btn btn-sm btn-primary" onclick="dockerUpdateAll()" title="Pull latest images and recreate containers">⬆️ Update All</button>
+                            <button class="btn btn-sm btn-warning" onclick="dockerForceRebuild()" title="Force rebuild all containers (no cache)">🔨 Force Rebuild</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Bulk Actions Panel -->
+                        <div class="bulk-actions-panel" id="bulkActionsPanel">
+                            <div class="bulk-action-item">
+                                <button class="btn btn-sm" onclick="dockerAction('restart')" title="Restart all running containers">
+                                    🔄 Restart All
+                                </button>
+                            </div>
+                            <div class="bulk-action-item">
+                                <button class="btn btn-sm" onclick="dockerAction('pull')" title="Pull latest images without restarting">
+                                    ⬇️ Pull Images
+                                </button>
+                            </div>
+                            <div class="bulk-action-item">
+                                <button class="btn btn-sm" onclick="dockerPrune()" title="Remove unused containers, networks, and images">
+                                    🧹 Docker Prune
+                                </button>
+                            </div>
+                            <div class="bulk-action-item">
+                                <button class="btn btn-sm" onclick="loadContainerUpdates()" title="Check all containers for updates">
+                                    🔍 Check Updates
+                                </button>
+                            </div>
+                        </div>
+                        
+                        <!-- Container List -->
                         <div id="containerDetailList" class="container-detail-list">
-                            <div class="loading">Loading...</div>
+                            <div class="loading">Loading containers...</div>
                         </div>
                     </div>
                 </div>

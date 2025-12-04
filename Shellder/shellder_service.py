@@ -7204,6 +7204,364 @@ def api_docker_action(action):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/docker/update-all', methods=['POST'])
+def api_docker_update_all():
+    """Update all containers: pull latest images and recreate"""
+    import time
+    start_time = time.time()
+    steps = []
+    all_output = []
+    
+    try:
+        # Step 1: Pull latest images
+        pull_start = time.time()
+        pull_result = subprocess.run(
+            ['docker', 'compose', 'pull'],
+            capture_output=True, text=True, timeout=600,
+            cwd=str(AEGIS_ROOT)
+        )
+        pull_duration = f"{time.time() - pull_start:.1f}s"
+        steps.append({
+            'name': 'Pull latest images',
+            'success': pull_result.returncode == 0,
+            'duration': pull_duration
+        })
+        all_output.append(f"=== Pull Images ===\n{pull_result.stdout}\n{pull_result.stderr}")
+        
+        if pull_result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': 'Failed to pull images',
+                'steps': steps,
+                'output': '\n'.join(all_output),
+                'duration': f"{time.time() - start_time:.1f}s"
+            })
+        
+        # Step 2: Recreate containers with new images
+        up_start = time.time()
+        up_result = subprocess.run(
+            ['docker', 'compose', 'up', '-d', '--force-recreate'],
+            capture_output=True, text=True, timeout=300,
+            cwd=str(AEGIS_ROOT)
+        )
+        up_duration = f"{time.time() - up_start:.1f}s"
+        steps.append({
+            'name': 'Recreate containers',
+            'success': up_result.returncode == 0,
+            'duration': up_duration
+        })
+        all_output.append(f"=== Recreate Containers ===\n{up_result.stdout}\n{up_result.stderr}")
+        
+        total_duration = f"{time.time() - start_time:.1f}s"
+        
+        return jsonify({
+            'success': up_result.returncode == 0,
+            'steps': steps,
+            'output': '\n'.join(all_output),
+            'duration': total_duration
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Operation timed out (exceeded 10 minutes)',
+            'steps': steps,
+            'output': '\n'.join(all_output)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'steps': steps,
+            'output': '\n'.join(all_output)
+        })
+
+@app.route('/api/docker/rebuild', methods=['POST'])
+def api_docker_rebuild():
+    """Force rebuild all containers: stop, remove, pull fresh, and start"""
+    import time
+    start_time = time.time()
+    steps = []
+    all_output = []
+    
+    try:
+        # Step 1: Stop all containers
+        stop_start = time.time()
+        stop_result = subprocess.run(
+            ['docker', 'compose', 'down'],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(AEGIS_ROOT)
+        )
+        stop_duration = f"{time.time() - stop_start:.1f}s"
+        steps.append({
+            'name': 'Stop all containers',
+            'success': stop_result.returncode == 0,
+            'duration': stop_duration
+        })
+        all_output.append(f"=== Stop Containers ===\n{stop_result.stdout}\n{stop_result.stderr}")
+        
+        # Step 2: Remove containers and volumes (but keep data volumes)
+        rm_start = time.time()
+        rm_result = subprocess.run(
+            ['docker', 'compose', 'rm', '-f'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        rm_duration = f"{time.time() - rm_start:.1f}s"
+        steps.append({
+            'name': 'Remove containers',
+            'success': True,  # rm can fail if no containers, that's OK
+            'duration': rm_duration
+        })
+        all_output.append(f"=== Remove Containers ===\n{rm_result.stdout}\n{rm_result.stderr}")
+        
+        # Step 3: Pull fresh images (no cache)
+        pull_start = time.time()
+        pull_result = subprocess.run(
+            ['docker', 'compose', 'pull', '--ignore-pull-failures'],
+            capture_output=True, text=True, timeout=900,
+            cwd=str(AEGIS_ROOT)
+        )
+        pull_duration = f"{time.time() - pull_start:.1f}s"
+        steps.append({
+            'name': 'Pull fresh images',
+            'success': pull_result.returncode == 0,
+            'duration': pull_duration
+        })
+        all_output.append(f"=== Pull Fresh Images ===\n{pull_result.stdout}\n{pull_result.stderr}")
+        
+        # Step 4: Build and start all containers
+        up_start = time.time()
+        up_result = subprocess.run(
+            ['docker', 'compose', 'up', '-d', '--force-recreate', '--build'],
+            capture_output=True, text=True, timeout=600,
+            cwd=str(AEGIS_ROOT)
+        )
+        up_duration = f"{time.time() - up_start:.1f}s"
+        steps.append({
+            'name': 'Build and start containers',
+            'success': up_result.returncode == 0,
+            'duration': up_duration
+        })
+        all_output.append(f"=== Build & Start ===\n{up_result.stdout}\n{up_result.stderr}")
+        
+        total_duration = f"{time.time() - start_time:.1f}s"
+        
+        return jsonify({
+            'success': up_result.returncode == 0,
+            'steps': steps,
+            'output': '\n'.join(all_output),
+            'duration': total_duration
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({
+            'success': False,
+            'error': 'Operation timed out (exceeded 15 minutes)',
+            'steps': steps,
+            'output': '\n'.join(all_output)
+        })
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'steps': steps,
+            'output': '\n'.join(all_output)
+        })
+
+@app.route('/api/docker/prune', methods=['POST'])
+def api_docker_prune():
+    """Clean up unused Docker resources"""
+    try:
+        # Run docker system prune
+        result = subprocess.run(
+            ['docker', 'system', 'prune', '-f'],
+            capture_output=True, text=True, timeout=120
+        )
+        
+        # Try to parse space reclaimed
+        output = result.stdout + result.stderr
+        space_freed = "unknown"
+        
+        # Docker outputs something like "Total reclaimed space: 1.234GB"
+        import re
+        match = re.search(r'reclaimed space:\s*([\d.]+\s*[KMGT]?B)', output, re.IGNORECASE)
+        if match:
+            space_freed = match.group(1)
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': output,
+            'space_freed': space_freed
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/docker/health')
+def api_docker_health():
+    """Get comprehensive Docker health status"""
+    health = {
+        'daemon': {'running': False, 'version': None},
+        'compose': {'available': False, 'version': None},
+        'networks': {'count': 0, 'aegis_network': False},
+        'volumes': {'count': 0},
+        'info': {}
+    }
+    
+    try:
+        # Check Docker daemon
+        version_result = subprocess.run(
+            ['docker', 'version', '--format', '{{.Server.Version}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if version_result.returncode == 0:
+            health['daemon']['running'] = True
+            health['daemon']['version'] = version_result.stdout.strip()
+        
+        # Check Docker Compose
+        compose_result = subprocess.run(
+            ['docker', 'compose', 'version', '--short'],
+            capture_output=True, text=True, timeout=10
+        )
+        if compose_result.returncode == 0:
+            health['compose']['available'] = True
+            health['compose']['version'] = compose_result.stdout.strip()
+        
+        # Check networks
+        networks_result = subprocess.run(
+            ['docker', 'network', 'ls', '--format', '{{.Name}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if networks_result.returncode == 0:
+            networks = [n.strip() for n in networks_result.stdout.strip().split('\n') if n.strip()]
+            health['networks']['count'] = len(networks)
+            # Check for aegis network (might be named differently)
+            health['networks']['aegis_network'] = any(
+                'aegis' in n.lower() or 'default' in n.lower() 
+                for n in networks
+            )
+        
+        # Check volumes
+        volumes_result = subprocess.run(
+            ['docker', 'volume', 'ls', '-q'],
+            capture_output=True, text=True, timeout=10
+        )
+        if volumes_result.returncode == 0:
+            volumes = [v.strip() for v in volumes_result.stdout.strip().split('\n') if v.strip()]
+            health['volumes']['count'] = len(volumes)
+        
+        # Get additional info
+        info_result = subprocess.run(
+            ['docker', 'info', '--format', '{{.DockerRootDir}}||{{.Images}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if info_result.returncode == 0:
+            parts = info_result.stdout.strip().split('||')
+            if len(parts) >= 2:
+                health['info']['docker_root'] = parts[0]
+                health['info']['images_count'] = parts[1]
+        
+        health['info']['version'] = health['daemon'].get('version', '--')
+        
+        # Check compose file
+        compose_file = AEGIS_ROOT / 'docker-compose.yaml'
+        if compose_file.exists():
+            health['info']['compose_file'] = 'docker-compose.yaml ✓'
+        else:
+            compose_file = AEGIS_ROOT / 'docker-compose.yml'
+            if compose_file.exists():
+                health['info']['compose_file'] = 'docker-compose.yml ✓'
+            else:
+                health['info']['compose_file'] = 'Not found ✗'
+        
+        # Get disk usage
+        disk_result = subprocess.run(
+            ['docker', 'system', 'df', '--format', '{{.Size}}'],
+            capture_output=True, text=True, timeout=30
+        )
+        if disk_result.returncode == 0:
+            sizes = [s.strip() for s in disk_result.stdout.strip().split('\n') if s.strip()]
+            health['info']['disk_usage'] = ', '.join(sizes[:3]) if sizes else '--'
+        
+    except Exception as e:
+        health['error'] = str(e)
+    
+    return jsonify(health)
+
+@app.route('/api/docker/port-check')
+def api_docker_port_check():
+    """Check accessibility of container internal ports"""
+    import socket
+    
+    ports = []
+    
+    # Known Aegis container ports
+    container_ports = {
+        'dragonite': {'port': 7272, 'host_port': 7272},
+        'golbat': {'port': 9001, 'host_port': 9001},
+        'rotom': {'port': 7070, 'host_port': 7070},
+        'koji': {'port': 8080, 'host_port': 8080},
+        'reactmap': {'port': 8080, 'host_port': 6001},
+        'grafana': {'port': 3000, 'host_port': 3000},
+        'victoriametrics': {'port': 8428, 'host_port': 8428},
+        'vmagent': {'port': 8429, 'host_port': 8429},
+        'mariadb': {'port': 3306, 'host_port': 3306},
+        'xilriws': {'port': 9002, 'host_port': 9002},
+    }
+    
+    # Get running containers
+    running_containers = set()
+    if docker_client:
+        try:
+            for c in docker_client.containers.list():
+                running_containers.add(c.name)
+        except:
+            pass
+    else:
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '--format', '{{.Names}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                running_containers = set(n.strip() for n in result.stdout.strip().split('\n') if n.strip())
+        except:
+            pass
+    
+    for container, port_info in container_ports.items():
+        port_data = {
+            'container': container,
+            'internal_port': port_info['port'],
+            'host_port': port_info.get('host_port'),
+            'running': container in running_containers,
+            'accessible': False,
+            'response_time': None
+        }
+        
+        if port_data['running']:
+            # Try to connect to the port
+            import time
+            start_time = time.time()
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(2)
+                result = sock.connect_ex(('127.0.0.1', port_info.get('host_port', port_info['port'])))
+                sock.close()
+                
+                if result == 0:
+                    port_data['accessible'] = True
+                    port_data['response_time'] = int((time.time() - start_time) * 1000)
+            except Exception as e:
+                port_data['error'] = str(e)
+        
+        ports.append(port_data)
+    
+    return jsonify({
+        'ports': ports,
+        'running_count': len(running_containers),
+        'accessible_count': sum(1 for p in ports if p['accessible'])
+    })
+
 # =============================================================================
 # XILRIWS ENDPOINTS
 # =============================================================================

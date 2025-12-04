@@ -1820,6 +1820,342 @@ async function dockerAction(action) {
 }
 
 // =============================================================================
+// DOCKER UPDATE ALL & FORCE REBUILD
+// =============================================================================
+
+async function dockerUpdateAll() {
+    // Show confirmation dialog
+    const confirmed = await showConfirmDialog(
+        '⬆️ Update All Containers',
+        `<p>This will:</p>
+        <ol style="margin: 10px 0 10px 20px; color: var(--text-secondary);">
+            <li>Pull the latest images for all containers</li>
+            <li>Stop all running containers</li>
+            <li>Recreate containers with new images</li>
+            <li>Start all containers</li>
+        </ol>
+        <p class="text-warning" style="margin-top: 10px;">⚠️ This may cause brief service interruption.</p>
+        <p style="margin-top: 10px;">Continue?</p>`,
+        'Update All',
+        'btn-primary'
+    );
+    
+    if (!confirmed) return;
+    
+    showDockerProgress('Updating all containers... This may take a few minutes.');
+    
+    try {
+        const result = await fetchAPI('/api/docker/update-all', {
+            method: 'POST'
+        });
+        
+        hideDockerProgress();
+        
+        if (result.success) {
+            showToast('✅ All containers updated successfully!', 'success');
+            // Show detailed results in modal
+            showDockerOperationResult('Update All Results', result);
+        } else {
+            showToast(`❌ Update failed: ${result.error || 'Unknown error'}`, 'error');
+            if (result.output) {
+                showDockerOperationResult('Update Error Details', result);
+            }
+        }
+        
+        // Refresh data after update
+        setTimeout(() => {
+            refreshData();
+            if (currentPage === 'containers') {
+                loadContainerDetails();
+                loadDockerHealth();
+            }
+        }, 2000);
+        
+    } catch (error) {
+        hideDockerProgress();
+        showToast(`❌ Update operation failed: ${error.message}`, 'error');
+    }
+}
+
+async function dockerForceRebuild() {
+    // Show confirmation dialog with warning
+    const confirmed = await showConfirmDialog(
+        '🔨 Force Rebuild All Containers',
+        `<p><strong style="color: var(--warning);">⚠️ This is an advanced operation!</strong></p>
+        <p style="margin: 10px 0;">This will:</p>
+        <ol style="margin: 10px 0 10px 20px; color: var(--text-secondary);">
+            <li>Stop all running containers</li>
+            <li>Remove all containers</li>
+            <li>Pull fresh images (no cache)</li>
+            <li>Rebuild and start all containers from scratch</li>
+        </ol>
+        <p class="text-danger" style="margin-top: 10px;">🚨 This will cause extended downtime and may take several minutes.</p>
+        <p style="margin-top: 10px;">Are you sure you want to force rebuild?</p>`,
+        'Force Rebuild',
+        'btn-warning'
+    );
+    
+    if (!confirmed) return;
+    
+    showDockerProgress('Force rebuilding all containers... This may take several minutes.');
+    
+    try {
+        const result = await fetchAPI('/api/docker/rebuild', {
+            method: 'POST'
+        });
+        
+        hideDockerProgress();
+        
+        if (result.success) {
+            showToast('✅ All containers rebuilt successfully!', 'success');
+            showDockerOperationResult('Force Rebuild Results', result);
+        } else {
+            showToast(`❌ Rebuild failed: ${result.error || 'Unknown error'}`, 'error');
+            if (result.output) {
+                showDockerOperationResult('Rebuild Error Details', result);
+            }
+        }
+        
+        // Refresh data after rebuild
+        setTimeout(() => {
+            refreshData();
+            if (currentPage === 'containers') {
+                loadContainerDetails();
+                loadDockerHealth();
+            }
+        }, 3000);
+        
+    } catch (error) {
+        hideDockerProgress();
+        showToast(`❌ Rebuild operation failed: ${error.message}`, 'error');
+    }
+}
+
+async function dockerPrune() {
+    const confirmed = await showConfirmDialog(
+        '🧹 Docker Prune',
+        `<p>This will remove:</p>
+        <ul style="margin: 10px 0 10px 20px; color: var(--text-secondary);">
+            <li>Stopped containers</li>
+            <li>Unused networks</li>
+            <li>Dangling images</li>
+            <li>Build cache</li>
+        </ul>
+        <p style="margin-top: 10px;">This can free up significant disk space. Continue?</p>`,
+        'Prune',
+        'btn-warning'
+    );
+    
+    if (!confirmed) return;
+    
+    showToast('🧹 Cleaning up unused Docker resources...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/docker/prune', {
+            method: 'POST'
+        });
+        
+        if (result.success) {
+            const freed = result.space_freed || 'some';
+            showToast(`✅ Cleanup complete! Freed ${freed} of disk space.`, 'success');
+            loadDockerHealth(); // Refresh to show new disk usage
+        } else {
+            showToast(`❌ Prune failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`❌ Prune operation failed`, 'error');
+    }
+}
+
+function showDockerProgress(message) {
+    // Create progress overlay if it doesn't exist
+    let progressEl = document.getElementById('dockerOperationProgress');
+    if (!progressEl) {
+        progressEl = document.createElement('div');
+        progressEl.id = 'dockerOperationProgress';
+        progressEl.className = 'docker-operation-progress';
+        progressEl.innerHTML = `
+            <div class="spinner"></div>
+            <span class="progress-text">${message}</span>
+        `;
+        document.body.appendChild(progressEl);
+    } else {
+        progressEl.querySelector('.progress-text').textContent = message;
+    }
+    progressEl.classList.add('active');
+}
+
+function hideDockerProgress() {
+    const progressEl = document.getElementById('dockerOperationProgress');
+    if (progressEl) {
+        progressEl.classList.remove('active');
+    }
+}
+
+function showDockerOperationResult(title, result) {
+    let content = '';
+    
+    if (result.steps) {
+        content += '<div class="operation-steps">';
+        result.steps.forEach(step => {
+            const icon = step.success ? '✅' : '❌';
+            content += `<div class="operation-step ${step.success ? 'success' : 'error'}">
+                <span class="step-icon">${icon}</span>
+                <span class="step-name">${step.name}</span>
+                ${step.duration ? `<span class="step-duration">${step.duration}</span>` : ''}
+            </div>`;
+        });
+        content += '</div>';
+    }
+    
+    if (result.output) {
+        content += `<pre class="log-viewer" style="max-height: 300px; margin-top: 12px;">${escapeHtml(result.output)}</pre>`;
+    }
+    
+    if (result.duration) {
+        content += `<p style="margin-top: 12px; color: var(--text-muted);">⏱️ Total time: ${result.duration}</p>`;
+    }
+    
+    openModal(title, content);
+}
+
+async function showConfirmDialog(title, message, confirmText = 'Confirm', confirmClass = 'btn-primary') {
+    return new Promise((resolve) => {
+        openModal(title, message, [
+            { text: 'Cancel', class: 'btn', onclick: () => { closeModal(); resolve(false); } },
+            { text: confirmText, class: `btn ${confirmClass}`, onclick: () => { closeModal(); resolve(true); } }
+        ]);
+    });
+}
+
+// =============================================================================
+// DOCKER HEALTH MONITORING
+// =============================================================================
+
+async function loadDockerHealth() {
+    try {
+        const health = await fetchAPI('/api/docker/health');
+        updateDockerHealthDisplay(health);
+    } catch (error) {
+        console.error('Failed to load Docker health:', error);
+        setHealthStatusError();
+    }
+}
+
+function updateDockerHealthDisplay(health) {
+    // Docker Daemon Status
+    const daemonEl = document.getElementById('dockerDaemonStatus');
+    if (daemonEl && health.daemon) {
+        const daemon = health.daemon;
+        daemonEl.querySelector('.health-status-text').textContent = 
+            daemon.running ? `Running (${daemon.version || 'unknown version'})` : 'Not Running';
+        daemonEl.querySelector('.health-indicator').className = 
+            `health-indicator ${daemon.running ? 'healthy' : 'error'}`;
+    }
+    
+    // Docker Compose Status
+    const composeEl = document.getElementById('dockerComposeStatus');
+    if (composeEl && health.compose) {
+        const compose = health.compose;
+        composeEl.querySelector('.health-status-text').textContent = 
+            compose.available ? `Available (${compose.version || 'v2'})` : 'Not Found';
+        composeEl.querySelector('.health-indicator').className = 
+            `health-indicator ${compose.available ? 'healthy' : 'error'}`;
+    }
+    
+    // Docker Network Status
+    const networkEl = document.getElementById('dockerNetworkStatus');
+    if (networkEl && health.networks) {
+        const networks = health.networks;
+        networkEl.querySelector('.health-status-text').textContent = 
+            `${networks.count || 0} networks (${networks.aegis_network ? 'Aegis OK' : 'Aegis missing'})`;
+        networkEl.querySelector('.health-indicator').className = 
+            `health-indicator ${networks.aegis_network ? 'healthy' : 'warning'}`;
+    }
+    
+    // Docker Volumes Status
+    const volumesEl = document.getElementById('dockerVolumesStatus');
+    if (volumesEl && health.volumes) {
+        const volumes = health.volumes;
+        volumesEl.querySelector('.health-status-text').textContent = 
+            `${volumes.count || 0} volumes`;
+        volumesEl.querySelector('.health-indicator').className = 
+            `health-indicator healthy`;
+    }
+    
+    // Docker Info Section
+    if (health.info) {
+        const info = health.info;
+        document.getElementById('dockerRoot').textContent = info.docker_root || '--';
+        document.getElementById('dockerVersion').textContent = info.version || '--';
+        document.getElementById('composeFile').textContent = info.compose_file || '--';
+        document.getElementById('totalImages').textContent = info.images_count || '--';
+        document.getElementById('dockerDiskUsage').textContent = info.disk_usage || '--';
+    }
+}
+
+function setHealthStatusError() {
+    const indicators = document.querySelectorAll('.health-indicator');
+    indicators.forEach(el => {
+        el.className = 'health-indicator error';
+    });
+    
+    const statusTexts = document.querySelectorAll('.health-status-text');
+    statusTexts.forEach(el => {
+        el.textContent = 'Failed to check';
+    });
+}
+
+async function checkAllContainerPorts() {
+    const gridEl = document.getElementById('portHealthGrid');
+    gridEl.innerHTML = '<div class="loading">Checking container ports... This may take a moment.</div>';
+    
+    try {
+        const result = await fetchAPI('/api/docker/port-check');
+        
+        if (!result.ports || result.ports.length === 0) {
+            gridEl.innerHTML = '<div class="loading">No containers with exposed ports found</div>';
+            return;
+        }
+        
+        gridEl.innerHTML = result.ports.map(port => {
+            const statusClass = port.running ? (port.accessible ? 'accessible' : 'inaccessible') : 'not-running';
+            const icon = port.running ? (port.accessible ? '✅' : '❌') : '⏸️';
+            const statusText = port.running ? (port.accessible ? 'Accessible' : 'Unreachable') : 'Not Running';
+            
+            return `
+                <div class="port-health-item ${statusClass}">
+                    <span class="port-icon">${icon}</span>
+                    <div class="port-info">
+                        <div class="port-name">${port.container}</div>
+                        <div class="port-details">
+                            <span>Port: ${port.internal_port}</span>
+                            ${port.host_port ? `<span>→ ${port.host_port}</span>` : ''}
+                        </div>
+                    </div>
+                    <span class="port-status ${statusClass}">${statusText}</span>
+                    ${port.response_time ? `<span class="port-response-time ${port.response_time < 100 ? 'fast' : 'slow'}">${port.response_time}ms</span>` : ''}
+                </div>
+            `;
+        }).join('');
+        
+        // Add summary
+        const accessible = result.ports.filter(p => p.accessible).length;
+        const running = result.ports.filter(p => p.running).length;
+        const total = result.ports.length;
+        
+        gridEl.innerHTML += `
+            <div class="port-health-summary" style="grid-column: 1 / -1; margin-top: 12px; padding: 10px; background: var(--bg-secondary); border-radius: var(--radius-sm); text-align: center; font-size: 12px; color: var(--text-muted);">
+                📊 Summary: ${accessible}/${running} running containers accessible | ${running}/${total} containers running
+            </div>
+        `;
+        
+    } catch (error) {
+        gridEl.innerHTML = `<div class="error-msg">Failed to check ports: ${error.message}</div>`;
+    }
+}
+
+// =============================================================================
 // LOGS
 // =============================================================================
 
@@ -1958,7 +2294,23 @@ async function gitPull() {
 function openModal(title, content, footer = '') {
     document.getElementById('modalTitle').textContent = title;
     document.getElementById('modalBody').innerHTML = content;
-    document.getElementById('modalFooter').innerHTML = footer;
+    
+    // Handle footer - can be string HTML or array of button configs
+    const footerEl = document.getElementById('modalFooter');
+    if (Array.isArray(footer)) {
+        // Array of button configurations: [{text, class, onclick}]
+        footerEl.innerHTML = '';
+        footer.forEach(btn => {
+            const button = document.createElement('button');
+            button.textContent = btn.text;
+            button.className = btn.class || 'btn';
+            button.onclick = btn.onclick;
+            footerEl.appendChild(button);
+        });
+    } else {
+        footerEl.innerHTML = footer;
+    }
+    
     document.getElementById('modal').classList.add('active');
 }
 
@@ -2501,6 +2853,10 @@ navigateTo = function(page) {
     
     // Page-specific initialization
     switch(page) {
+        case 'containers':
+            loadDockerHealth();
+            loadContainerUpdates();
+            break;
         case 'xilriws':
             loadXilriwsStats();
             loadProxyInfo();
