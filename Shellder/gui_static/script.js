@@ -7131,6 +7131,7 @@ async function emergencyMemoryCleanup() {
 
 let wizardStatus = null;
 let wizardStarted = false;
+let portCheckResult = null;  // Track port check results
 let detectedResources = null;
 let generatedPasswords = null;
 
@@ -7178,8 +7179,12 @@ function updateWizardUI() {
     updateStepStatus('docker', wizardStatus.steps.docker?.complete, 
         wizardStatus.steps.docker?.complete ? 'Docker is running' : 'Docker not installed or not running');
     
-    // Update ports step (always show as checkable)
-    updateStepStatus('ports', false, 'Click to check');
+    // Update ports step - preserve check result if already checked
+    if (portCheckResult !== null) {
+        updateStepStatus('ports', portCheckResult.success, portCheckResult.message);
+    } else {
+        updateStepStatus('ports', false, 'Click to check');
+    }
     
     // Update resources step
     updateStepStatus('resources', detectedResources !== null,
@@ -7300,9 +7305,11 @@ async function checkPortsStep() {
     
     if (data.all_available) {
         appendWizardOutput('\\n✅ All required ports are available!\\n', 'success');
+        portCheckResult = { success: true, message: 'All ports free' };
         updateStepStatus('ports', true, 'All ports free');
     } else {
         appendWizardOutput('\\n⚠️ Some ports are in use. Stop conflicting services first.\\n', 'warning');
+        portCheckResult = { success: false, message: 'Port conflicts detected' };
         updateStepStatus('ports', false, 'Port conflicts detected');
     }
 }
