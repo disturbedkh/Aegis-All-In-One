@@ -7563,6 +7563,391 @@ def api_docker_port_check():
     })
 
 # =============================================================================
+# DOCKER SERVICE MANAGEMENT
+# =============================================================================
+
+@app.route('/api/docker/service/<action>', methods=['POST'])
+def api_docker_service_action(action):
+    """Control Docker service (systemd)"""
+    if action not in ['start', 'stop', 'restart', 'enable', 'disable', 'status']:
+        return jsonify({'success': False, 'error': 'Invalid action'})
+    
+    try:
+        if action == 'status':
+            result = subprocess.run(
+                ['systemctl', 'is-active', 'docker'],
+                capture_output=True, text=True, timeout=10
+            )
+            return jsonify({
+                'success': True,
+                'status': result.stdout.strip(),
+                'running': result.returncode == 0
+            })
+        
+        # For start/stop/restart/enable/disable
+        result = subprocess.run(
+            ['sudo', 'systemctl', action, 'docker'],
+            capture_output=True, text=True, timeout=60
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'output': result.stdout + result.stderr
+        })
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/docker/install-status')
+def api_docker_install_status():
+    """Get installation status of Docker components"""
+    status = {
+        'engine': {'installed': False, 'version': None},
+        'compose': {'installed': False, 'version': None},
+        'buildx': {'installed': False, 'version': None}
+    }
+    
+    try:
+        # Check Docker Engine
+        result = subprocess.run(
+            ['docker', '--version'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            status['engine']['installed'] = True
+            # Parse version like "Docker version 24.0.7, build afdd53b"
+            import re
+            match = re.search(r'version\s+([\d.]+)', result.stdout)
+            if match:
+                status['engine']['version'] = match.group(1)
+        
+        # Check Docker Compose
+        result = subprocess.run(
+            ['docker', 'compose', 'version', '--short'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            status['compose']['installed'] = True
+            status['compose']['version'] = result.stdout.strip()
+        
+        # Check Buildx
+        result = subprocess.run(
+            ['docker', 'buildx', 'version'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0:
+            status['buildx']['installed'] = True
+            # Parse version
+            match = re.search(r'v?([\d.]+)', result.stdout)
+            if match:
+                status['buildx']['version'] = match.group(1)
+                
+    except Exception as e:
+        status['error'] = str(e)
+    
+    return jsonify(status)
+
+@app.route('/api/docker/install/<component>', methods=['POST'])
+def api_docker_install_component(component):
+    """Install Docker components"""
+    if component not in ['engine', 'compose', 'buildx', 'all']:
+        return jsonify({'success': False, 'error': 'Invalid component'})
+    
+    steps = []
+    all_output = []
+    
+    try:
+        if component in ['engine', 'all']:
+            # Install Docker Engine
+            steps.append({'name': 'Installing Docker Engine', 'success': False})
+            
+            # Check if already installed
+            check_result = subprocess.run(['which', 'docker'], capture_output=True, text=True)
+            if check_result.returncode == 0:
+                steps[-1]['success'] = True
+                steps[-1]['name'] = 'Docker Engine already installed'
+                all_output.append('Docker Engine is already installed')
+            else:
+                # Install using convenience script
+                install_cmds = [
+                    ['sudo', 'apt-get', 'update', '-y'],
+                    ['sudo', 'apt-get', 'install', '-y', 'ca-certificates', 'curl', 'gnupg'],
+                    ['curl', '-fsSL', 'https://get.docker.com', '-o', '/tmp/get-docker.sh'],
+                    ['sudo', 'sh', '/tmp/get-docker.sh']
+                ]
+                
+                for cmd in install_cmds:
+                    result = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                    all_output.append(f"$ {' '.join(cmd)}\n{result.stdout}\n{result.stderr}")
+                    if result.returncode != 0:
+                        steps[-1]['error'] = f"Command failed: {' '.join(cmd)}"
+                        break
+                else:
+                    steps[-1]['success'] = True
+                    
+                    # Add current user to docker group
+                    import os
+                    user = os.environ.get('SUDO_USER') or os.environ.get('USER', 'root')
+                    subprocess.run(['sudo', 'usermod', '-aG', 'docker', user], capture_output=True)
+        
+        if component in ['compose', 'all']:
+            # Docker Compose is included with Docker Engine v2
+            steps.append({'name': 'Checking Docker Compose', 'success': False})
+            result = subprocess.run(['docker', 'compose', 'version'], capture_output=True, text=True)
+            if result.returncode == 0:
+                steps[-1]['success'] = True
+                steps[-1]['name'] = 'Docker Compose available'
+            else:
+                # Try to install compose plugin
+                result = subprocess.run(
+                    ['sudo', 'apt-get', 'install', '-y', 'docker-compose-plugin'],
+                    capture_output=True, text=True, timeout=120
+                )
+                all_output.append(result.stdout + result.stderr)
+                steps[-1]['success'] = result.returncode == 0
+        
+        if component in ['buildx', 'all']:
+            steps.append({'name': 'Checking Docker Buildx', 'success': False})
+            result = subprocess.run(['docker', 'buildx', 'version'], capture_output=True, text=True)
+            if result.returncode == 0:
+                steps[-1]['success'] = True
+                steps[-1]['name'] = 'Docker Buildx available'
+            else:
+                # Try to install buildx
+                result = subprocess.run(
+                    ['sudo', 'apt-get', 'install', '-y', 'docker-buildx-plugin'],
+                    capture_output=True, text=True, timeout=120
+                )
+                all_output.append(result.stdout + result.stderr)
+                steps[-1]['success'] = result.returncode == 0
+        
+        if component == 'all':
+            # Enable and start Docker service
+            steps.append({'name': 'Starting Docker service', 'success': False})
+            subprocess.run(['sudo', 'systemctl', 'enable', 'docker'], capture_output=True)
+            result = subprocess.run(['sudo', 'systemctl', 'start', 'docker'], capture_output=True, text=True)
+            steps[-1]['success'] = result.returncode == 0
+        
+        overall_success = all(s.get('success', False) for s in steps)
+        
+        return jsonify({
+            'success': overall_success,
+            'steps': steps,
+            'output': '\n'.join(all_output),
+            'message': 'Installation completed' if overall_success else 'Some steps failed'
+        })
+        
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'steps': steps,
+            'output': '\n'.join(all_output)
+        })
+
+# =============================================================================
+# DOCKER CONFIGURATION FILES
+# =============================================================================
+
+DOCKER_CONFIG_PATHS = {
+    'daemon': '/etc/docker/daemon.json',
+    'service': '/etc/systemd/system/docker.service.d/override.conf',
+    'compose-override': str(AEGIS_ROOT / 'docker-compose.override.yml'),
+    'env': str(AEGIS_ROOT / '.env'),
+    'registries': '/etc/containers/registries.conf',
+    'logrotate': '/etc/logrotate.d/docker'
+}
+
+@app.route('/api/docker/configs')
+def api_docker_configs():
+    """Get status of all Docker configuration files"""
+    configs = {}
+    
+    for name, path in DOCKER_CONFIG_PATHS.items():
+        config_path = Path(path)
+        try:
+            if config_path.exists():
+                stat = config_path.stat()
+                configs[name] = {
+                    'exists': True,
+                    'path': str(config_path),
+                    'size': f"{stat.st_size} bytes",
+                    'modified': datetime.fromtimestamp(stat.st_mtime).isoformat()
+                }
+            else:
+                configs[name] = {
+                    'exists': False,
+                    'path': str(config_path)
+                }
+        except Exception as e:
+            configs[name] = {
+                'exists': False,
+                'error': str(e),
+                'path': str(config_path)
+            }
+    
+    return jsonify(configs)
+
+@app.route('/api/docker/config/<config_type>')
+def api_docker_config_get(config_type):
+    """Get content of a Docker configuration file"""
+    if config_type not in DOCKER_CONFIG_PATHS:
+        return jsonify({'error': 'Unknown config type'}), 400
+    
+    path = Path(DOCKER_CONFIG_PATHS[config_type])
+    
+    # Default templates for files that don't exist
+    templates = {
+        'daemon': '''{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+    },
+    "storage-driver": "overlay2",
+    "live-restore": true
+}''',
+        'service': '''[Service]
+# Add Docker service overrides here
+# Environment="HTTP_PROXY=http://proxy.example.com:80"
+''',
+        'compose-override': '''version: '3.8'
+# Override settings - merged with docker-compose.yaml
+services: {}
+''',
+        'env': '''# Docker Compose Environment Variables
+# Used by docker-compose.yaml
+''',
+        'registries': '''unqualified-search-registries = ["docker.io"]
+''',
+        'logrotate': '''/var/lib/docker/containers/*/*.log {
+    rotate 7
+    daily
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+'''
+    }
+    
+    try:
+        if path.exists():
+            # Try reading with sudo if permission denied
+            try:
+                content = path.read_text()
+            except PermissionError:
+                result = subprocess.run(
+                    ['sudo', 'cat', str(path)],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    content = result.stdout
+                else:
+                    return jsonify({
+                        'exists': True,
+                        'path': str(path),
+                        'content': '',
+                        'error': 'Permission denied - run Shellder with sudo'
+                    })
+            
+            return jsonify({
+                'exists': True,
+                'path': str(path),
+                'content': content
+            })
+        else:
+            return jsonify({
+                'exists': False,
+                'path': str(path),
+                'template': templates.get(config_type, '# Configuration file\n')
+            })
+    except Exception as e:
+        return jsonify({'error': str(e), 'path': str(path)}), 500
+
+@app.route('/api/docker/config/<config_type>', methods=['POST'])
+def api_docker_config_save(config_type):
+    """Save a Docker configuration file"""
+    if config_type not in DOCKER_CONFIG_PATHS:
+        return jsonify({'success': False, 'error': 'Unknown config type'}), 400
+    
+    data = request.get_json()
+    content = data.get('content', '')
+    
+    path = Path(DOCKER_CONFIG_PATHS[config_type])
+    
+    try:
+        # Validate JSON for daemon.json
+        if config_type == 'daemon':
+            import json
+            try:
+                json.loads(content)
+            except json.JSONDecodeError as e:
+                return jsonify({
+                    'success': False,
+                    'error': f'Invalid JSON: {str(e)}'
+                })
+        
+        # Create parent directory if needed
+        if not path.parent.exists():
+            subprocess.run(['sudo', 'mkdir', '-p', str(path.parent)], check=True)
+        
+        # Write file (may need sudo for system files)
+        if str(path).startswith('/etc/'):
+            # Use sudo for system files
+            result = subprocess.run(
+                ['sudo', 'tee', str(path)],
+                input=content,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            if result.returncode != 0:
+                return jsonify({
+                    'success': False,
+                    'error': f'Failed to write: {result.stderr}'
+                })
+        else:
+            # Direct write for user files
+            path.write_text(content)
+        
+        # Reload systemd if service file was modified
+        if config_type == 'service':
+            subprocess.run(['sudo', 'systemctl', 'daemon-reload'], capture_output=True)
+        
+        return jsonify({
+            'success': True,
+            'path': str(path)
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+@app.route('/api/docker/config/<config_type>/validate', methods=['POST'])
+def api_docker_config_validate(config_type):
+    """Validate a Docker configuration file"""
+    data = request.get_json()
+    content = data.get('content', '')
+    
+    try:
+        if config_type == 'daemon':
+            import json
+            json.loads(content)
+            return jsonify({'valid': True})
+        
+        elif config_type == 'compose-override':
+            import yaml
+            yaml.safe_load(content)
+            return jsonify({'valid': True})
+        
+        else:
+            # Basic syntax check - just verify it's not empty
+            return jsonify({'valid': bool(content.strip())})
+            
+    except Exception as e:
+        return jsonify({'valid': False, 'error': str(e)})
+
+# =============================================================================
 # XILRIWS ENDPOINTS
 # =============================================================================
 

@@ -5071,3 +5071,359 @@ select:focus {
     color: var(--warning);
 }
 
+/* =============================================================================
+   DOCKER INSTALLATION SECTION
+   ============================================================================= */
+
+.docker-install-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.docker-install-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.docker-install-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.docker-service-controls {
+    display: flex;
+    gap: 8px;
+}
+
+.docker-install-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(245, 158, 11, 0.1);
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.docker-install-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.docker-install-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    transition: all var(--transition-fast);
+}
+
+.docker-install-item:hover {
+    border-color: var(--accent-primary);
+}
+
+.docker-install-item.installed {
+    border-left: 4px solid var(--success);
+}
+
+.docker-install-item.not-installed {
+    border-left: 4px solid var(--warning);
+}
+
+.install-icon {
+    font-size: 28px;
+    min-width: 40px;
+    text-align: center;
+}
+
+.install-info {
+    flex: 1;
+}
+
+.install-title {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.install-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 2px;
+}
+
+.install-status {
+    font-size: 11px;
+    color: var(--text-muted);
+    font-family: var(--font-mono);
+    margin-top: 4px;
+}
+
+.install-status.installed {
+    color: var(--success);
+}
+
+.install-status.not-installed {
+    color: var(--warning);
+}
+
+/* =============================================================================
+   DOCKER CONFIGURATION SECTION
+   ============================================================================= */
+
+.docker-config-section {
+    margin-top: 24px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.docker-config-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.docker-config-header h3 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 600;
+}
+
+.docker-config-hint {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.2);
+    border-radius: var(--radius-sm);
+    margin-bottom: 16px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.docker-config-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 12px;
+}
+
+.docker-config-item {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    padding: 14px 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.docker-config-item:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+    transform: translateX(4px);
+}
+
+.docker-config-item.exists {
+    border-left: 4px solid var(--success);
+}
+
+.docker-config-item.missing {
+    border-left: 4px solid var(--text-muted);
+    opacity: 0.7;
+}
+
+.config-icon {
+    font-size: 24px;
+    min-width: 36px;
+    text-align: center;
+}
+
+.config-info {
+    flex: 1;
+    min-width: 0;
+}
+
+.config-title {
+    font-weight: 600;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.config-path {
+    font-size: 10px;
+    color: var(--accent-secondary);
+    font-family: var(--font-mono);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.config-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-top: 4px;
+}
+
+.config-status {
+    font-size: 11px;
+    padding: 3px 10px;
+    border-radius: 10px;
+    font-weight: 500;
+    white-space: nowrap;
+}
+
+.config-status.exists {
+    background: rgba(16, 185, 129, 0.2);
+    color: var(--success);
+}
+
+.config-status.missing {
+    background: rgba(100, 116, 139, 0.2);
+    color: var(--text-muted);
+}
+
+.config-status.error {
+    background: rgba(239, 68, 68, 0.2);
+    color: var(--danger);
+}
+
+/* Docker Config Editor */
+.docker-config-editor {
+    margin-top: 20px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--accent-primary);
+}
+
+.config-editor-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 12px;
+}
+
+.config-editor-header h4 {
+    margin: 0;
+    font-size: 15px;
+    font-weight: 600;
+}
+
+.config-editor-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.config-editor-path {
+    font-family: var(--font-mono);
+    font-size: 11px;
+    color: var(--accent-secondary);
+    margin-bottom: 12px;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    display: inline-block;
+}
+
+.docker-config-editor .config-editor {
+    width: 100%;
+    min-height: 300px;
+    margin-bottom: 12px;
+}
+
+.config-editor-hint {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 12px;
+    background: rgba(59, 130, 246, 0.1);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+/* Installation Progress Modal */
+.install-progress {
+    padding: 20px;
+}
+
+.install-progress-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 16px;
+}
+
+.install-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 10px 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.install-step.pending {
+    opacity: 0.6;
+}
+
+.install-step.running {
+    border-left: 3px solid var(--accent-primary);
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.install-step.success {
+    border-left: 3px solid var(--success);
+}
+
+.install-step.error {
+    border-left: 3px solid var(--danger);
+}
+
+.step-icon {
+    font-size: 18px;
+    min-width: 24px;
+    text-align: center;
+}
+
+.step-info {
+    flex: 1;
+}
+
+.step-name {
+    font-weight: 500;
+    font-size: 13px;
+}
+
+.step-status {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.install-output {
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    padding: 12px;
+    font-family: var(--font-mono);
+    font-size: 11px;
+    max-height: 200px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    color: var(--text-secondary);
+}
+

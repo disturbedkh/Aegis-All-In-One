@@ -523,6 +523,156 @@
                                 <span class="info-value" id="dockerDiskUsage">--</span>
                             </div>
                         </div>
+                        
+                        <!-- Docker Installation Section -->
+                        <div class="docker-install-section">
+                            <div class="docker-install-header">
+                                <h3>🔧 Docker Installation & Service</h3>
+                                <div class="docker-service-controls">
+                                    <button class="btn btn-sm btn-success" onclick="dockerServiceAction('start')" title="Start Docker service">▶️ Start</button>
+                                    <button class="btn btn-sm btn-warning" onclick="dockerServiceAction('restart')" title="Restart Docker service">🔄 Restart</button>
+                                    <button class="btn btn-sm btn-danger" onclick="dockerServiceAction('stop')" title="Stop Docker service">⏹️ Stop</button>
+                                </div>
+                            </div>
+                            <div class="docker-install-hint">
+                                <span class="hint-icon">💡</span>
+                                <span>Install or update Docker components. Requires sudo access on the server.</span>
+                            </div>
+                            <div class="docker-install-grid">
+                                <div class="docker-install-item" id="installDockerEngine">
+                                    <div class="install-icon">🐳</div>
+                                    <div class="install-info">
+                                        <div class="install-title">Docker Engine</div>
+                                        <div class="install-desc">Container runtime & CLI</div>
+                                        <div class="install-status" id="dockerEngineStatus">Checking...</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-primary" onclick="installDockerComponent('engine')" title="Install Docker Engine">Install</button>
+                                </div>
+                                <div class="docker-install-item" id="installDockerCompose">
+                                    <div class="install-icon">📦</div>
+                                    <div class="install-info">
+                                        <div class="install-title">Docker Compose</div>
+                                        <div class="install-desc">Multi-container orchestration</div>
+                                        <div class="install-status" id="dockerComposeInstallStatus">Checking...</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-primary" onclick="installDockerComponent('compose')" title="Install Docker Compose">Install</button>
+                                </div>
+                                <div class="docker-install-item" id="installDockerBuildx">
+                                    <div class="install-icon">🔨</div>
+                                    <div class="install-info">
+                                        <div class="install-title">Docker Buildx</div>
+                                        <div class="install-desc">Extended build capabilities</div>
+                                        <div class="install-status" id="dockerBuildxStatus">Checking...</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-primary" onclick="installDockerComponent('buildx')" title="Install Docker Buildx">Install</button>
+                                </div>
+                                <div class="docker-install-item" id="installDockerAll">
+                                    <div class="install-icon">🚀</div>
+                                    <div class="install-info">
+                                        <div class="install-title">Full Docker Setup</div>
+                                        <div class="install-desc">Install all components + configure</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-success" onclick="installDockerComponent('all')" title="Install complete Docker setup">Install All</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Docker Configuration Files Section -->
+                        <div class="docker-config-section">
+                            <div class="docker-config-header">
+                                <h3>📁 Docker Configuration Files</h3>
+                                <button class="btn btn-sm" onclick="loadDockerConfigs()" title="Refresh config files">🔄 Refresh</button>
+                            </div>
+                            <div class="docker-config-hint">
+                                <span class="hint-icon">⚠️</span>
+                                <span>Edit Docker service configuration. Changes require Docker service restart to take effect.</span>
+                            </div>
+                            <div class="docker-config-grid" id="dockerConfigGrid">
+                                <!-- Daemon.json -->
+                                <div class="docker-config-item" onclick="editDockerConfig('daemon')">
+                                    <div class="config-icon">⚙️</div>
+                                    <div class="config-info">
+                                        <div class="config-title">daemon.json</div>
+                                        <div class="config-path">/etc/docker/daemon.json</div>
+                                        <div class="config-desc">Docker daemon configuration (logging, storage, registry mirrors)</div>
+                                    </div>
+                                    <span class="config-status" id="daemonJsonStatus">--</span>
+                                </div>
+                                
+                                <!-- Docker Service -->
+                                <div class="docker-config-item" onclick="editDockerConfig('service')">
+                                    <div class="config-icon">🔧</div>
+                                    <div class="config-info">
+                                        <div class="config-title">docker.service</div>
+                                        <div class="config-path">/etc/systemd/system/docker.service.d/override.conf</div>
+                                        <div class="config-desc">Systemd service overrides (environment, limits)</div>
+                                    </div>
+                                    <span class="config-status" id="dockerServiceStatus">--</span>
+                                </div>
+                                
+                                <!-- Docker Compose Override -->
+                                <div class="docker-config-item" onclick="editDockerConfig('compose-override')">
+                                    <div class="config-icon">📝</div>
+                                    <div class="config-info">
+                                        <div class="config-title">docker-compose.override.yml</div>
+                                        <div class="config-path">Local compose overrides</div>
+                                        <div class="config-desc">Override container settings without modifying main file</div>
+                                    </div>
+                                    <span class="config-status" id="composeOverrideStatus">--</span>
+                                </div>
+                                
+                                <!-- Docker Environment -->
+                                <div class="docker-config-item" onclick="editDockerConfig('env')">
+                                    <div class="config-icon">🔑</div>
+                                    <div class="config-info">
+                                        <div class="config-title">.env (Docker)</div>
+                                        <div class="config-path">Docker Compose environment variables</div>
+                                        <div class="config-desc">Environment variables for compose services</div>
+                                    </div>
+                                    <span class="config-status" id="dockerEnvStatus">--</span>
+                                </div>
+                                
+                                <!-- Registries Config -->
+                                <div class="docker-config-item" onclick="editDockerConfig('registries')">
+                                    <div class="config-icon">🏛️</div>
+                                    <div class="config-info">
+                                        <div class="config-title">registries.conf</div>
+                                        <div class="config-path">/etc/containers/registries.conf</div>
+                                        <div class="config-desc">Container registry configuration</div>
+                                    </div>
+                                    <span class="config-status" id="registriesStatus">--</span>
+                                </div>
+                                
+                                <!-- Docker Log Config -->
+                                <div class="docker-config-item" onclick="editDockerConfig('logrotate')">
+                                    <div class="config-icon">📋</div>
+                                    <div class="config-info">
+                                        <div class="config-title">docker-logrotate</div>
+                                        <div class="config-path">/etc/logrotate.d/docker</div>
+                                        <div class="config-desc">Docker log rotation settings</div>
+                                    </div>
+                                    <span class="config-status" id="logrotateStatus">--</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Config Editor (hidden by default) -->
+                            <div class="docker-config-editor" id="dockerConfigEditor" style="display: none;">
+                                <div class="config-editor-header">
+                                    <h4 id="configEditorTitle">Edit Configuration</h4>
+                                    <div class="config-editor-actions">
+                                        <button class="btn btn-sm btn-success" onclick="saveDockerConfig()">💾 Save</button>
+                                        <button class="btn btn-sm btn-warning" onclick="saveDockerConfigAndRestart()">💾 Save & Restart Docker</button>
+                                        <button class="btn btn-sm" onclick="closeDockerConfigEditor()">✖ Close</button>
+                                    </div>
+                                </div>
+                                <div class="config-editor-path" id="configEditorPath">/path/to/file</div>
+                                <textarea id="dockerConfigContent" class="config-editor" placeholder="Loading configuration..."></textarea>
+                                <div class="config-editor-hint">
+                                    <span>💡 Tip: Invalid JSON in daemon.json will prevent Docker from starting. Use the validator below.</span>
+                                    <button class="btn btn-sm" onclick="validateDockerConfig()">✓ Validate</button>
+                                </div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 

@@ -2156,6 +2156,473 @@ async function checkAllContainerPorts() {
 }
 
 // =============================================================================
+// DOCKER INSTALLATION & SERVICE MANAGEMENT
+// =============================================================================
+
+async function dockerServiceAction(action) {
+    const actionNames = {
+        'start': 'Starting Docker service',
+        'stop': 'Stopping Docker service',
+        'restart': 'Restarting Docker service',
+        'enable': 'Enabling Docker service',
+        'disable': 'Disabling Docker service'
+    };
+    
+    showToast(`${actionNames[action]}...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/docker/service/${action}`, {
+            method: 'POST'
+        });
+        
+        if (result.success) {
+            showToast(`✅ ${actionNames[action]} completed`, 'success');
+            // Refresh health status after service action
+            setTimeout(() => loadDockerHealth(), 2000);
+        } else {
+            showToast(`❌ Failed: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`❌ Service action failed: ${error.message}`, 'error');
+    }
+}
+
+async function installDockerComponent(component) {
+    const componentNames = {
+        'engine': 'Docker Engine',
+        'compose': 'Docker Compose',
+        'buildx': 'Docker Buildx',
+        'all': 'Full Docker Setup'
+    };
+    
+    const componentName = componentNames[component] || component;
+    
+    // Show confirmation
+    const confirmed = await showConfirmDialog(
+        `🔧 Install ${componentName}`,
+        `<p>This will install ${componentName} on your server.</p>
+        <p style="margin-top: 10px; color: var(--text-muted);">
+            ${component === 'all' 
+                ? 'This includes Docker Engine, Docker Compose, and Buildx plugin, plus recommended configuration.'
+                : `This will download and install ${componentName}.`
+            }
+        </p>
+        <p class="text-warning" style="margin-top: 10px;">⚠️ Requires sudo access. The server will run installation commands.</p>
+        <p style="margin-top: 10px;">Continue?</p>`,
+        'Install',
+        'btn-primary'
+    );
+    
+    if (!confirmed) return;
+    
+    // Show progress modal
+    openModal(`Installing ${componentName}`, `
+        <div class="install-progress">
+            <div class="install-progress-steps" id="installSteps">
+                <div class="install-step running">
+                    <span class="step-icon">⏳</span>
+                    <div class="step-info">
+                        <div class="step-name">Preparing installation...</div>
+                        <div class="step-status">Please wait</div>
+                    </div>
+                </div>
+            </div>
+            <div class="install-output" id="installOutput">Starting installation...</div>
+        </div>
+    `);
+    
+    try {
+        const result = await fetchAPI(`/api/docker/install/${component}`, {
+            method: 'POST'
+        });
+        
+        // Update modal with results
+        const stepsHtml = (result.steps || []).map(step => `
+            <div class="install-step ${step.success ? 'success' : 'error'}">
+                <span class="step-icon">${step.success ? '✅' : '❌'}</span>
+                <div class="step-info">
+                    <div class="step-name">${step.name}</div>
+                    <div class="step-status">${step.success ? 'Completed' : step.error || 'Failed'}</div>
+                </div>
+            </div>
+        `).join('');
+        
+        document.getElementById('installSteps').innerHTML = stepsHtml || `
+            <div class="install-step ${result.success ? 'success' : 'error'}">
+                <span class="step-icon">${result.success ? '✅' : '❌'}</span>
+                <div class="step-info">
+                    <div class="step-name">${result.success ? 'Installation completed' : 'Installation failed'}</div>
+                    <div class="step-status">${result.message || ''}</div>
+                </div>
+            </div>
+        `;
+        
+        document.getElementById('installOutput').textContent = result.output || 'No output';
+        
+        if (result.success) {
+            showToast(`✅ ${componentName} installed successfully!`, 'success');
+        } else {
+            showToast(`❌ Installation failed: ${result.error}`, 'error');
+        }
+        
+        // Refresh health status
+        setTimeout(() => {
+            loadDockerHealth();
+            loadDockerInstallStatus();
+        }, 2000);
+        
+    } catch (error) {
+        document.getElementById('installSteps').innerHTML = `
+            <div class="install-step error">
+                <span class="step-icon">❌</span>
+                <div class="step-info">
+                    <div class="step-name">Installation failed</div>
+                    <div class="step-status">${error.message}</div>
+                </div>
+            </div>
+        `;
+        showToast(`❌ Installation failed: ${error.message}`, 'error');
+    }
+}
+
+async function loadDockerInstallStatus() {
+    try {
+        const status = await fetchAPI('/api/docker/install-status');
+        
+        // Update Docker Engine status
+        const engineStatusEl = document.getElementById('dockerEngineStatus');
+        if (engineStatusEl) {
+            if (status.engine.installed) {
+                engineStatusEl.textContent = `Installed (${status.engine.version})`;
+                engineStatusEl.className = 'install-status installed';
+                document.getElementById('installDockerEngine')?.classList.add('installed');
+                document.getElementById('installDockerEngine')?.classList.remove('not-installed');
+            } else {
+                engineStatusEl.textContent = 'Not installed';
+                engineStatusEl.className = 'install-status not-installed';
+                document.getElementById('installDockerEngine')?.classList.add('not-installed');
+                document.getElementById('installDockerEngine')?.classList.remove('installed');
+            }
+        }
+        
+        // Update Docker Compose status
+        const composeStatusEl = document.getElementById('dockerComposeInstallStatus');
+        if (composeStatusEl) {
+            if (status.compose.installed) {
+                composeStatusEl.textContent = `Installed (${status.compose.version})`;
+                composeStatusEl.className = 'install-status installed';
+                document.getElementById('installDockerCompose')?.classList.add('installed');
+                document.getElementById('installDockerCompose')?.classList.remove('not-installed');
+            } else {
+                composeStatusEl.textContent = 'Not installed';
+                composeStatusEl.className = 'install-status not-installed';
+                document.getElementById('installDockerCompose')?.classList.add('not-installed');
+                document.getElementById('installDockerCompose')?.classList.remove('installed');
+            }
+        }
+        
+        // Update Buildx status
+        const buildxStatusEl = document.getElementById('dockerBuildxStatus');
+        if (buildxStatusEl) {
+            if (status.buildx.installed) {
+                buildxStatusEl.textContent = `Installed (${status.buildx.version})`;
+                buildxStatusEl.className = 'install-status installed';
+                document.getElementById('installDockerBuildx')?.classList.add('installed');
+                document.getElementById('installDockerBuildx')?.classList.remove('not-installed');
+            } else {
+                buildxStatusEl.textContent = 'Not installed';
+                buildxStatusEl.className = 'install-status not-installed';
+                document.getElementById('installDockerBuildx')?.classList.add('not-installed');
+                document.getElementById('installDockerBuildx')?.classList.remove('installed');
+            }
+        }
+        
+    } catch (error) {
+        console.error('Failed to load Docker install status:', error);
+    }
+}
+
+// =============================================================================
+// DOCKER CONFIGURATION FILE MANAGEMENT
+// =============================================================================
+
+let currentDockerConfig = null;
+
+async function loadDockerConfigs() {
+    try {
+        const configs = await fetchAPI('/api/docker/configs');
+        
+        // Update config statuses
+        updateConfigStatus('daemonJsonStatus', configs.daemon);
+        updateConfigStatus('dockerServiceStatus', configs.service);
+        updateConfigStatus('composeOverrideStatus', configs.compose_override);
+        updateConfigStatus('dockerEnvStatus', configs.env);
+        updateConfigStatus('registriesStatus', configs.registries);
+        updateConfigStatus('logrotateStatus', configs.logrotate);
+        
+        // Update config items with exists/missing class
+        document.querySelectorAll('.docker-config-item').forEach(item => {
+            const statusEl = item.querySelector('.config-status');
+            if (statusEl) {
+                if (statusEl.classList.contains('exists')) {
+                    item.classList.add('exists');
+                    item.classList.remove('missing');
+                } else {
+                    item.classList.add('missing');
+                    item.classList.remove('exists');
+                }
+            }
+        });
+        
+    } catch (error) {
+        console.error('Failed to load Docker configs:', error);
+    }
+}
+
+function updateConfigStatus(elementId, config) {
+    const el = document.getElementById(elementId);
+    if (!el) return;
+    
+    if (config && config.exists) {
+        el.textContent = config.size || 'Exists';
+        el.className = 'config-status exists';
+    } else if (config && config.error) {
+        el.textContent = 'Error';
+        el.className = 'config-status error';
+    } else {
+        el.textContent = 'Not found';
+        el.className = 'config-status missing';
+    }
+}
+
+async function editDockerConfig(configType) {
+    currentDockerConfig = configType;
+    
+    const configNames = {
+        'daemon': 'daemon.json',
+        'service': 'docker.service override',
+        'compose-override': 'docker-compose.override.yml',
+        'env': '.env',
+        'registries': 'registries.conf',
+        'logrotate': 'docker-logrotate'
+    };
+    
+    const editorEl = document.getElementById('dockerConfigEditor');
+    const titleEl = document.getElementById('configEditorTitle');
+    const pathEl = document.getElementById('configEditorPath');
+    const contentEl = document.getElementById('dockerConfigContent');
+    
+    titleEl.textContent = `Edit ${configNames[configType] || configType}`;
+    contentEl.value = 'Loading...';
+    editorEl.style.display = 'block';
+    
+    // Scroll to editor
+    editorEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    
+    try {
+        const result = await fetchAPI(`/api/docker/config/${configType}`);
+        
+        pathEl.textContent = result.path || 'Unknown path';
+        
+        if (result.exists) {
+            contentEl.value = result.content || '';
+        } else {
+            // Provide template for new file
+            contentEl.value = result.template || getConfigTemplate(configType);
+            contentEl.placeholder = 'File does not exist. Edit and save to create.';
+        }
+        
+    } catch (error) {
+        contentEl.value = `Error loading config: ${error.message}`;
+    }
+}
+
+function getConfigTemplate(configType) {
+    const templates = {
+        'daemon': `{
+    "log-driver": "json-file",
+    "log-opts": {
+        "max-size": "10m",
+        "max-file": "3"
+    },
+    "storage-driver": "overlay2",
+    "live-restore": true
+}`,
+        'service': `[Service]
+# Add Docker service overrides here
+# Example:
+# Environment="HTTP_PROXY=http://proxy.example.com:80"
+# Environment="HTTPS_PROXY=https://proxy.example.com:443"
+`,
+        'compose-override': `version: '3.8'
+# Override settings for local development
+# This file is merged with docker-compose.yaml
+
+services:
+  # Example: override a service setting
+  # reactmap:
+  #   environment:
+  #     - DEBUG=true
+`,
+        'env': `# Docker Compose Environment Variables
+# These are used by docker-compose.yaml
+
+# Database
+MYSQL_ROOT_PASSWORD=your_root_password
+MYSQL_DATABASE=aegis
+MYSQL_USER=aegis
+MYSQL_PASSWORD=your_password
+
+# Ports (uncomment to override defaults)
+# REACTMAP_PORT=6001
+# DRAGONITE_PORT=7272
+`,
+        'registries': `# Container registry configuration
+unqualified-search-registries = ["docker.io"]
+
+[[registry]]
+prefix = "docker.io"
+location = "docker.io"
+`,
+        'logrotate': `/var/lib/docker/containers/*/*.log {
+    rotate 7
+    daily
+    compress
+    delaycompress
+    missingok
+    notifempty
+    copytruncate
+}
+`
+    };
+    
+    return templates[configType] || '# Configuration file\n';
+}
+
+function closeDockerConfigEditor() {
+    document.getElementById('dockerConfigEditor').style.display = 'none';
+    currentDockerConfig = null;
+}
+
+async function saveDockerConfig() {
+    if (!currentDockerConfig) return;
+    
+    const content = document.getElementById('dockerConfigContent').value;
+    
+    showToast('Saving configuration...', 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/docker/config/${currentDockerConfig}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        
+        if (result.success) {
+            showToast('✅ Configuration saved!', 'success');
+            loadDockerConfigs(); // Refresh status
+        } else {
+            showToast(`❌ Failed to save: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`❌ Save failed: ${error.message}`, 'error');
+    }
+}
+
+async function saveDockerConfigAndRestart() {
+    if (!currentDockerConfig) return;
+    
+    const content = document.getElementById('dockerConfigContent').value;
+    
+    const confirmed = await showConfirmDialog(
+        '💾 Save & Restart Docker',
+        `<p>This will save the configuration and restart the Docker service.</p>
+        <p class="text-warning" style="margin-top: 10px;">⚠️ All running containers will be temporarily stopped during restart.</p>
+        <p style="margin-top: 10px;">Continue?</p>`,
+        'Save & Restart',
+        'btn-warning'
+    );
+    
+    if (!confirmed) return;
+    
+    showDockerProgress('Saving configuration and restarting Docker...');
+    
+    try {
+        // Save first
+        const saveResult = await fetchAPI(`/api/docker/config/${currentDockerConfig}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        
+        if (!saveResult.success) {
+            hideDockerProgress();
+            showToast(`❌ Failed to save: ${saveResult.error}`, 'error');
+            return;
+        }
+        
+        // Then restart Docker
+        const restartResult = await fetchAPI('/api/docker/service/restart', {
+            method: 'POST'
+        });
+        
+        hideDockerProgress();
+        
+        if (restartResult.success) {
+            showToast('✅ Configuration saved and Docker restarted!', 'success');
+            closeDockerConfigEditor();
+            
+            // Wait a bit then refresh everything
+            setTimeout(() => {
+                loadDockerHealth();
+                loadDockerConfigs();
+                loadContainerDetails();
+            }, 5000);
+        } else {
+            showToast(`⚠️ Config saved but restart failed: ${restartResult.error}`, 'warning');
+        }
+        
+    } catch (error) {
+        hideDockerProgress();
+        showToast(`❌ Operation failed: ${error.message}`, 'error');
+    }
+}
+
+async function validateDockerConfig() {
+    if (!currentDockerConfig) return;
+    
+    const content = document.getElementById('dockerConfigContent').value;
+    
+    // Client-side validation for JSON configs
+    if (currentDockerConfig === 'daemon') {
+        try {
+            JSON.parse(content);
+            showToast('✅ Valid JSON syntax!', 'success');
+        } catch (e) {
+            showToast(`❌ Invalid JSON: ${e.message}`, 'error');
+        }
+        return;
+    }
+    
+    // Server-side validation for other configs
+    try {
+        const result = await fetchAPI(`/api/docker/config/${currentDockerConfig}/validate`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        
+        if (result.valid) {
+            showToast('✅ Configuration is valid!', 'success');
+        } else {
+            showToast(`❌ Invalid: ${result.error}`, 'error');
+        }
+    } catch (error) {
+        showToast(`⚠️ Could not validate: ${error.message}`, 'warning');
+    }
+}
+
+// =============================================================================
 // LOGS
 // =============================================================================
 
@@ -2856,6 +3323,8 @@ navigateTo = function(page) {
         case 'containers':
             loadDockerHealth();
             loadContainerUpdates();
+            loadDockerInstallStatus();
+            loadDockerConfigs();
             break;
         case 'xilriws':
             loadXilriwsStats();
