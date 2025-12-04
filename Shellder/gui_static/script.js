@@ -5743,34 +5743,233 @@ async function loadConfigFiles() {
     }
 }
 
+// Config editor state
+let currentConfigSchema = null;
+let configEditorMode = 'form'; // 'form' or 'raw'
+
 async function editConfigFile(path) {
-    const card = document.getElementById('configEditorCard');
+    const panel = document.getElementById('configEditorPanel');
     const title = document.getElementById('configEditorTitle');
-    const editor = document.getElementById('configEditorContent');
+    const pathLabel = document.getElementById('configEditorPath');
+    const formEditor = document.getElementById('configFormEditor');
+    const rawEditor = document.getElementById('configRawEditor');
+    const rawContent = document.getElementById('configEditorContent');
+    const fieldsContainer = document.getElementById('configFieldsContainer');
+    const statusEl = document.getElementById('configEditorStatus');
     
-    if (!card || !editor) return;
+    if (!panel) return;
     
     currentConfigPath = path;
-    card.style.display = 'block';
-    title.textContent = `📝 Editing: ${path}`;
-    editor.value = 'Loading...';
+    configEditorMode = 'form';
+    
+    // Reset UI
+    panel.style.display = 'block';
+    formEditor.style.display = 'block';
+    rawEditor.style.display = 'none';
+    document.getElementById('toggleRawBtn').textContent = '📄 Raw Mode';
+    
+    const configInfo = REQUIRED_CONFIGS_INFO[path] || { name: path };
+    title.textContent = `📝 ${configInfo.name || path}`;
+    pathLabel.textContent = path;
+    fieldsContainer.innerHTML = '<div class="loading">Loading...</div>';
+    statusEl.textContent = '';
     
     try {
-        const data = await fetchAPI(`/api/config/file?path=${encodeURIComponent(path)}`);
+        // First, try to get schema for form-based editing
+        const schemaResponse = await fetch(`/api/config/schema/${encodeURIComponent(path)}`);
+        const schemaData = await schemaResponse.json();
         
-        if (data.is_template) {
-            editor.value = data.content;
-            showToast('Loaded from template - save to create the actual file', 'info');
+        // Also load the raw content
+        const fileData = await fetchAPI(`/api/config/file?path=${encodeURIComponent(path)}`);
+        rawContent.value = fileData.content || '';
+        
+        if (schemaData.has_schema) {
+            currentConfigSchema = schemaData;
+            renderConfigForm(schemaData);
+            statusEl.textContent = fileData.is_template ? '⚠️ From template - save to create file' : `✅ File exists`;
         } else {
-            editor.value = data.content;
+            // No schema - show raw editor
+            currentConfigSchema = null;
+            fieldsContainer.innerHTML = `
+                <div class="no-schema-notice">
+                    <p>📝 This config file doesn't have a structured editor.</p>
+                    <p>Use Raw Mode to edit directly.</p>
+                    <button class="btn btn-primary btn-sm" onclick="toggleRawEditor()">Open Raw Editor</button>
+                </div>
+            `;
+            statusEl.textContent = fileData.is_template ? '⚠️ From template' : '✅ File exists';
         }
         
         // Scroll to editor
-        card.scrollIntoView({ behavior: 'smooth' });
+        panel.scrollIntoView({ behavior: 'smooth' });
         
     } catch (e) {
-        editor.value = `Error loading file: ${e.message}`;
+        fieldsContainer.innerHTML = `<div class="error-msg">Error loading config: ${e.message}</div>`;
     }
+}
+
+function renderConfigForm(schemaData) {
+    const container = document.getElementById('configFieldsContainer');
+    const values = schemaData.current_values || {};
+    
+    let html = '';
+    for (const [sectionKey, section] of Object.entries(schemaData.sections)) {
+        const sectionValues = values[sectionKey] || {};
+        
+        html += `
+            <div class="config-section" id="config-section-${sectionKey}">
+                <div class="config-section-header" onclick="toggleConfigSection('${sectionKey}')">
+                    <h4>${section.title}</h4>
+                    <span class="config-section-toggle">▼</span>
+                </div>
+                <div class="config-section-fields">
+                    ${Object.entries(section.fields).map(([fieldKey, field]) => {
+                        const currentValue = sectionValues[fieldKey] ?? field.default ?? '';
+                        return renderConfigField(sectionKey, fieldKey, field, currentValue);
+                    }).join('')}
+                </div>
+            </div>
+        `;
+    }
+    
+    container.innerHTML = html;
+}
+
+function renderConfigField(section, key, field, value) {
+    const inputId = `config-${section}-${key}`;
+    let inputHtml = '';
+    
+    if (field.type === 'checkbox') {
+        inputHtml = `
+            <label class="checkbox-label">
+                <input type="checkbox" id="${inputId}" ${value ? 'checked' : ''}>
+                <span>Enabled</span>
+            </label>
+        `;
+    } else if (field.type === 'password') {
+        inputHtml = `
+            <div class="input-with-action">
+                <input type="password" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}">
+                <button class="btn btn-xs" onclick="toggleFieldVisibility('${inputId}')" title="Show/Hide">👁️</button>
+                <button class="btn btn-xs" onclick="generateFieldValue('${inputId}')" title="Generate random">🎲</button>
+            </div>
+        `;
+    } else if (field.type === 'number') {
+        inputHtml = `<input type="number" id="${inputId}" value="${value}" placeholder="${field.default || ''}">`;
+    } else {
+        inputHtml = `<input type="text" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}">`;
+    }
+    
+    return `
+        <div class="config-field">
+            <div class="config-field-info">
+                <div class="config-field-label">${field.label}</div>
+                <div class="config-field-desc">${field.desc}</div>
+            </div>
+            <div class="config-field-input">
+                ${inputHtml}
+            </div>
+        </div>
+    `;
+}
+
+function toggleConfigSection(sectionKey) {
+    const section = document.getElementById(`config-section-${sectionKey}`);
+    if (section) {
+        section.classList.toggle('collapsed');
+    }
+}
+
+function toggleFieldVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
+    }
+}
+
+function generateFieldValue(inputId) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const value = Array.from(crypto.getRandomValues(new Uint8Array(24)))
+        .map(b => chars[b % chars.length]).join('');
+    
+    input.value = value;
+    input.type = 'text';
+    showToast('Generated random value', 'success');
+}
+
+function toggleRawEditor() {
+    const formEditor = document.getElementById('configFormEditor');
+    const rawEditor = document.getElementById('configRawEditor');
+    const toggleBtn = document.getElementById('toggleRawBtn');
+    
+    if (configEditorMode === 'form') {
+        // Switch to raw mode - first collect form values and update raw content
+        if (currentConfigSchema) {
+            updateRawFromForm();
+        }
+        formEditor.style.display = 'none';
+        rawEditor.style.display = 'block';
+        toggleBtn.textContent = '📋 Form Mode';
+        configEditorMode = 'raw';
+    } else {
+        formEditor.style.display = 'block';
+        rawEditor.style.display = 'none';
+        toggleBtn.textContent = '📄 Raw Mode';
+        configEditorMode = 'form';
+    }
+}
+
+function updateRawFromForm() {
+    if (!currentConfigSchema) return;
+    
+    const values = collectFormValues();
+    const rawContent = document.getElementById('configEditorContent');
+    
+    if (currentConfigSchema.format === 'json') {
+        rawContent.value = JSON.stringify(values, null, 2);
+    } else if (currentConfigSchema.format === 'toml') {
+        // Generate TOML
+        let toml = '# Generated by Shellder Config Editor\\n\\n';
+        for (const [sectionKey, sectionValues] of Object.entries(values)) {
+            toml += `[${sectionKey}]\\n`;
+            for (const [key, value] of Object.entries(sectionValues)) {
+                if (typeof value === 'string') {
+                    toml += `${key} = "${value}"\\n`;
+                } else if (typeof value === 'boolean') {
+                    toml += `${key} = ${value}\\n`;
+                } else {
+                    toml += `${key} = ${value}\\n`;
+                }
+            }
+            toml += '\\n';
+        }
+        rawContent.value = toml;
+    }
+}
+
+function collectFormValues() {
+    if (!currentConfigSchema) return {};
+    
+    const values = {};
+    for (const [sectionKey, section] of Object.entries(currentConfigSchema.sections)) {
+        values[sectionKey] = {};
+        for (const [fieldKey, field] of Object.entries(section.fields)) {
+            const input = document.getElementById(`config-${sectionKey}-${fieldKey}`);
+            if (input) {
+                if (field.type === 'checkbox') {
+                    values[sectionKey][fieldKey] = input.checked;
+                } else if (field.type === 'number') {
+                    values[sectionKey][fieldKey] = parseFloat(input.value) || 0;
+                } else {
+                    values[sectionKey][fieldKey] = input.value;
+                }
+            }
+        }
+    }
+    return values;
 }
 
 async function saveConfigFile() {
@@ -5779,18 +5978,34 @@ async function saveConfigFile() {
         return;
     }
     
-    const editor = document.getElementById('configEditorContent');
-    if (!editor) return;
+    showToast('Saving...', 'info');
     
     try {
-        const result = await fetchAPI('/api/config/file', {
-            method: 'POST',
-            body: JSON.stringify({
-                path: currentConfigPath,
-                content: editor.value
-            }),
-            force: true
-        });
+        let result;
+        
+        if (configEditorMode === 'form' && currentConfigSchema) {
+            // Save from form
+            const values = collectFormValues();
+            result = await fetchAPI('/api/config/structured', {
+                method: 'POST',
+                body: JSON.stringify({
+                    path: currentConfigPath,
+                    values: values
+                }),
+                force: true
+            });
+        } else {
+            // Save raw content
+            const editor = document.getElementById('configEditorContent');
+            result = await fetchAPI('/api/config/file', {
+                method: 'POST',
+                body: JSON.stringify({
+                    path: currentConfigPath,
+                    content: editor.value
+                }),
+                force: true
+            });
+        }
         
         if (result.success) {
             showToast(`${currentConfigPath} saved successfully`, 'success');
@@ -5805,10 +6020,22 @@ async function saveConfigFile() {
 }
 
 function closeConfigEditor() {
-    const card = document.getElementById('configEditorCard');
-    if (card) card.style.display = 'none';
+    const panel = document.getElementById('configEditorPanel');
+    if (panel) panel.style.display = 'none';
     currentConfigPath = null;
+    currentConfigSchema = null;
 }
+
+// Config file info lookup (for display names)
+const REQUIRED_CONFIGS_INFO = {
+    '.env': { name: 'Environment Variables' },
+    'docker-compose.yaml': { name: 'Docker Compose' },
+    'unown/dragonite_config.toml': { name: 'Dragonite Config' },
+    'unown/golbat_config.toml': { name: 'Golbat Config' },
+    'unown/rotom_config.json': { name: 'Rotom Config' },
+    'reactmap/local.json': { name: 'ReactMap Config' },
+    'mysql_data/mariadb.cnf': { name: 'MariaDB Config' },
+};
 
 async function createConfigFromTemplate(path) {
     showToast(`Creating ${path} from template...`, 'info');

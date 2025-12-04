@@ -5545,6 +5545,212 @@ select:focus {
     color: var(--danger);
 }
 
+/* Config Editor Panel */
+.config-editor-panel {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-lg);
+    margin-top: 16px;
+    animation: slideDown 0.2s ease-out;
+}
+
+.config-panel-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 14px 18px;
+    border-bottom: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-lg) var(--radius-lg) 0 0;
+}
+
+.config-panel-title h3 {
+    margin: 0;
+    font-size: 1.1em;
+    color: var(--text-primary);
+}
+
+.config-path-label {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.config-panel-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.config-form-editor {
+    padding: 16px;
+    max-height: 500px;
+    overflow-y: auto;
+}
+
+.config-fields-container {
+    display: flex;
+    flex-direction: column;
+    gap: 20px;
+}
+
+.config-section {
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    overflow: hidden;
+}
+
+.config-section-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 10px 14px;
+    background: var(--bg-primary);
+    border-bottom: 1px solid var(--border-color);
+    cursor: pointer;
+}
+
+.config-section-header:hover {
+    background: var(--bg-secondary);
+}
+
+.config-section-header h4 {
+    margin: 0;
+    font-size: 0.95em;
+    color: var(--text-primary);
+}
+
+.config-section-toggle {
+    font-size: 0.9em;
+    transition: transform 0.2s;
+}
+
+.config-section.collapsed .config-section-toggle {
+    transform: rotate(-90deg);
+}
+
+.config-section.collapsed .config-section-fields {
+    display: none;
+}
+
+.config-section-fields {
+    padding: 12px;
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.config-field {
+    display: grid;
+    grid-template-columns: 180px 1fr;
+    gap: 12px;
+    align-items: start;
+}
+
+.config-field-info {
+    padding-top: 6px;
+}
+
+.config-field-label {
+    font-weight: 500;
+    font-size: 0.9em;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.config-field-desc {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    line-height: 1.3;
+}
+
+.config-field-input {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.config-field-input input,
+.config-field-input select {
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    color: var(--text-primary);
+    font-size: 0.9em;
+}
+
+.config-field-input input:focus,
+.config-field-input select:focus {
+    outline: none;
+    border-color: var(--primary);
+}
+
+.config-field-input input[type="password"] {
+    font-family: 'JetBrains Mono', monospace;
+}
+
+.config-field-input .field-hint {
+    font-size: 0.75em;
+    color: var(--text-muted);
+}
+
+.config-field-input .input-with-action {
+    display: flex;
+    gap: 6px;
+}
+
+.config-field-input .input-with-action input {
+    flex: 1;
+}
+
+.config-raw-editor {
+    padding: 16px;
+}
+
+.config-raw-editor .config-editor {
+    width: 100%;
+    min-height: 400px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    color: var(--text-primary);
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 0.85em;
+    resize: vertical;
+}
+
+.config-panel-footer {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 18px;
+    border-top: 1px solid var(--border-color);
+    background: var(--bg-tertiary);
+    border-radius: 0 0 var(--radius-lg) var(--radius-lg);
+}
+
+.config-footer-info {
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+.config-footer-actions {
+    display: flex;
+    gap: 8px;
+}
+
+.no-schema-notice {
+    padding: 20px;
+    text-align: center;
+    color: var(--text-secondary);
+}
+
+.no-schema-notice p {
+    margin-bottom: 10px;
+}
+
 /* Docker Config Editor */
 .docker-config-editor {
     margin-top: 20px;

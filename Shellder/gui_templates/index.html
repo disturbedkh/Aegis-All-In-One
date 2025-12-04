@@ -843,17 +843,39 @@
                         </div>
                     </div>
                     
-                    <!-- Config Editor -->
-                    <div class="card" id="configEditorCard" style="display: none;">
-                        <div class="card-header">
-                            <h2 id="configEditorTitle">📝 Edit Config</h2>
-                            <div class="card-actions">
-                                <button class="btn btn-success btn-sm" onclick="saveConfigFile()">💾 Save</button>
+                    <!-- Structured Config Editor Panel -->
+                    <div id="configEditorPanel" class="config-editor-panel" style="display: none;">
+                        <div class="config-panel-header">
+                            <div class="config-panel-title">
+                                <h3 id="configEditorTitle">📝 Edit Config</h3>
+                                <span id="configEditorPath" class="config-path-label"></span>
+                            </div>
+                            <div class="config-panel-actions">
+                                <button class="btn btn-sm" onclick="toggleRawEditor()" id="toggleRawBtn">📄 Raw Mode</button>
                                 <button class="btn btn-sm" onclick="closeConfigEditor()">✖ Close</button>
                             </div>
                         </div>
-                        <div class="card-body">
+                        
+                        <!-- Form-based Editor -->
+                        <div id="configFormEditor" class="config-form-editor">
+                            <div id="configFieldsContainer" class="config-fields-container">
+                                <!-- Config fields loaded dynamically -->
+                            </div>
+                        </div>
+                        
+                        <!-- Raw Text Editor (hidden by default) -->
+                        <div id="configRawEditor" class="config-raw-editor" style="display: none;">
                             <textarea id="configEditorContent" class="config-editor" placeholder="Loading..."></textarea>
+                        </div>
+                        
+                        <div class="config-panel-footer">
+                            <div class="config-footer-info">
+                                <span id="configEditorStatus"></span>
+                            </div>
+                            <div class="config-footer-actions">
+                                <button class="btn btn-secondary btn-sm" onclick="closeConfigEditor()">Cancel</button>
+                                <button class="btn btn-success btn-sm" onclick="saveConfigFile()">💾 Save Changes</button>
+                            </div>
                         </div>
                     </div>
                 </div>

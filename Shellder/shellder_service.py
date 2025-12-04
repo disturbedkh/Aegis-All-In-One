@@ -8448,6 +8448,120 @@ REQUIRED_CONFIGS = {
     }
 }
 
+# Config field schemas for form-based editing
+CONFIG_FIELD_SCHEMAS = {
+    'unown/dragonite_config.toml': {
+        'format': 'toml',
+        'sections': {
+            'general': {
+                'title': 'General Settings',
+                'fields': {
+                    'listen_host': {'type': 'text', 'label': 'Listen Host', 'desc': 'IP address to bind to (0.0.0.0 for all interfaces)', 'default': '0.0.0.0'},
+                    'listen_port': {'type': 'number', 'label': 'Listen Port', 'desc': 'Port for the web interface', 'default': 7272},
+                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Secret key for API authentication', 'default': ''},
+                    'admin_password': {'type': 'password', 'label': 'Admin Password', 'desc': 'Password for admin interface', 'default': ''},
+                }
+            },
+            'database': {
+                'title': 'Database Connection',
+                'fields': {
+                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database server hostname (use "database" for Docker)', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port (default 3306)', 'default': 3306},
+                    'name': {'type': 'text', 'label': 'Database Name', 'desc': 'Name of the database', 'default': 'dragonite'},
+                    'user': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
+                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                }
+            },
+            'golbat': {
+                'title': 'Golbat Integration',
+                'fields': {
+                    'api_endpoint': {'type': 'text', 'label': 'API Endpoint', 'desc': 'Golbat API URL (e.g., http://golbat:9001)', 'default': 'http://golbat:9001'},
+                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Golbat API secret (must match Golbat config)', 'default': ''},
+                }
+            }
+        }
+    },
+    'unown/golbat_config.toml': {
+        'format': 'toml',
+        'sections': {
+            'general': {
+                'title': 'General Settings',
+                'fields': {
+                    'api_listen': {'type': 'text', 'label': 'API Listen Address', 'desc': 'Address for API (e.g., :9001)', 'default': ':9001'},
+                    'raw_listen': {'type': 'text', 'label': 'Raw Data Listen', 'desc': 'Address for raw data (e.g., :9002)', 'default': ':9002'},
+                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Secret for API authentication', 'default': ''},
+                    'raw_secret': {'type': 'password', 'label': 'Raw Data Secret', 'desc': 'Secret for raw data endpoint', 'default': ''},
+                }
+            },
+            'database': {
+                'title': 'Database Connection',
+                'fields': {
+                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database server hostname', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port', 'default': 3306},
+                    'name': {'type': 'text', 'label': 'Database Name', 'desc': 'Database name', 'default': 'golbat'},
+                    'user': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
+                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                }
+            },
+            'koji': {
+                'title': 'Koji Integration',
+                'fields': {
+                    'url': {'type': 'text', 'label': 'Koji URL', 'desc': 'Koji server URL for geofence data', 'default': 'http://koji:8080'},
+                    'bearer_token': {'type': 'password', 'label': 'Bearer Token', 'desc': 'API token for Koji', 'default': ''},
+                }
+            }
+        }
+    },
+    'unown/rotom_config.json': {
+        'format': 'json',
+        'sections': {
+            'server': {
+                'title': 'Server Settings',
+                'fields': {
+                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Port for Rotom API', 'default': 7070},
+                    'public': {'type': 'checkbox', 'label': 'Public Access', 'desc': 'Allow public access to API', 'default': False},
+                }
+            },
+            'client': {
+                'title': 'Client Settings',
+                'fields': {
+                    'workers': {'type': 'number', 'label': 'Max Workers', 'desc': 'Maximum number of worker connections', 'default': 100},
+                    'pokemon_timeout': {'type': 'number', 'label': 'Pokemon Timeout', 'desc': 'Timeout for Pokemon encounters (seconds)', 'default': 30},
+                }
+            }
+        }
+    },
+    'reactmap/local.json': {
+        'format': 'json',
+        'sections': {
+            'database': {
+                'title': 'Database Connection',
+                'fields': {
+                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database hostname', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port', 'default': 3306},
+                    'database': {'type': 'text', 'label': 'Database Name', 'desc': 'Golbat database name', 'default': 'golbat'},
+                    'username': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
+                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                }
+            },
+            'map': {
+                'title': 'Map Settings',
+                'fields': {
+                    'startLat': {'type': 'number', 'label': 'Start Latitude', 'desc': 'Default map center latitude', 'default': 0},
+                    'startLon': {'type': 'number', 'label': 'Start Longitude', 'desc': 'Default map center longitude', 'default': 0},
+                    'startZoom': {'type': 'number', 'label': 'Start Zoom', 'desc': 'Default map zoom level (1-18)', 'default': 12},
+                }
+            },
+            'authentication': {
+                'title': 'Authentication',
+                'fields': {
+                    'alwaysEnabledPerms': {'type': 'text', 'label': 'Default Permissions', 'desc': 'Permissions enabled for all users', 'default': ''},
+                }
+            }
+        }
+    }
+}
+
 # Required environment variables
 REQUIRED_ENV_VARS = {
     'PUID': {'description': 'User ID for file permissions', 'default': '1000', 'category': 'system'},
@@ -9524,6 +9638,109 @@ def api_terminal_sessions():
 def api_setup_run_script(script):
     """Redirect to terminal start"""
     return api_terminal_start(script)
+
+@app.route('/api/config/schema/<path:config_path>')
+def api_config_schema(config_path):
+    """Get field schema and current values for a config file"""
+    if config_path not in CONFIG_FIELD_SCHEMAS:
+        return jsonify({'error': 'No schema available for this config', 'has_schema': False}), 200
+    
+    schema = CONFIG_FIELD_SCHEMAS[config_path]
+    aegis_root = str(AEGIS_ROOT)
+    full_path = os.path.join(aegis_root, config_path)
+    
+    # Parse current values if file exists
+    current_values = {}
+    if os.path.exists(full_path):
+        try:
+            with open(full_path, 'r') as f:
+                content = f.read()
+            
+            if schema['format'] == 'toml':
+                try:
+                    import tomli
+                    current_values = tomli.loads(content)
+                except ImportError:
+                    # Fallback to basic parsing
+                    pass
+            elif schema['format'] == 'json':
+                current_values = json.loads(content)
+        except Exception as e:
+            current_values = {'_parse_error': str(e)}
+    
+    return jsonify({
+        'has_schema': True,
+        'format': schema['format'],
+        'sections': schema['sections'],
+        'current_values': current_values,
+        'exists': os.path.exists(full_path)
+    })
+
+@app.route('/api/config/structured', methods=['POST'])
+def api_config_structured_save():
+    """Save a config file from structured form data"""
+    data = request.get_json()
+    config_path = data.get('path')
+    values = data.get('values', {})
+    
+    if not config_path:
+        return jsonify({'error': 'Path is required'}), 400
+    
+    if config_path not in CONFIG_FIELD_SCHEMAS:
+        return jsonify({'error': 'No schema for this config'}), 400
+    
+    schema = CONFIG_FIELD_SCHEMAS[config_path]
+    aegis_root = str(AEGIS_ROOT)
+    full_path = os.path.join(aegis_root, config_path)
+    
+    # Build config content based on format
+    try:
+        if schema['format'] == 'toml':
+            content = generate_toml_content(schema, values)
+        elif schema['format'] == 'json':
+            content = json.dumps(values, indent=2)
+        else:
+            return jsonify({'error': 'Unsupported format'}), 400
+        
+        # Create directory if needed
+        os.makedirs(os.path.dirname(full_path), exist_ok=True)
+        
+        # Write file
+        result = subprocess.run(
+            ['sudo', 'tee', full_path],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        
+        return jsonify({'success': True, 'path': config_path})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+def generate_toml_content(schema, values):
+    """Generate TOML content from structured values"""
+    lines = ['# Generated by Shellder Config Editor', '']
+    
+    for section_key, section_info in schema['sections'].items():
+        section_values = values.get(section_key, {})
+        if section_values:
+            lines.append(f'[{section_key}]')
+            for field_key, field_info in section_info['fields'].items():
+                if field_key in section_values:
+                    value = section_values[field_key]
+                    if field_info['type'] in ('text', 'password'):
+                        lines.append(f'{field_key} = "{value}"')
+                    elif field_info['type'] == 'number':
+                        lines.append(f'{field_key} = {value}')
+                    elif field_info['type'] == 'checkbox':
+                        lines.append(f'{field_key} = {"true" if value else "false"}')
+            lines.append('')
+    
+    return '\n'.join(lines)
 
 @app.route('/api/config/files')
 def api_config_files():
