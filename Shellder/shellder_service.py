@@ -8588,40 +8588,268 @@ def api_setup_scripts():
     
     return jsonify({'scripts': scripts})
 
-@app.route('/api/setup/run/<script>', methods=['POST'])
-def api_setup_run_script(script):
-    """Run a setup script (streams output)"""
-    aegis_root = str(AEGIS_ROOT)  # Use properly resolved global path
+# =============================================================================
+# INTERACTIVE TERMINAL FOR SCRIPTS (PTY + WebSocket)
+# =============================================================================
+
+import pty
+import select
+import fcntl
+import termios
+import struct
+
+# Track active terminal sessions
+terminal_sessions = {}
+
+class TerminalSession:
+    """Manages an interactive PTY session for script execution"""
+    
+    def __init__(self, session_id, script_path, cwd):
+        self.session_id = session_id
+        self.script_path = script_path
+        self.cwd = cwd
+        self.master_fd = None
+        self.slave_fd = None
+        self.pid = None
+        self.started = datetime.now().isoformat()
+        self.active = False
+        
+    def start(self):
+        """Start the PTY process"""
+        # Create pseudo-terminal
+        self.master_fd, self.slave_fd = pty.openpty()
+        
+        # Fork process
+        self.pid = os.fork()
+        
+        if self.pid == 0:
+            # Child process
+            os.close(self.master_fd)
+            os.setsid()
+            os.dup2(self.slave_fd, 0)  # stdin
+            os.dup2(self.slave_fd, 1)  # stdout
+            os.dup2(self.slave_fd, 2)  # stderr
+            os.close(self.slave_fd)
+            
+            # Change to working directory
+            os.chdir(self.cwd)
+            
+            # Set environment
+            os.environ['TERM'] = 'xterm-256color'
+            os.environ['COLUMNS'] = '120'
+            os.environ['LINES'] = '30'
+            
+            # Execute script
+            os.execvp('sudo', ['sudo', 'bash', self.script_path])
+        else:
+            # Parent process
+            os.close(self.slave_fd)
+            self.active = True
+            
+            # Set non-blocking
+            flags = fcntl.fcntl(self.master_fd, fcntl.F_GETFL)
+            fcntl.fcntl(self.master_fd, fcntl.F_SETFL, flags | os.O_NONBLOCK)
+            
+    def read_output(self):
+        """Read available output from PTY"""
+        if not self.active or self.master_fd is None:
+            return None
+            
+        try:
+            ready, _, _ = select.select([self.master_fd], [], [], 0.1)
+            if ready:
+                data = os.read(self.master_fd, 4096)
+                if data:
+                    return data.decode('utf-8', errors='replace')
+        except (OSError, IOError):
+            self.active = False
+        return None
+        
+    def write_input(self, data):
+        """Write input to PTY"""
+        if not self.active or self.master_fd is None:
+            return False
+            
+        try:
+            os.write(self.master_fd, data.encode('utf-8'))
+            return True
+        except (OSError, IOError):
+            self.active = False
+            return False
+            
+    def resize(self, cols, rows):
+        """Resize PTY window"""
+        if self.master_fd is not None:
+            try:
+                winsize = struct.pack('HHHH', rows, cols, 0, 0)
+                fcntl.ioctl(self.master_fd, termios.TIOCSWINSZ, winsize)
+            except:
+                pass
+                
+    def is_alive(self):
+        """Check if process is still running"""
+        if self.pid is None:
+            return False
+        try:
+            pid, status = os.waitpid(self.pid, os.WNOHANG)
+            if pid == 0:
+                return True
+            self.active = False
+            return False
+        except:
+            self.active = False
+            return False
+            
+    def terminate(self):
+        """Terminate the session"""
+        self.active = False
+        if self.master_fd is not None:
+            try:
+                os.close(self.master_fd)
+            except:
+                pass
+        if self.pid is not None:
+            try:
+                os.kill(self.pid, 9)
+            except:
+                pass
+
+def terminal_output_reader(session_id):
+    """Background thread to read terminal output and emit via WebSocket"""
+    session = terminal_sessions.get(session_id)
+    if not session:
+        return
+        
+    while session.active and session.is_alive():
+        output = session.read_output()
+        if output and socketio and SOCKETIO_AVAILABLE:
+            socketio.emit('terminal_output', {
+                'session_id': session_id,
+                'data': output
+            })
+        time.sleep(0.05)  # Small delay to prevent CPU spinning
+    
+    # Session ended
+    if socketio and SOCKETIO_AVAILABLE:
+        socketio.emit('terminal_output', {
+            'session_id': session_id,
+            'data': '\r\n\033[32m[Session ended]\033[0m\r\n',
+            'ended': True
+        })
+    
+    # Cleanup
+    if session_id in terminal_sessions:
+        terminal_sessions[session_id].terminate()
+        del terminal_sessions[session_id]
+
+@app.route('/api/terminal/start/<script>', methods=['POST'])
+def api_terminal_start(script):
+    """Start an interactive terminal session for a script"""
+    aegis_root = str(AEGIS_ROOT)
     
     # Whitelist allowed scripts
-    allowed_scripts = ['setup.sh', 'dbsetup.sh', 'nginx-setup.sh', 'check.sh', 'fletchling.sh', 'poracle.sh']
+    allowed_scripts = ['setup.sh', 'dbsetup.sh', 'nginx-setup.sh', 'check.sh', 
+                       'fletchling.sh', 'poracle.sh', 'logs.sh', 'shellder.sh']
     if script not in allowed_scripts:
-        return jsonify({'error': f'Script not allowed. Use: {allowed_scripts}'}), 400
+        return jsonify({'error': f'Script not allowed'}), 400
     
-    script_path = os.path.join(aegis_root, 'Shellder', script)
+    # Find script path
+    if script == 'shellder.sh':
+        script_path = os.path.join(aegis_root, script)
+    else:
+        script_path = os.path.join(aegis_root, 'Shellder', script)
+        
     if not os.path.exists(script_path):
-        return jsonify({'error': 'Script not found'}), 404
+        return jsonify({'error': 'Script not found', 'path': script_path}), 404
+    
+    # Generate session ID
+    session_id = f"term_{script}_{int(time.time())}"
+    
+    # Check if same script already has active session
+    for sid, session in list(terminal_sessions.items()):
+        if session.script_path == script_path and session.is_alive():
+            return jsonify({
+                'error': f'{script} already has an active session',
+                'session_id': sid
+            }), 409
     
     try:
-        # Run script with sudo and capture output
-        result = subprocess.run(
-            ['sudo', 'bash', script_path],
-            capture_output=True,
-            text=True,
-            timeout=300,  # 5 minute timeout
-            cwd=aegis_root
+        # Create and start session
+        session = TerminalSession(session_id, script_path, aegis_root)
+        session.start()
+        terminal_sessions[session_id] = session
+        
+        # Start output reader thread
+        thread = threading.Thread(
+            target=terminal_output_reader,
+            args=(session_id,),
+            daemon=True
         )
+        thread.start()
         
         return jsonify({
-            'success': result.returncode == 0,
-            'stdout': result.stdout,
-            'stderr': result.stderr,
-            'return_code': result.returncode
+            'success': True,
+            'session_id': session_id,
+            'script': script
         })
-    except subprocess.TimeoutExpired:
-        return jsonify({'error': 'Script timed out (5 minutes)'}), 504
+        
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+@app.route('/api/terminal/input/<session_id>', methods=['POST'])
+def api_terminal_input(session_id):
+    """Send input to terminal session"""
+    session = terminal_sessions.get(session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+        
+    data = request.json.get('data', '')
+    if session.write_input(data):
+        return jsonify({'success': True})
+    return jsonify({'error': 'Failed to write'}), 500
+
+@app.route('/api/terminal/resize/<session_id>', methods=['POST'])
+def api_terminal_resize(session_id):
+    """Resize terminal"""
+    session = terminal_sessions.get(session_id)
+    if not session:
+        return jsonify({'error': 'Session not found'}), 404
+        
+    cols = request.json.get('cols', 120)
+    rows = request.json.get('rows', 30)
+    session.resize(cols, rows)
+    return jsonify({'success': True})
+
+@app.route('/api/terminal/stop/<session_id>', methods=['POST'])
+def api_terminal_stop(session_id):
+    """Stop terminal session"""
+    session = terminal_sessions.get(session_id)
+    if session:
+        session.terminate()
+        if session_id in terminal_sessions:
+            del terminal_sessions[session_id]
+    return jsonify({'success': True})
+
+@app.route('/api/terminal/sessions')
+def api_terminal_sessions():
+    """Get active terminal sessions"""
+    return jsonify({
+        'sessions': [
+            {
+                'session_id': sid,
+                'script': os.path.basename(s.script_path),
+                'started': s.started,
+                'active': s.is_alive()
+            }
+            for sid, s in terminal_sessions.items()
+        ]
+    })
+
+# Legacy endpoint for backwards compatibility
+@app.route('/api/setup/run/<script>', methods=['POST'])
+def api_setup_run_script(script):
+    """Redirect to terminal start"""
+    return api_terminal_start(script)
 
 @app.route('/api/config/files')
 def api_config_files():

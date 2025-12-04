@@ -5945,49 +5945,229 @@ async function saveEnvVars() {
 // SETUP SCRIPTS
 // =============================================================================
 
+// =============================================================================
+// INTERACTIVE TERMINAL FOR SCRIPTS (xterm.js)
+// =============================================================================
+
+let terminal = null;
+let terminalFitAddon = null;
+let currentSessionId = null;
+
 async function runSetupScript(script) {
-    const outputCard = document.getElementById('scriptOutputCard');
-    const outputTitle = document.getElementById('scriptOutputTitle');
-    const output = document.getElementById('scriptOutput');
+    const terminalCard = document.getElementById('scriptTerminalCard');
+    const terminalTitle = document.getElementById('scriptTerminalTitle');
+    const terminalContainer = document.getElementById('terminalContainer');
+    const terminalStatus = document.getElementById('terminalStatus');
     
-    if (!outputCard || !output) return;
+    if (!terminalCard || !terminalContainer) {
+        showToast('Terminal container not found', 'error');
+        return;
+    }
     
-    outputCard.style.display = 'block';
-    outputTitle.textContent = `Running: ${script}`;
-    output.textContent = 'Starting script...\n\n';
+    // Show terminal card
+    terminalCard.style.display = 'block';
+    terminalTitle.textContent = `🖥️ Running: ${script}`;
+    terminalStatus.textContent = 'Connecting...';
+    terminalStatus.className = 'terminal-status connecting';
     
-    // Scroll to output
-    outputCard.scrollIntoView({ behavior: 'smooth' });
+    // Scroll to terminal
+    terminalCard.scrollIntoView({ behavior: 'smooth' });
     
-    try {
-        showToast(`Running ${script}... This may take a few minutes.`, 'info');
+    // Initialize xterm.js if not already done
+    if (!terminal) {
+        terminal = new Terminal({
+            cursorBlink: true,
+            cursorStyle: 'block',
+            fontSize: 14,
+            fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+            theme: {
+                background: '#1a1d23',
+                foreground: '#e4e4e7',
+                cursor: '#f59e0b',
+                cursorAccent: '#1a1d23',
+                selectionBackground: '#3b82f6',
+                black: '#1a1d23',
+                red: '#ef4444',
+                green: '#22c55e',
+                yellow: '#f59e0b',
+                blue: '#3b82f6',
+                magenta: '#a855f7',
+                cyan: '#06b6d4',
+                white: '#e4e4e7',
+                brightBlack: '#4b5563',
+                brightRed: '#f87171',
+                brightGreen: '#4ade80',
+                brightYellow: '#fbbf24',
+                brightBlue: '#60a5fa',
+                brightMagenta: '#c084fc',
+                brightCyan: '#22d3ee',
+                brightWhite: '#ffffff'
+            },
+            scrollback: 5000,
+            convertEol: true
+        });
         
-        const result = await fetchAPI(`/api/setup/run/${script}`, {
+        terminalFitAddon = new FitAddon.FitAddon();
+        terminal.loadAddon(terminalFitAddon);
+        terminal.open(terminalContainer);
+        terminalFitAddon.fit();
+        
+        // Handle terminal input
+        terminal.onData((data) => {
+            if (currentSessionId) {
+                sendTerminalInput(data);
+            }
+        });
+        
+        // Handle resize
+        window.addEventListener('resize', () => {
+            if (terminalFitAddon) {
+                terminalFitAddon.fit();
+                if (currentSessionId) {
+                    resizeTerminal();
+                }
+            }
+        });
+    } else {
+        terminal.clear();
+        terminalFitAddon.fit();
+    }
+    
+    // Start terminal session
+    try {
+        showToast(`Starting interactive terminal for ${script}...`, 'info');
+        
+        const result = await fetchAPI(`/api/terminal/start/${script}`, {
             method: 'POST',
             force: true
         });
         
         if (result.success) {
-            output.textContent = result.stdout || 'Script completed successfully.\n';
-            if (result.stderr) {
-                output.textContent += '\n--- STDERR ---\n' + result.stderr;
-            }
-            showToast(`${script} completed successfully`, 'success');
+            currentSessionId = result.session_id;
+            terminalStatus.textContent = 'Connected';
+            terminalStatus.className = 'terminal-status connected';
+            terminal.writeln('\x1b[32m✓ Terminal session started\x1b[0m');
+            terminal.writeln('\x1b[90m─────────────────────────────────────────\x1b[0m');
+            terminal.writeln('');
+            
+            // Send initial resize
+            resizeTerminal();
+            
+            // Focus terminal
+            terminal.focus();
         } else {
-            output.textContent = `Script failed (exit code: ${result.return_code})\n\n`;
-            output.textContent += result.stdout || '';
-            output.textContent += '\n--- ERRORS ---\n' + (result.stderr || result.error || 'Unknown error');
-            showToast(`${script} failed`, 'error');
+            terminalStatus.textContent = 'Failed';
+            terminalStatus.className = 'terminal-status error';
+            terminal.writeln(`\x1b[31m✗ Error: ${result.error}\x1b[0m`);
+            if (result.path) {
+                terminal.writeln(`\x1b[90mPath: ${result.path}\x1b[0m`);
+            }
+            showToast(`Failed to start ${script}: ${result.error}`, 'error');
         }
         
-        // Refresh status
-        loadSetupStatus();
-        loadConfigFiles();
-        
     } catch (e) {
-        output.textContent = `Error running script: ${e.message}`;
+        terminalStatus.textContent = 'Error';
+        terminalStatus.className = 'terminal-status error';
+        terminal.writeln(`\x1b[31m✗ Error: ${e.message}\x1b[0m`);
         showToast(`Error: ${e.message}`, 'error');
     }
+}
+
+async function sendTerminalInput(data) {
+    if (!currentSessionId) return;
+    
+    try {
+        await fetch(`/api/terminal/input/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ data: data })
+        });
+    } catch (e) {
+        console.error('Failed to send input:', e);
+    }
+}
+
+async function resizeTerminal() {
+    if (!currentSessionId || !terminal) return;
+    
+    try {
+        await fetch(`/api/terminal/resize/${currentSessionId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ 
+                cols: terminal.cols, 
+                rows: terminal.rows 
+            })
+        });
+    } catch (e) {
+        console.error('Failed to resize:', e);
+    }
+}
+
+async function stopTerminalSession() {
+    if (!currentSessionId) return;
+    
+    try {
+        await fetch(`/api/terminal/stop/${currentSessionId}`, { method: 'POST' });
+        showToast('Terminal session stopped', 'info');
+    } catch (e) {
+        console.error('Failed to stop session:', e);
+    }
+    
+    currentSessionId = null;
+    const terminalStatus = document.getElementById('terminalStatus');
+    if (terminalStatus) {
+        terminalStatus.textContent = 'Stopped';
+        terminalStatus.className = 'terminal-status disconnected';
+    }
+}
+
+function closeTerminal() {
+    stopTerminalSession();
+    const terminalCard = document.getElementById('scriptTerminalCard');
+    if (terminalCard) {
+        terminalCard.style.display = 'none';
+    }
+    
+    // Refresh setup status
+    loadSetupStatus();
+    loadConfigFiles();
+}
+
+// Handle terminal output from WebSocket
+function setupTerminalOutputListener() {
+    if (typeof socket !== 'undefined' && socket) {
+        socket.on('terminal_output', (data) => {
+            if (!terminal) return;
+            if (currentSessionId && data.session_id !== currentSessionId) return;
+            
+            if (data.data) {
+                terminal.write(data.data);
+            }
+            
+            if (data.ended) {
+                const terminalStatus = document.getElementById('terminalStatus');
+                if (terminalStatus) {
+                    terminalStatus.textContent = 'Session Ended';
+                    terminalStatus.className = 'terminal-status disconnected';
+                }
+                currentSessionId = null;
+                showToast('Script completed', 'success');
+                
+                // Refresh status
+                loadSetupStatus();
+                loadConfigFiles();
+            }
+        });
+    }
+}
+
+// Initialize terminal output listener when socket connects
+if (typeof socket !== 'undefined' && socket) {
+    socket.on('connect', () => {
+        setupTerminalOutputListener();
+    });
+    setupTerminalOutputListener();
 }
 
 function closeScriptOutput() {
