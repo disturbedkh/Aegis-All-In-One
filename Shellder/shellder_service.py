@@ -8624,9 +8624,18 @@ class TerminalSession:
         env['COLUMNS'] = '120'
         env['LINES'] = '30'
         
+        # Try to run without sudo first (service may already have privileges)
+        # If we're root, run directly; otherwise try sudo without password
+        if os.geteuid() == 0:
+            cmd = ['bash', self.script_path]
+        else:
+            # Use sudo with -n (non-interactive, fails if password needed)
+            # Fall back to direct execution if sudo fails
+            cmd = ['sudo', '-n', 'bash', self.script_path]
+        
         # Start process with PTY
         self.process = subprocess.Popen(
-            ['sudo', '-S', 'bash', self.script_path],
+            cmd,
             stdin=slave_fd,
             stdout=slave_fd,
             stderr=slave_fd,
