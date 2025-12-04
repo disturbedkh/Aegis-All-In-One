@@ -5747,6 +5747,138 @@ select:focus {
     color: var(--text-secondary);
 }
 
+/* =============================================================================
+   SHARED FIELD INDICATORS - For fields that appear in multiple configs
+   ============================================================================= */
+
+.shared-fields-legend {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+    border: 1px solid var(--border-color);
+    border-left: 4px solid var(--primary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    margin-bottom: 20px;
+}
+
+.shared-fields-legend .legend-title {
+    font-weight: 600;
+    font-size: 0.95em;
+    color: var(--text-primary);
+    margin-bottom: 12px;
+}
+
+.shared-fields-legend .legend-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 10px;
+}
+
+.shared-fields-legend .legend-item {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-primary);
+    padding: 6px 12px;
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.shared-fields-legend .legend-label {
+    font-size: 0.85em;
+    font-weight: 500;
+    color: var(--text-primary);
+}
+
+.shared-fields-legend .legend-count {
+    font-size: 0.75em;
+    color: var(--text-muted);
+}
+
+.shared-fields-legend .legend-hint {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.shared-indicator {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    display: inline-block;
+    flex-shrink: 0;
+    box-shadow: 0 0 4px currentColor;
+}
+
+/* Shared field badge on individual fields */
+.shared-field-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 2px 8px;
+    border-radius: 10px;
+    border: 1px solid;
+    font-size: 0.7em;
+    background: rgba(255,255,255,0.05);
+    white-space: nowrap;
+}
+
+.shared-field-badge .shared-label {
+    font-weight: 500;
+}
+
+.shared-field-badge .shared-count {
+    opacity: 0.7;
+    font-size: 0.9em;
+}
+
+/* Config field with shared indicator */
+.config-field.has-shared {
+    border-left: 3px solid var(--primary);
+    padding-left: 12px;
+    margin-left: -12px;
+}
+
+.config-field-label-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+/* Section description */
+.config-section-header .section-desc {
+    font-size: 0.75em;
+    color: var(--text-muted);
+    font-weight: normal;
+    margin-left: 8px;
+}
+
+/* Sync button styling */
+.btn-sync {
+    font-size: 0.75em !important;
+    padding: 4px 8px !important;
+    white-space: nowrap;
+    transition: all 0.2s ease;
+}
+
+.btn-sync:hover {
+    transform: scale(1.05);
+    box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+}
+
+/* Input with action - ensure proper layout */
+.input-with-action {
+    display: flex;
+    gap: 6px;
+    align-items: stretch;
+}
+
+.input-with-action input {
+    flex: 1;
+    min-width: 0;
+}
+
 .no-schema-notice p {
     margin-bottom: 10px;
 }

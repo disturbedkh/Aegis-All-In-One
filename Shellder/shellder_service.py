@@ -8448,116 +8448,345 @@ REQUIRED_CONFIGS = {
     }
 }
 
-# Config field schemas for form-based editing
+# Shared field indicators - fields that appear in multiple configs and must match
+SHARED_FIELDS = {
+    'db_user': {
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'label': 'Database Username',
+        'desc': 'Must match MYSQL_USER in .env - used by all services',
+        'color': '#3b82f6'  # blue
+    },
+    'db_password': {
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'label': 'Database Password',
+        'desc': 'Must match MYSQL_PASSWORD in .env - used by all services',
+        'color': '#3b82f6'
+    },
+    'koji_secret': {
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'label': 'Koji Bearer Token',
+        'desc': 'Must match KOJI_SECRET in .env - used to access Koji geofences',
+        'color': '#8b5cf6'  # purple
+    },
+    'golbat_api_secret': {
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'label': 'Golbat API Secret',
+        'desc': 'Must match across configs - Dragonite/ReactMap use this to request data from Golbat',
+        'color': '#10b981'  # green
+    },
+    'golbat_raw_secret': {
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml'],
+        'label': 'Golbat Raw Bearer',
+        'desc': 'Must match across configs - Dragonite uses this to SEND data to Golbat',
+        'color': '#f59e0b'  # amber
+    },
+    'rotom_device_secret': {
+        'configs': ['unown/rotom_config.json'],
+        'label': 'Device Auth Secret',
+        'desc': 'Devices use this to authenticate with Rotom',
+        'color': '#ef4444'  # red
+    }
+}
+
+# Config field schemas for form-based editing - COMPLETE with all fields
 CONFIG_FIELD_SCHEMAS = {
     'unown/dragonite_config.toml': {
         'format': 'toml',
         'sections': {
             'general': {
-                'title': 'General Settings',
+                'title': '🔧 General Settings',
+                'desc': 'Core Dragonite server configuration',
                 'fields': {
-                    'listen_host': {'type': 'text', 'label': 'Listen Host', 'desc': 'IP address to bind to (0.0.0.0 for all interfaces)', 'default': '0.0.0.0'},
-                    'listen_port': {'type': 'number', 'label': 'Listen Port', 'desc': 'Port for the web interface', 'default': 7272},
-                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Secret key for API authentication', 'default': ''},
-                    'admin_password': {'type': 'password', 'label': 'Admin Password', 'desc': 'Password for admin interface', 'default': ''},
+                    'login_delay': {'type': 'number', 'label': 'Login Delay', 'desc': 'Seconds between account logins on same proxy (0=no delay, higher=safer)', 'default': 0},
+                    'stats': {'type': 'checkbox', 'label': 'Enable Stats', 'desc': 'Record detailed worker performance statistics', 'default': True},
+                    'api_host': {'type': 'text', 'label': 'API Host', 'desc': 'Network address to listen on (0.0.0.0 = all interfaces)', 'default': '0.0.0.0'},
+                    'api_port': {'type': 'number', 'label': 'API Port', 'desc': 'Port for web interface and API (Docker maps externally)', 'default': 7272},
+                    'remote_auth_url': {'type': 'text', 'label': 'Auth Service URL', 'desc': 'Xilriws login helper URL for Pokemon GO authentication', 'default': 'http://xilriws:5090/api/v1/login-code'},
                 }
             },
-            'database': {
-                'title': 'Database Connection',
+            'auth.ptc': {
+                'title': '🎮 PTC Account Settings',
+                'desc': 'Pokemon Trainer Club account configuration',
                 'fields': {
-                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database server hostname (use "database" for Docker)', 'default': 'database'},
-                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port (default 3306)', 'default': 3306},
-                    'name': {'type': 'text', 'label': 'Database Name', 'desc': 'Name of the database', 'default': 'dragonite'},
-                    'user': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
-                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                    'enable': {'type': 'checkbox', 'label': 'Enable PTC', 'desc': 'Allow PTC accounts for scanning', 'default': True},
+                    'login_delay': {'type': 'number', 'label': 'PTC Login Delay', 'desc': 'Seconds between PTC logins (120=safe, lower=faster but riskier)', 'default': 120},
+                    'token_init_enabled': {'type': 'checkbox', 'label': 'Pre-auth Accounts', 'desc': 'Prepare accounts before needed (faster switching)', 'default': True},
+                    'remote_auth_url': {'type': 'text', 'label': 'PTC Auth URL', 'desc': 'Auth service specifically for PTC accounts', 'default': 'http://xilriws:5090/api/v1/login-code'},
+                    'token_refresh_only': {'type': 'checkbox', 'label': 'Token Refresh Only', 'desc': 'Only use accounts with valid cached tokens (safer)', 'default': True},
                 }
             },
-            'golbat': {
-                'title': 'Golbat Integration',
+            'auth.nk': {
+                'title': '🎮 Nintendo/Google Account Settings',
+                'desc': 'Nintendo-linked or Google-linked account configuration',
                 'fields': {
-                    'api_endpoint': {'type': 'text', 'label': 'API Endpoint', 'desc': 'Golbat API URL (e.g., http://golbat:9001)', 'default': 'http://golbat:9001'},
-                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Golbat API secret (must match Golbat config)', 'default': ''},
+                    'enable': {'type': 'checkbox', 'label': 'Enable NK', 'desc': 'Allow Nintendo/Google linked accounts', 'default': False},
+                    'token_init_enabled': {'type': 'checkbox', 'label': 'Pre-auth Accounts', 'desc': 'Prepare accounts before needed', 'default': True},
+                    'token_refresh_only': {'type': 'checkbox', 'label': 'Token Refresh Only', 'desc': 'Only use accounts with valid cached tokens', 'default': True},
                 }
-            }
+            },
+            'koji': {
+                'title': '🗺️ Koji Geofence Connection',
+                'desc': 'Connection to Koji for scan area definitions',
+                'fields': {
+                    'url': {'type': 'text', 'label': 'Koji URL', 'desc': 'Internal Docker address of Koji service', 'default': 'http://koji:8080'},
+                    'bearer_token': {'type': 'password', 'label': 'Koji Bearer Token', 'desc': 'Must match KOJI_SECRET in .env', 'default': '', 'shared': 'koji_secret'},
+                }
+            },
+            'prometheus': {
+                'title': '📊 Prometheus Metrics',
+                'desc': 'Performance monitoring for Grafana dashboards',
+                'fields': {
+                    'enabled': {'type': 'checkbox', 'label': 'Enable Metrics', 'desc': 'Send stats to Prometheus (needed for Grafana)', 'default': True},
+                }
+            },
+            'tuning': {
+                'title': '⚙️ Account Tuning',
+                'desc': 'Control how aggressively accounts are used',
+                'fields': {
+                    'recycle_on_jail': {'type': 'checkbox', 'label': 'Recycle Jailed', 'desc': 'Put jailed accounts back in rotation after cooldown', 'default': False},
+                    'minimum_account_reuse_hours': {'type': 'number', 'label': 'Account Reuse Hours', 'desc': 'Hours an account must rest before reuse (72=3 days)', 'default': 72},
+                }
+            },
+            'rotom': {
+                'title': '📱 Rotom Device Manager',
+                'desc': 'Connection to Rotom for device management',
+                'fields': {
+                    'endpoint': {'type': 'text', 'label': 'Rotom Endpoint', 'desc': 'WebSocket address for Rotom controller', 'default': 'ws://rotom:7071'},
+                }
+            },
+            'logging': {
+                'title': '📝 Logging',
+                'desc': 'Debug and log file settings',
+                'fields': {
+                    'save': {'type': 'checkbox', 'label': 'Save Logs', 'desc': 'Write logs to files (needed for Blissey stats)', 'default': False},
+                }
+            },
+            'processors': {
+                'title': '🔄 Data Processors',
+                'desc': 'Golbat connection for data processing',
+                'fields': {
+                    'golbat_endpoint': {'type': 'text', 'label': 'Golbat HTTP', 'desc': 'Golbat HTTP address for sending data', 'default': 'http://golbat:9001'},
+                    'golbat_raw_bearer': {'type': 'password', 'label': 'Golbat Raw Bearer', 'desc': 'Password to SEND raw data to Golbat', 'default': '', 'shared': 'golbat_raw_secret'},
+                    'golbat_api_secret': {'type': 'password', 'label': 'Golbat API Secret', 'desc': 'Password to REQUEST data from Golbat', 'default': '', 'shared': 'golbat_api_secret'},
+                    'golbat_grpc_endpoint': {'type': 'text', 'label': 'Golbat gRPC', 'desc': 'Faster data transfer via gRPC (optional)', 'default': 'golbat:50001'},
+                }
+            },
+            'db.dragonite': {
+                'title': '🗄️ Dragonite Database',
+                'desc': 'Database for Dragonite accounts and settings',
+                'fields': {
+                    'host': {'type': 'text', 'label': 'DB Host', 'desc': 'Database server (use "database" for Docker)', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'DB Port', 'desc': 'Database port (3306 standard)', 'default': 3306},
+                    'user': {'type': 'text', 'label': 'DB Username', 'desc': 'Must match MYSQL_USER in .env', 'default': 'dbuser', 'shared': 'db_user'},
+                    'password': {'type': 'password', 'label': 'DB Password', 'desc': 'Must match MYSQL_PASSWORD in .env', 'default': '', 'shared': 'db_password'},
+                    'name': {'type': 'text', 'label': 'DB Name', 'desc': 'Database name for Dragonite data', 'default': 'dragonite'},
+                    'pool_size': {'type': 'number', 'label': 'Pool Size', 'desc': 'Number of database connections to maintain', 'default': 1},
+                }
+            },
         }
     },
     'unown/golbat_config.toml': {
         'format': 'toml',
         'sections': {
-            'general': {
-                'title': 'General Settings',
+            'root': {
+                'title': '🌐 Network & Security',
+                'desc': 'Ports and authentication for Golbat services',
                 'fields': {
-                    'api_listen': {'type': 'text', 'label': 'API Listen Address', 'desc': 'Address for API (e.g., :9001)', 'default': ':9001'},
-                    'raw_listen': {'type': 'text', 'label': 'Raw Data Listen', 'desc': 'Address for raw data (e.g., :9002)', 'default': ':9002'},
-                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Secret for API authentication', 'default': ''},
-                    'raw_secret': {'type': 'password', 'label': 'Raw Data Secret', 'desc': 'Secret for raw data endpoint', 'default': ''},
-                }
-            },
-            'database': {
-                'title': 'Database Connection',
-                'fields': {
-                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database server hostname', 'default': 'database'},
-                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port', 'default': 3306},
-                    'name': {'type': 'text', 'label': 'Database Name', 'desc': 'Database name', 'default': 'golbat'},
-                    'user': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
-                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                    'port': {'type': 'number', 'label': 'HTTP Port', 'desc': 'Port for incoming data and API requests', 'default': 9001},
+                    'grpc_port': {'type': 'number', 'label': 'gRPC Port', 'desc': 'Faster communication port using gRPC protocol', 'default': 50001},
+                    'raw_bearer': {'type': 'password', 'label': 'Raw Bearer', 'desc': 'Password required to SEND data TO Golbat', 'default': '', 'shared': 'golbat_raw_secret'},
+                    'api_secret': {'type': 'password', 'label': 'API Secret', 'desc': 'Password required to REQUEST data FROM Golbat', 'default': '', 'shared': 'golbat_api_secret'},
+                    'pokemon_memory_only': {'type': 'checkbox', 'label': 'Memory Only', 'desc': 'Keep Pokemon in RAM only (faster but lost on restart)', 'default': False},
                 }
             },
             'koji': {
-                'title': 'Koji Integration',
+                'title': '🗺️ Koji Geofence',
+                'desc': 'Geofence/area configuration from Koji',
                 'fields': {
-                    'url': {'type': 'text', 'label': 'Koji URL', 'desc': 'Koji server URL for geofence data', 'default': 'http://koji:8080'},
-                    'bearer_token': {'type': 'password', 'label': 'Bearer Token', 'desc': 'API token for Koji', 'default': ''},
+                    'url': {'type': 'text', 'label': 'Koji Geofence URL', 'desc': 'URL to fetch geofence definitions (include project name)', 'default': 'http://koji:8080/api/v1/geofence/feature-collection/Mapping'},
+                    'bearer_token': {'type': 'password', 'label': 'Koji Bearer Token', 'desc': 'Must match KOJI_SECRET in .env', 'default': '', 'shared': 'koji_secret'},
                 }
-            }
+            },
+            'cleanup': {
+                'title': '🧹 Database Cleanup',
+                'desc': 'Automatic deletion of old data',
+                'fields': {
+                    'pokemon': {'type': 'checkbox', 'label': 'Clean Pokemon', 'desc': 'Delete Pokemon after they despawn', 'default': True},
+                    'incidents': {'type': 'checkbox', 'label': 'Clean Incidents', 'desc': 'Remove Team Rocket invasions after expiry', 'default': True},
+                    'quests': {'type': 'checkbox', 'label': 'Clean Quests', 'desc': 'Remove quests after midnight reset', 'default': True},
+                    'stats': {'type': 'checkbox', 'label': 'Track Stats', 'desc': 'Keep historical statistics', 'default': True},
+                    'stats_days': {'type': 'number', 'label': 'Stats Retention Days', 'desc': 'Days to keep statistics history', 'default': 365},
+                    'device_hours': {'type': 'number', 'label': 'Device Cleanup Hours', 'desc': 'Remove inactive devices after X hours', 'default': 24},
+                }
+            },
+            'logging': {
+                'title': '📝 Logging',
+                'desc': 'Debug and log file settings',
+                'fields': {
+                    'debug': {'type': 'checkbox', 'label': 'Debug Mode', 'desc': 'Enable verbose debug logging', 'default': False},
+                    'save_logs': {'type': 'checkbox', 'label': 'Save to Files', 'desc': 'Write logs to disk files', 'default': False},
+                    'max_size': {'type': 'number', 'label': 'Max Log Size (MB)', 'desc': 'Maximum size before rotating', 'default': 50},
+                    'max_backups': {'type': 'number', 'label': 'Max Backups', 'desc': 'Number of old log files to keep', 'default': 10},
+                    'max_age': {'type': 'number', 'label': 'Max Age (Days)', 'desc': 'Delete logs older than this', 'default': 30},
+                    'compress': {'type': 'checkbox', 'label': 'Compress Logs', 'desc': 'Gzip old log files to save space', 'default': True},
+                }
+            },
+            'database': {
+                'title': '🗄️ Database',
+                'desc': 'Where Golbat stores all Pokemon data',
+                'fields': {
+                    'user': {'type': 'text', 'label': 'DB Username', 'desc': 'Must match MYSQL_USER in .env', 'default': 'dbuser', 'shared': 'db_user'},
+                    'password': {'type': 'password', 'label': 'DB Password', 'desc': 'Must match MYSQL_PASSWORD in .env', 'default': '', 'shared': 'db_password'},
+                    'address': {'type': 'text', 'label': 'DB Address', 'desc': 'Database host:port', 'default': 'database:3306'},
+                    'db': {'type': 'text', 'label': 'DB Name', 'desc': 'Database name for Pokemon/gym/raid data', 'default': 'golbat'},
+                }
+            },
+            'pvp': {
+                'title': '⚔️ PVP Rankings',
+                'desc': 'Battle League ranking calculations',
+                'fields': {
+                    'enabled': {'type': 'checkbox', 'label': 'Enable PVP', 'desc': 'Calculate Great/Ultra/Master League rankings', 'default': True},
+                    'include_hundos_under_cap': {'type': 'checkbox', 'label': 'Include Hundos', 'desc': 'Show PVP rank for 100% Pokemon under CP cap', 'default': False},
+                }
+            },
+            'prometheus': {
+                'title': '📊 Prometheus Metrics',
+                'desc': 'Performance monitoring',
+                'fields': {
+                    'enabled': {'type': 'checkbox', 'label': 'Enable Metrics', 'desc': 'Send stats to Prometheus for Grafana', 'default': True},
+                }
+            },
+            'tuning': {
+                'title': '⚙️ Performance Tuning',
+                'desc': 'Query and performance adjustments',
+                'fields': {
+                    'max_pokemon_distance': {'type': 'number', 'label': 'Max Search Distance (km)', 'desc': 'Maximum search radius for ReactMap', 'default': 100},
+                    'max_pokemon_results': {'type': 'number', 'label': 'Max Results', 'desc': 'Maximum Pokemon to return per query', 'default': 3000},
+                    'extended_timeout': {'type': 'checkbox', 'label': 'Extended Timeout', 'desc': 'Allow longer database queries', 'default': False},
+                }
+            },
         }
     },
     'unown/rotom_config.json': {
         'format': 'json',
         'sections': {
-            'server': {
-                'title': 'Server Settings',
+            'deviceListener': {
+                'title': '📱 Device Connections',
+                'desc': 'Settings for scanning devices (phones) connecting to Rotom',
                 'fields': {
-                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Port for Rotom API', 'default': 7070},
-                    'public': {'type': 'checkbox', 'label': 'Public Access', 'desc': 'Allow public access to API', 'default': False},
+                    'port': {'type': 'number', 'label': 'Device Port', 'desc': 'Port devices connect to (set this in Aegis app)', 'default': 7070},
+                    'secret': {'type': 'password', 'label': 'Device Secret', 'desc': 'Password devices need to connect (set in Aegis as Auth Bearer)', 'default': '', 'shared': 'rotom_device_secret'},
+                }
+            },
+            'controllerListener': {
+                'title': '🎮 Controller (Dragonite)',
+                'desc': 'Settings for Dragonite to control devices',
+                'fields': {
+                    'port': {'type': 'number', 'label': 'Controller Port', 'desc': 'Internal port for Dragonite connection', 'default': 7071},
+                    'secret': {'type': 'password', 'label': 'Controller Secret', 'desc': 'Password for Dragonite (empty = no auth, internal only)', 'default': ''},
                 }
             },
             'client': {
-                'title': 'Client Settings',
+                'title': '🌐 Web Dashboard',
+                'desc': 'Settings for the Rotom status web page',
                 'fields': {
-                    'workers': {'type': 'number', 'label': 'Max Workers', 'desc': 'Maximum number of worker connections', 'default': 100},
-                    'pokemon_timeout': {'type': 'number', 'label': 'Pokemon Timeout', 'desc': 'Timeout for Pokemon encounters (seconds)', 'default': 30},
+                    'port': {'type': 'number', 'label': 'Web Port', 'desc': 'Internal port for dashboard (Docker maps to 6003)', 'default': 7072},
+                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Bind address (0.0.0.0 for Docker)', 'default': '0.0.0.0'},
                 }
-            }
+            },
+            'logging': {
+                'title': '📝 Logging',
+                'desc': 'Log file settings',
+                'fields': {
+                    'save': {'type': 'checkbox', 'label': 'Save Logs', 'desc': 'Write logs to files', 'default': False},
+                    'maxSize': {'type': 'number', 'label': 'Max Size (MB)', 'desc': 'Max log file size before rotation', 'default': 100},
+                    'maxAge': {'type': 'number', 'label': 'Max Age (Days)', 'desc': 'Delete logs older than this', 'default': 14},
+                    'debug': {'type': 'checkbox', 'label': 'Debug Mode', 'desc': 'Enable detailed debug logging', 'default': False},
+                    'consoleStatus': {'type': 'checkbox', 'label': 'Console Status', 'desc': 'Show device status in console (noisy)', 'default': False},
+                }
+            },
+            'monitor': {
+                'title': '🔍 Device Monitor',
+                'desc': 'Automatic device health monitoring',
+                'fields': {
+                    'enabled': {'type': 'checkbox', 'label': 'Enable Monitor', 'desc': 'Turn on automatic device health monitoring', 'default': False},
+                    'reboot': {'type': 'checkbox', 'label': 'Auto Reboot', 'desc': 'Automatically reboot stuck devices (risky)', 'default': False},
+                    'minMemory': {'type': 'number', 'label': 'Min Memory (KB)', 'desc': 'Min free memory before device flagged unhealthy', 'default': 30000},
+                    'deviceCooldown': {'type': 'number', 'label': 'Cooldown (sec)', 'desc': 'Wait time before assigning work to new device', 'default': 0},
+                }
+            },
         }
     },
     'reactmap/local.json': {
         'format': 'json',
         'sections': {
-            'database': {
-                'title': 'Database Connection',
+            'general': {
+                'title': '🌐 Server Settings',
+                'desc': 'General ReactMap server configuration',
                 'fields': {
-                    'host': {'type': 'text', 'label': 'Host', 'desc': 'Database hostname', 'default': 'database'},
-                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Database port', 'default': 3306},
-                    'database': {'type': 'text', 'label': 'Database Name', 'desc': 'Golbat database name', 'default': 'golbat'},
-                    'username': {'type': 'text', 'label': 'Username', 'desc': 'Database username', 'default': 'dbuser'},
-                    'password': {'type': 'password', 'label': 'Password', 'desc': 'Database password', 'default': ''},
+                    'interface': {'type': 'text', 'label': 'Bind Address', 'desc': 'Network interface to bind to', 'default': '0.0.0.0'},
+                    'port': {'type': 'number', 'label': 'Port', 'desc': 'Internal port (Docker maps externally)', 'default': 8080},
                 }
             },
-            'map': {
-                'title': 'Map Settings',
+            'api': {
+                'title': '🔑 API Security',
+                'desc': 'Session and API security settings',
                 'fields': {
-                    'startLat': {'type': 'number', 'label': 'Start Latitude', 'desc': 'Default map center latitude', 'default': 0},
-                    'startLon': {'type': 'number', 'label': 'Start Longitude', 'desc': 'Default map center longitude', 'default': 0},
-                    'startZoom': {'type': 'number', 'label': 'Start Zoom', 'desc': 'Default map zoom level (1-18)', 'default': 12},
+                    'sessionSecret': {'type': 'password', 'label': 'Session Secret', 'desc': 'Secret for session encryption (auto-generated)', 'default': ''},
+                    'reactMapSecret': {'type': 'password', 'label': 'ReactMap Secret', 'desc': 'Additional API secret', 'default': ''},
+                    'maxSessions': {'type': 'number', 'label': 'Max Sessions', 'desc': 'Maximum concurrent sessions per user', 'default': 2},
                 }
             },
-            'authentication': {
-                'title': 'Authentication',
+            'api.kojiOptions': {
+                'title': '🗺️ Koji Integration',
+                'desc': 'Connection to Koji for geofences',
                 'fields': {
-                    'alwaysEnabledPerms': {'type': 'text', 'label': 'Default Permissions', 'desc': 'Permissions enabled for all users', 'default': ''},
+                    'bearerToken': {'type': 'password', 'label': 'Koji Bearer Token', 'desc': 'Must match KOJI_SECRET in .env', 'default': '', 'shared': 'koji_secret'},
                 }
-            }
+            },
+            'map.general': {
+                'title': '🗺️ Map Defaults',
+                'desc': 'Default map view settings',
+                'fields': {
+                    'title': {'type': 'text', 'label': 'Site Title', 'desc': 'Browser tab title', 'default': "Pokemod's PoGo Map"},
+                    'headerTitle': {'type': 'text', 'label': 'Header Title', 'desc': 'Title shown on map', 'default': "Pokemod's PoGo Map"},
+                    'startLat': {'type': 'number', 'label': 'Start Latitude', 'desc': 'Default map center latitude', 'default': 37.7894, 'step': 0.0001},
+                    'startLon': {'type': 'number', 'label': 'Start Longitude', 'desc': 'Default map center longitude', 'default': -122.4016, 'step': 0.0001},
+                    'startZoom': {'type': 'number', 'label': 'Start Zoom', 'desc': 'Default zoom level (1-18)', 'default': 12},
+                    'minZoom': {'type': 'number', 'label': 'Min Zoom', 'desc': 'Minimum allowed zoom out', 'default': 6},
+                    'maxZoom': {'type': 'number', 'label': 'Max Zoom', 'desc': 'Maximum allowed zoom in', 'default': 18},
+                    'geoJsonFileName': {'type': 'text', 'label': 'GeoJSON URL', 'desc': 'Koji URL for scan area polygons', 'default': 'http://koji:8080/api/v1/geofence/feature-collection/Reactmap'},
+                }
+            },
+            'database_golbat': {
+                'title': '🗄️ Golbat Database',
+                'desc': 'Connection to Golbat for Pokemon data',
+                'fields': {
+                    'endpoint': {'type': 'text', 'label': 'Golbat Endpoint', 'desc': 'Golbat HTTP API address', 'default': 'http://golbat:9001'},
+                    'secret': {'type': 'password', 'label': 'Golbat API Secret', 'desc': 'Must match api_secret in golbat_config', 'default': '', 'shared': 'golbat_api_secret'},
+                }
+            },
+            'database_main': {
+                'title': '🗄️ Main Database',
+                'desc': 'Direct database connection for Pokemon data',
+                'fields': {
+                    'host': {'type': 'text', 'label': 'DB Host', 'desc': 'Database server hostname', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'DB Port', 'desc': 'Database port', 'default': 3306},
+                    'username': {'type': 'text', 'label': 'DB Username', 'desc': 'Must match MYSQL_USER in .env', 'default': 'dbuser', 'shared': 'db_user'},
+                    'password': {'type': 'password', 'label': 'DB Password', 'desc': 'Must match MYSQL_PASSWORD in .env', 'default': '', 'shared': 'db_password'},
+                    'database': {'type': 'text', 'label': 'DB Name', 'desc': 'Golbat database name', 'default': 'golbat'},
+                }
+            },
+            'scanner': {
+                'title': '📡 Scanner Integration',
+                'desc': 'On-demand scanning settings',
+                'fields': {
+                    'platform': {'type': 'text', 'label': 'Scanner Platform', 'desc': 'Scanner type (dragonite)', 'default': 'dragonite'},
+                    'apiEndpoint': {'type': 'text', 'label': 'Scanner API', 'desc': 'Dragonite scout endpoint', 'default': 'http://dragonite:7272/scout'},
+                    'scanZoneEnabled': {'type': 'checkbox', 'label': 'Enable Scan Zone', 'desc': 'Allow users to request scans', 'default': True},
+                    'scanZoneMaxSize': {'type': 'number', 'label': 'Max Scan Size', 'desc': 'Maximum scan zone size', 'default': 4},
+                }
+            },
         }
     }
 }
@@ -9668,13 +9897,219 @@ def api_config_schema(config_path):
         except Exception as e:
             current_values = {'_parse_error': str(e)}
     
+    # Add shared field information to the response
+    shared_fields_info = {}
+    for section_key, section_info in schema['sections'].items():
+        for field_key, field_info in section_info['fields'].items():
+            if 'shared' in field_info:
+                shared_key = field_info['shared']
+                if shared_key in SHARED_FIELDS:
+                    shared_data = SHARED_FIELDS[shared_key]
+                    # Find other configs that use this field
+                    other_configs = [c for c in shared_data['configs'] if c != config_path]
+                    shared_fields_info[f"{section_key}.{field_key}"] = {
+                        'key': shared_key,
+                        'label': shared_data['label'],
+                        'desc': shared_data['desc'],
+                        'color': shared_data['color'],
+                        'other_configs': other_configs,
+                        'total_configs': len(shared_data['configs'])
+                    }
+    
     return jsonify({
         'has_schema': True,
         'format': schema['format'],
         'sections': schema['sections'],
         'current_values': current_values,
-        'exists': os.path.exists(full_path)
+        'exists': os.path.exists(full_path),
+        'shared_fields': shared_fields_info,
+        'all_shared_definitions': SHARED_FIELDS
     })
+
+@app.route('/api/config/sync-field', methods=['POST'])
+def api_config_sync_field():
+    """Sync a field value across all configs that share it"""
+    data = request.get_json()
+    shared_key = data.get('shared_key')
+    new_value = data.get('value')
+    source_config = data.get('source_config')
+    
+    if not shared_key or new_value is None:
+        return jsonify({'error': 'shared_key and value are required'}), 400
+    
+    if shared_key not in SHARED_FIELDS:
+        return jsonify({'error': f'Unknown shared field: {shared_key}'}), 400
+    
+    shared_info = SHARED_FIELDS[shared_key]
+    aegis_root = str(AEGIS_ROOT)
+    results = []
+    
+    for config_path in shared_info['configs']:
+        if config_path not in CONFIG_FIELD_SCHEMAS:
+            results.append({'config': config_path, 'status': 'skipped', 'reason': 'No schema'})
+            continue
+        
+        schema = CONFIG_FIELD_SCHEMAS[config_path]
+        full_path = os.path.join(aegis_root, config_path)
+        
+        if not os.path.exists(full_path):
+            results.append({'config': config_path, 'status': 'skipped', 'reason': 'File does not exist'})
+            continue
+        
+        try:
+            # Find which field in this config uses this shared key
+            field_path = None
+            for section_key, section_info in schema['sections'].items():
+                for field_key, field_info in section_info['fields'].items():
+                    if field_info.get('shared') == shared_key:
+                        field_path = (section_key, field_key)
+                        break
+                if field_path:
+                    break
+            
+            if not field_path:
+                results.append({'config': config_path, 'status': 'skipped', 'reason': 'Field not found in schema'})
+                continue
+            
+            # Read current config
+            with open(full_path, 'r') as f:
+                content = f.read()
+            
+            # Update the value based on format
+            if schema['format'] == 'toml':
+                updated_content = update_toml_field(content, field_path[0], field_path[1], new_value, schema['sections'][field_path[0]]['fields'][field_path[1]])
+            elif schema['format'] == 'json':
+                updated_content = update_json_field(content, field_path[0], field_path[1], new_value)
+            else:
+                results.append({'config': config_path, 'status': 'error', 'reason': 'Unsupported format'})
+                continue
+            
+            # Write updated config
+            result = subprocess.run(
+                ['sudo', 'tee', full_path],
+                input=updated_content,
+                capture_output=True,
+                text=True,
+                timeout=10
+            )
+            
+            if result.returncode == 0:
+                results.append({'config': config_path, 'status': 'success', 'field': f"{field_path[0]}.{field_path[1]}"})
+            else:
+                results.append({'config': config_path, 'status': 'error', 'reason': result.stderr})
+                
+        except Exception as e:
+            results.append({'config': config_path, 'status': 'error', 'reason': str(e)})
+    
+    return jsonify({
+        'success': True,
+        'shared_key': shared_key,
+        'value': '***' if 'password' in shared_key or 'secret' in shared_key else new_value,
+        'results': results
+    })
+
+def update_toml_field(content, section, field, value, field_info):
+    """Update a specific field in TOML content"""
+    lines = content.split('\n')
+    in_section = False
+    section_pattern = re.compile(r'^\s*\[' + re.escape(section) + r'\]\s*$')
+    field_pattern = re.compile(r'^(\s*)' + re.escape(field) + r'\s*=')
+    new_section_pattern = re.compile(r'^\s*\[')
+    
+    field_updated = False
+    result_lines = []
+    
+    for i, line in enumerate(lines):
+        # Check if we're entering the target section
+        if section_pattern.match(line):
+            in_section = True
+            result_lines.append(line)
+            continue
+        
+        # Check if we're leaving the section
+        if in_section and new_section_pattern.match(line) and not section_pattern.match(line):
+            # If field wasn't found in section, add it before leaving
+            if not field_updated:
+                formatted_value = format_toml_value(value, field_info)
+                result_lines.append(f'{field} = {formatted_value}')
+                field_updated = True
+            in_section = False
+        
+        # Check if this is our field
+        if in_section and field_pattern.match(line):
+            formatted_value = format_toml_value(value, field_info)
+            # Preserve any inline comments
+            comment = ''
+            if '#' in line:
+                comment = ' #' + line.split('#', 1)[1]
+            result_lines.append(f'{field} = {formatted_value}{comment}')
+            field_updated = True
+            continue
+        
+        result_lines.append(line)
+    
+    # If we never found the section or field, we might need to add them
+    if not field_updated:
+        # This is a simplified case - in practice you'd want more robust handling
+        formatted_value = format_toml_value(value, field_info)
+        result_lines.append('')
+        result_lines.append(f'[{section}]')
+        result_lines.append(f'{field} = {formatted_value}')
+    
+    return '\n'.join(result_lines)
+
+def format_toml_value(value, field_info):
+    """Format a value for TOML based on field type"""
+    field_type = field_info.get('type', 'text')
+    if field_type in ('text', 'password'):
+        # Escape quotes and backslashes
+        escaped = str(value).replace('\\', '\\\\').replace('"', '\\"')
+        return f'"{escaped}"'
+    elif field_type == 'number':
+        return str(value)
+    elif field_type == 'checkbox':
+        return 'true' if value else 'false'
+    else:
+        return f'"{value}"'
+
+def update_json_field(content, section, field, value):
+    """Update a specific field in JSON content"""
+    try:
+        data = json.loads(content)
+        
+        # Handle nested sections like "api.kojiOptions" or "map.general"
+        if '.' in section:
+            parts = section.split('.')
+            target = data
+            for part in parts[:-1]:
+                if part not in target:
+                    target[part] = {}
+                target = target[part]
+            if parts[-1] not in target:
+                target[parts[-1]] = {}
+            target[parts[-1]][field] = value
+        elif section == 'database_golbat':
+            # Special handling for ReactMap database schemas
+            if 'database' in data and 'schemas' in data['database']:
+                for schema in data['database']['schemas']:
+                    if schema.get('type') == 'golbat':
+                        schema[field] = value
+                        break
+        elif section == 'database_main':
+            # Special handling for ReactMap database schemas (main DB)
+            if 'database' in data and 'schemas' in data['database']:
+                for schema in data['database']['schemas']:
+                    if 'useFor' in schema and 'gym' in schema.get('useFor', []):
+                        schema[field] = value
+                        break
+        else:
+            if section not in data:
+                data[section] = {}
+            data[section][field] = value
+        
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        raise Exception(f'Failed to update JSON: {e}')
 
 @app.route('/api/config/structured', methods=['POST'])
 def api_config_structured_save():

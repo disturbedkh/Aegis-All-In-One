@@ -5811,8 +5811,38 @@ async function editConfigFile(path) {
 function renderConfigForm(schemaData) {
     const container = document.getElementById('configFieldsContainer');
     const values = schemaData.current_values || {};
+    const sharedFields = schemaData.shared_fields || {};
     
-    let html = '';
+    // Add legend for shared fields
+    let legendHtml = '';
+    const usedSharedKeys = new Set();
+    for (const fieldPath of Object.keys(sharedFields)) {
+        usedSharedKeys.add(sharedFields[fieldPath].key);
+    }
+    
+    if (usedSharedKeys.size > 0) {
+        legendHtml = `
+            <div class="shared-fields-legend">
+                <div class="legend-title">🔗 Shared Field Indicators</div>
+                <div class="legend-items">
+                    ${Array.from(usedSharedKeys).map(key => {
+                        const info = schemaData.all_shared_definitions[key];
+                        if (!info) return '';
+                        return `
+                            <div class="legend-item">
+                                <span class="shared-indicator" style="background: ${info.color};"></span>
+                                <span class="legend-label">${info.label}</span>
+                                <span class="legend-count">(${info.configs.length} configs)</span>
+                            </div>
+                        `;
+                    }).join('')}
+                </div>
+                <div class="legend-hint">💡 Fields with indicators are shared across multiple config files. Use "Sync All" to update all configs at once.</div>
+            </div>
+        `;
+    }
+    
+    let html = legendHtml;
     for (const [sectionKey, section] of Object.entries(schemaData.sections)) {
         const sectionValues = values[sectionKey] || {};
         
@@ -5820,12 +5850,14 @@ function renderConfigForm(schemaData) {
             <div class="config-section" id="config-section-${sectionKey}">
                 <div class="config-section-header" onclick="toggleConfigSection('${sectionKey}')">
                     <h4>${section.title}</h4>
+                    ${section.desc ? `<span class="section-desc">${section.desc}</span>` : ''}
                     <span class="config-section-toggle">▼</span>
                 </div>
                 <div class="config-section-fields">
                     ${Object.entries(section.fields).map(([fieldKey, field]) => {
                         const currentValue = sectionValues[fieldKey] ?? field.default ?? '';
-                        return renderConfigField(sectionKey, fieldKey, field, currentValue);
+                        const sharedInfo = sharedFields[`${sectionKey}.${fieldKey}`] || null;
+                        return renderConfigField(sectionKey, fieldKey, field, currentValue, sharedInfo);
                     }).join('')}
                 </div>
             </div>
@@ -5835,7 +5867,7 @@ function renderConfigForm(schemaData) {
     container.innerHTML = html;
 }
 
-function renderConfigField(section, key, field, value) {
+function renderConfigField(section, key, field, value, sharedInfo = null) {
     const inputId = `config-${section}-${key}`;
     let inputHtml = '';
     
@@ -5852,18 +5884,45 @@ function renderConfigField(section, key, field, value) {
                 <input type="password" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}">
                 <button class="btn btn-xs" onclick="toggleFieldVisibility('${inputId}')" title="Show/Hide">👁️</button>
                 <button class="btn btn-xs" onclick="generateFieldValue('${inputId}')" title="Generate random">🎲</button>
+                ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
             </div>
         `;
     } else if (field.type === 'number') {
-        inputHtml = `<input type="number" id="${inputId}" value="${value}" placeholder="${field.default || ''}">`;
+        inputHtml = `
+            <div class="input-with-action">
+                <input type="number" id="${inputId}" value="${value}" placeholder="${field.default || ''}" style="flex:1;">
+                ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
+            </div>
+        `;
     } else {
-        inputHtml = `<input type="text" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}">`;
+        inputHtml = `
+            <div class="input-with-action">
+                <input type="text" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}" style="flex:1;">
+                ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
+            </div>
+        `;
+    }
+    
+    // Shared field indicator
+    let sharedIndicator = '';
+    if (sharedInfo) {
+        const otherConfigs = sharedInfo.other_configs.map(c => c.split('/').pop()).join(', ');
+        sharedIndicator = `
+            <div class="shared-field-badge" style="border-color: ${sharedInfo.color}; color: ${sharedInfo.color};" title="Also in: ${otherConfigs}">
+                <span class="shared-indicator" style="background: ${sharedInfo.color};"></span>
+                <span class="shared-label">${sharedInfo.label}</span>
+                <span class="shared-count">${sharedInfo.total_configs} configs</span>
+            </div>
+        `;
     }
     
     return `
-        <div class="config-field">
+        <div class="config-field ${sharedInfo ? 'has-shared' : ''}">
             <div class="config-field-info">
-                <div class="config-field-label">${field.label}</div>
+                <div class="config-field-label-row">
+                    <span class="config-field-label">${field.label}</span>
+                    ${sharedIndicator}
+                </div>
                 <div class="config-field-desc">${field.desc}</div>
             </div>
             <div class="config-field-input">
@@ -5871,6 +5930,60 @@ function renderConfigField(section, key, field, value) {
             </div>
         </div>
     `;
+}
+
+// Sync a shared field value across all configs
+async function syncSharedField(inputId, sharedKey) {
+    const input = document.getElementById(inputId);
+    if (!input) return;
+    
+    const value = input.type === 'checkbox' ? input.checked : input.value;
+    
+    if (!value && input.type !== 'checkbox') {
+        showToast('Please enter a value before syncing', 'warning');
+        return;
+    }
+    
+    // Confirm sync
+    const confirmed = confirm(`Sync this value to ALL configs that use "${sharedKey}"?\n\nThis will update multiple config files.`);
+    if (!confirmed) return;
+    
+    showToast('Syncing to all configs...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/config/sync-field', {
+            method: 'POST',
+            body: JSON.stringify({
+                shared_key: sharedKey,
+                value: value,
+                source_config: currentConfigPath
+            }),
+            force: true
+        });
+        
+        if (result.success) {
+            const successCount = result.results.filter(r => r.status === 'success').length;
+            const skipCount = result.results.filter(r => r.status === 'skipped').length;
+            const errorCount = result.results.filter(r => r.status === 'error').length;
+            
+            let message = `Synced to ${successCount} configs`;
+            if (skipCount > 0) message += `, ${skipCount} skipped`;
+            if (errorCount > 0) message += `, ${errorCount} errors`;
+            
+            showToast(message, errorCount > 0 ? 'warning' : 'success');
+            
+            // Show details in console
+            console.log('Sync results:', result.results);
+            
+            // Refresh config list
+            loadConfigFiles();
+            loadSetupStatus();
+        } else {
+            showToast(`Sync failed: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Sync error: ${e.message}`, 'error');
+    }
 }
 
 function toggleConfigSection(sectionKey) {
