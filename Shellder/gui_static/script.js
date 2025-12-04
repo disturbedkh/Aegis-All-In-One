@@ -5495,28 +5495,29 @@ async function loadConfigVarsQuickStatus() {
         const data = await fetchAPI('/api/config/variables-status');
         cachedConfigVarsData = data;  // Cache for dropdown
         
-        // Update count: configured/total
+        // Update count: configured/total (using new API format)
         const configured = data.summary.configured || 0;
-        const total = data.summary.total_variables || 0;
+        const total = data.summary.total || 0;
         countEl.textContent = `${configured}/${total}`;
         
-        // Update sync light based on mismatch status
+        // Update sync light based on overall status
         if (syncLight) {
+            const status = data.summary.overall_status;
             const mismatched = data.summary.mismatched || 0;
-            const missing = data.summary.missing || 0;
+            const notConfigured = data.summary.not_configured || 0;
             
-            if (mismatched > 0) {
+            if (status === 'mismatch' || mismatched > 0) {
                 syncLight.className = 'sync-light mismatch';
-                syncLight.title = `${mismatched} variable(s) have mismatched values across configs`;
-            } else if (missing > 0) {
+                syncLight.title = `${mismatched} secret(s) have mismatched values - click to view`;
+            } else if (status === 'incomplete' || notConfigured > 0) {
                 syncLight.className = 'sync-light partial';
-                syncLight.title = `${missing} required variable(s) not set`;
-            } else if (configured === total) {
+                syncLight.title = `${notConfigured} secret(s) still at default - must be configured`;
+            } else if (status === 'synced') {
                 syncLight.className = 'sync-light synced';
-                syncLight.title = 'All variables configured and synced';
+                syncLight.title = 'All secrets configured and synced across configs';
             } else {
-                syncLight.className = 'sync-light partial';
-                syncLight.title = `${total - configured} variable(s) not configured`;
+                syncLight.className = 'sync-light synced';
+                syncLight.title = 'Configuration OK';
             }
         }
     } catch (e) {
@@ -5573,55 +5574,78 @@ async function populateConfigVarsDropdown() {
     
     let html = '';
     
-    // Summary row
+    // Summary row (using new API format)
+    const synced = data.summary.synced || 0;
+    const notConfigured = data.summary.not_configured || 0;
+    const mismatched = data.summary.mismatched || 0;
+    
     html += `
         <div class="dropdown-summary">
-            <div class="dropdown-summary-item ok">✅ ${data.summary.configured || 0} configured</div>
-            <div class="dropdown-summary-item warning">⚠️ ${data.summary.missing || 0} missing</div>
-            <div class="dropdown-summary-item error">❌ ${data.summary.mismatched || 0} mismatched</div>
+            <div class="dropdown-summary-item ok">✅ ${synced} synced</div>
+            <div class="dropdown-summary-item warning">⚠️ ${notConfigured} unconfigured</div>
+            <div class="dropdown-summary-item error">❌ ${mismatched} mismatched</div>
         </div>
     `;
     
-    // Show categories with their variables
-    for (const [catKey, cat] of Object.entries(data.categories)) {
-        const vars = Object.entries(cat.variables);
-        const issues = vars.filter(([_, v]) => !v.has_value || v.sync_status === 'mismatch');
-        
-        // Only show categories with issues, or first few categories
-        if (issues.length === 0 && catKey !== 'database' && catKey !== 'security') continue;
-        
+    // Group variables by their category from the categories definition
+    const varsByCategory = { 'database': [], 'secrets': [] };
+    
+    for (const [varName, varInfo] of Object.entries(data.variables || {})) {
+        // Determine category based on variable name
+        if (varName.startsWith('MYSQL')) {
+            varsByCategory.database.push([varName, varInfo]);
+        } else {
+            varsByCategory.secrets.push([varName, varInfo]);
+        }
+    }
+    
+    // Show database secrets first
+    if (varsByCategory.database.length > 0) {
         html += `
             <div class="dropdown-category">
-                <div class="dropdown-category-title">${cat.icon || '📁'} ${cat.title.replace(/^[^\s]+\s*/, '')}</div>
+                <div class="dropdown-category-title">🗄️ Database</div>
                 <div class="dropdown-var-list">
         `;
         
-        // Show variables (limit to important ones or issues)
-        const varsToShow = issues.length > 0 ? issues : vars.slice(0, 3);
-        for (const [varName, varInfo] of varsToShow) {
+        for (const [varName, varInfo] of varsByCategory.database) {
             let statusClass = 'empty';
             if (varInfo.sync_status === 'mismatch') statusClass = 'mismatch';
-            else if (varInfo.has_value) statusClass = 'ok';
-            else if (varInfo.required) statusClass = 'missing';
-            
-            const displayValue = varInfo.secret 
-                ? (varInfo.has_value ? '•••' : '-') 
-                : (varInfo.value || varInfo.default || '-');
+            else if (varInfo.sync_status === 'synced') statusClass = 'ok';
+            else if (varInfo.sync_status === 'not_configured') statusClass = 'missing';
             
             html += `
                 <div class="dropdown-var-item">
                     <span class="var-status ${statusClass}"></span>
                     <span class="var-name">${varInfo.label}</span>
-                    <span class="var-value">${truncateValue(displayValue, 12)}</span>
+                    <span class="var-value">${varInfo.is_configured ? '•••' : 'default'}</span>
                 </div>
             `;
         }
         
-        // Show count if more variables
-        if (vars.length > varsToShow.length) {
-            html += `<div class="dropdown-var-item" style="justify-content: center; color: var(--text-secondary); font-size: 0.8em;">
-                +${vars.length - varsToShow.length} more...
-            </div>`;
+        html += `</div></div>`;
+    }
+    
+    // Show service secrets
+    if (varsByCategory.secrets.length > 0) {
+        html += `
+            <div class="dropdown-category">
+                <div class="dropdown-category-title">🔐 Secrets</div>
+                <div class="dropdown-var-list">
+        `;
+        
+        for (const [varName, varInfo] of varsByCategory.secrets) {
+            let statusClass = 'empty';
+            if (varInfo.sync_status === 'mismatch') statusClass = 'mismatch';
+            else if (varInfo.sync_status === 'synced') statusClass = 'ok';
+            else if (varInfo.sync_status === 'not_configured') statusClass = 'missing';
+            
+            html += `
+                <div class="dropdown-var-item">
+                    <span class="var-status ${statusClass}"></span>
+                    <span class="var-name">${varInfo.label}</span>
+                    <span class="var-value">${varInfo.is_configured ? '•••' : 'default'}</span>
+                </div>
+            `;
         }
         
         html += `</div></div>`;
@@ -6277,13 +6301,13 @@ async function saveConfigFile() {
             // Save raw content
             const editor = document.getElementById('configEditorContent');
             result = await fetchAPI('/api/config/file', {
-                method: 'POST',
-                body: JSON.stringify({
-                    path: currentConfigPath,
-                    content: editor.value
-                }),
-                force: true
-            });
+            method: 'POST',
+            body: JSON.stringify({
+                path: currentConfigPath,
+                content: editor.value
+            }),
+            force: true
+        });
         }
         
         if (result.success) {
@@ -6352,104 +6376,152 @@ async function loadConfigVariablesStatus() {
     try {
         const data = await fetchAPI('/api/config/variables-status');
         
-        // Update summary stats
-        document.getElementById('configVarsTotal').textContent = data.summary.total_variables || 0;
-        document.getElementById('configVarsConfigured').textContent = data.summary.configured || 0;
-        document.getElementById('configVarsMissing').textContent = data.summary.missing || 0;
-        document.getElementById('configVarsSynced').textContent = data.summary.synced || 0;
-        document.getElementById('configVarsMismatched').textContent = data.summary.mismatched || 0;
+        // Update summary stats (using new API format)
+        const totalEl = document.getElementById('configVarsTotal');
+        const configuredEl = document.getElementById('configVarsConfigured');
+        const missingEl = document.getElementById('configVarsMissing');
+        const syncedEl = document.getElementById('configVarsSynced');
+        const mismatchedEl = document.getElementById('configVarsMismatched');
+        
+        if (totalEl) totalEl.textContent = data.summary.total || 0;
+        if (configuredEl) configuredEl.textContent = data.summary.configured || 0;
+        if (missingEl) missingEl.textContent = data.summary.not_configured || 0;
+        if (syncedEl) syncedEl.textContent = data.summary.synced || 0;
+        if (mismatchedEl) mismatchedEl.textContent = data.summary.mismatched || 0;
+        
+        // Group variables into categories
+        const dbVars = [];
+        const secretVars = [];
+        
+        for (const [varName, varInfo] of Object.entries(data.variables || {})) {
+            if (varName.startsWith('MYSQL')) {
+                dbVars.push([varName, varInfo]);
+            } else {
+                secretVars.push([varName, varInfo]);
+            }
+        }
         
         let html = '';
         
-        for (const [catKey, cat] of Object.entries(data.categories)) {
-            const vars = Object.entries(cat.variables);
-            const configuredCount = vars.filter(([_, v]) => v.has_value).length;
-            const missingCount = vars.filter(([_, v]) => !v.has_value && v.required).length;
-            const mismatchCount = vars.filter(([_, v]) => v.sync_status === 'mismatch').length;
+        // Database category
+        if (dbVars.length > 0) {
+            const configuredCount = dbVars.filter(([_, v]) => v.is_configured).length;
+            const mismatchCount = dbVars.filter(([_, v]) => v.sync_status === 'mismatch').length;
+            const notConfiguredCount = dbVars.filter(([_, v]) => v.sync_status === 'not_configured').length;
             
             html += `
-                <div class="config-var-category" data-category="${catKey}">
-                    <div class="config-var-category-header" onclick="toggleConfigCategory('${catKey}')">
-                        <h4>${cat.title}</h4>
+                <div class="config-var-category" data-category="database">
+                    <div class="config-var-category-header" onclick="toggleConfigCategory('database')">
+                        <h4>🗄️ Database Credentials</h4>
                         <div class="category-stats">
-                            <span class="stat ok">${configuredCount}/${vars.length} set</span>
-                            ${missingCount > 0 ? `<span class="stat warn">${missingCount} missing</span>` : ''}
+                            <span class="stat ok">${configuredCount}/${dbVars.length} set</span>
+                            ${notConfiguredCount > 0 ? `<span class="stat warn">${notConfiguredCount} unconfigured</span>` : ''}
                             ${mismatchCount > 0 ? `<span class="stat error">${mismatchCount} mismatch</span>` : ''}
                         </div>
                     </div>
-                    <div class="config-var-category-body" id="category-body-${catKey}">
+                    <div class="config-var-category-body show" id="category-body-database">
             `;
             
-            for (const [varName, varInfo] of vars) {
-                // Determine status indicator
-                let statusClass = 'empty';
-                if (varInfo.sync_status === 'synced') {
-                    statusClass = 'synced';
-                } else if (varInfo.sync_status === 'mismatch') {
-                    statusClass = 'mismatch';
-                } else if (varInfo.has_value) {
-                    statusClass = 'set';
-                } else if (varInfo.required) {
-                    statusClass = 'missing';
-                }
-                
-                // Show value or placeholder
-                let displayValue = '';
-                if (varInfo.secret) {
-                    displayValue = varInfo.has_value ? '••••••••' : '<span class="empty">(not set)</span>';
-                } else {
-                    displayValue = varInfo.value || varInfo.default || '<span class="empty">(not set)</span>';
-                }
-                
-                // Shared badge
-                const sharedBadge = varInfo.shared ? '<span class="shared-badge">🔗 shared</span>' : '';
-                
-                html += `
-                    <div class="config-var-item" data-var="${varName}">
-                        <div class="config-var-status ${statusClass}" title="${getStatusTitle(statusClass)}"></div>
-                        <div class="config-var-label">
-                            ${varInfo.label}
-                            ${sharedBadge}
-                        </div>
-                        <div class="config-var-value ${varInfo.secret ? 'secret' : ''}">${displayValue}</div>
-                        <div class="config-var-source">${varInfo.source}</div>
-                `;
-                
-                // Show sync details for mismatched variables
-                if (varInfo.sync_status === 'mismatch' && data.shared_sync[varName]) {
-                    const syncData = data.shared_sync[varName];
-                    html += `
-                        <div class="config-var-sync-details">
-                            <strong>⚠️ Values don't match across configs:</strong>
-                            ${Object.entries(syncData.values).map(([file, val]) => `
-                                <div class="sync-row">
-                                    <span class="sync-file">${file}</span>
-                                    <span class="sync-value">${val ? (varInfo.secret ? '••••' : truncateValue(val)) : '(empty)'}</span>
-                                </div>
-                            `).join('')}
-                            <button class="btn btn-xs btn-warning" style="margin-top: 8px;" 
-                                    onclick="syncConfigVariable('${varName}')">
-                                🔄 Sync All to Match
-                            </button>
-                        </div>
-                    `;
-                }
-                
-                html += `</div>`;
+            for (const [varName, varInfo] of dbVars) {
+                html += renderConfigVarItem(varName, varInfo);
             }
             
-            html += `
-                    </div>
-                </div>
-            `;
+            html += '</div></div>';
         }
         
-        container.innerHTML = html || '<div class="info-msg">No configuration data available</div>';
+        // Service Secrets category
+        if (secretVars.length > 0) {
+            const configuredCount = secretVars.filter(([_, v]) => v.is_configured).length;
+            const mismatchCount = secretVars.filter(([_, v]) => v.sync_status === 'mismatch').length;
+            const notConfiguredCount = secretVars.filter(([_, v]) => v.sync_status === 'not_configured').length;
+            
+            html += `
+                <div class="config-var-category" data-category="secrets">
+                    <div class="config-var-category-header" onclick="toggleConfigCategory('secrets')">
+                        <h4>🔐 Service Secrets</h4>
+                        <div class="category-stats">
+                            <span class="stat ok">${configuredCount}/${secretVars.length} set</span>
+                            ${notConfiguredCount > 0 ? `<span class="stat warn">${notConfiguredCount} unconfigured</span>` : ''}
+                            ${mismatchCount > 0 ? `<span class="stat error">${mismatchCount} mismatch</span>` : ''}
+                        </div>
+                    </div>
+                    <div class="config-var-category-body show" id="category-body-secrets">
+            `;
+            
+            for (const [varName, varInfo] of secretVars) {
+                html += renderConfigVarItem(varName, varInfo);
+            }
+            
+            html += '</div></div>';
+        }
+        
+        container.innerHTML = html;
         
     } catch (e) {
-        container.innerHTML = `<div class="error-msg">Failed to load config status: ${e.message}</div>`;
-        console.error('Config status error:', e);
+        console.error('Failed to load config variables status:', e);
+        container.innerHTML = `<div class="error-message">Failed to load: ${e.message}</div>`;
     }
+}
+
+function renderConfigVarItem(varName, varInfo) {
+    // Determine status indicator
+    let statusClass = 'empty';
+    let statusTitle = 'Not configured';
+    
+    if (varInfo.sync_status === 'synced') {
+        statusClass = 'synced';
+        statusTitle = 'Configured and synced across all configs';
+    } else if (varInfo.sync_status === 'mismatch') {
+        statusClass = 'mismatch';
+        statusTitle = 'Values do not match across config files';
+    } else if (varInfo.sync_status === 'not_configured') {
+        statusClass = 'missing';
+        statusTitle = 'Still at default placeholder - must be configured';
+    }
+    
+    // Files where this variable is used
+    const configFiles = Object.keys(varInfo.configs || {}).filter(f => varInfo.configs[f].status === 'ok');
+    const sharedBadge = configFiles.length > 1 ? `<span class="shared-badge" title="Used in ${configFiles.length} configs">🔗 ${configFiles.length} files</span>` : '';
+    
+    let html = `
+        <div class="config-var-item" data-var="${varName}">
+            <div class="config-var-status ${statusClass}" title="${statusTitle}"></div>
+            <div class="config-var-label">
+                ${varInfo.label || varName}
+                ${sharedBadge}
+            </div>
+            <div class="config-var-value secret">
+                ${varInfo.is_configured ? '••••••••' : '<span class="empty">(default)</span>'}
+            </div>
+    `;
+    
+    // Show sync details for mismatched or not_configured variables (expanded)
+    if (varInfo.sync_status === 'mismatch' || (varInfo.sync_status === 'not_configured' && Object.keys(varInfo.configs || {}).length > 0)) {
+        html += `
+            <div class="config-var-sync-details">
+                <strong>${varInfo.sync_status === 'mismatch' ? '⚠️ Values don\'t match:' : '📋 Config files using this secret:'}</strong>
+                ${Object.entries(varInfo.configs || {}).map(([file, info]) => {
+                    const statusIcon = info.is_default ? '⏸️' : (info.status === 'ok' ? '✅' : '❌');
+                    const valueText = info.is_default ? 'default' : (info.status === 'ok' ? '•••' : info.status);
+                    return `
+                        <div class="sync-row">
+                            <span class="sync-file">${file}</span>
+                            <span class="sync-value">${statusIcon} ${valueText}</span>
+                        </div>
+                    `;
+                }).join('')}
+                ${varInfo.sync_status === 'mismatch' ? `
+                    <button class="btn btn-xs btn-warning" style="margin-top: 8px;" 
+                            onclick="syncConfigVariable('${varName}')">
+                        🔄 Sync All to Match
+                    </button>
+                ` : ''}
+            </div>
+        `;
+    }
+    
+    html += `</div>`;
+    return html;
 }
 
 function getStatusTitle(status) {
@@ -6816,8 +6888,8 @@ function closeTerminal() {
     }
     
     // Refresh setup status
-    loadSetupStatus();
-    loadConfigFiles();
+        loadSetupStatus();
+        loadConfigFiles();
 }
 
 // Handle terminal output from WebSocket
