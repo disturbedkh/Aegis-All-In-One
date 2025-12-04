@@ -52,6 +52,7 @@ import json
 import time
 import threading
 import re
+import signal
 import sqlite3
 import subprocess
 import socket
@@ -10734,7 +10735,7 @@ class TerminalSession:
         return True
             
     def terminate(self):
-        """Terminate the session"""
+        """Terminate the session and ALL child processes"""
         self.active = False
         if self.master_fd is not None:
             try:
@@ -10744,10 +10745,22 @@ class TerminalSession:
             self.master_fd = None
         if self.process is not None:
             try:
-                self.process.terminate()
-                self.process.wait(timeout=2)
-            except:
+                # Kill the entire process group (all children spawned by the script)
+                # We use os.setsid in preexec_fn, so the process is its own group leader
+                pgid = os.getpgid(self.process.pid)
+                os.killpg(pgid, signal.SIGTERM)
+                self.process.wait(timeout=3)
+            except ProcessLookupError:
+                pass  # Process already dead
+            except Exception:
                 try:
+                    # Fallback: force kill the process group
+                    pgid = os.getpgid(self.process.pid)
+                    os.killpg(pgid, signal.SIGKILL)
+                except:
+                    pass
+                try:
+                    # Also try killing just the main process
                     self.process.kill()
                 except:
                     pass
