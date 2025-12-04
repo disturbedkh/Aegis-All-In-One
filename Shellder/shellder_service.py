@@ -217,6 +217,67 @@ else:
     socketio = None
 
 # =============================================================================
+# SIMPLE TOML PARSER (fallback when tomli/toml not available)
+# =============================================================================
+
+def parse_simple_toml(file_path):
+    """
+    Simple TOML parser for basic key=value and [section] syntax.
+    Used as fallback when tomli/toml modules are not available.
+    """
+    result = {}
+    current_section = result
+    section_path = []
+    
+    try:
+        with open(file_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                
+                # Skip comments and empty lines
+                if not line or line.startswith('#'):
+                    continue
+                
+                # Section header
+                if line.startswith('[') and line.endswith(']'):
+                    section_name = line[1:-1].strip()
+                    section_path = section_name.split('.')
+                    
+                    # Navigate/create nested sections
+                    current_section = result
+                    for part in section_path:
+                        if part not in current_section:
+                            current_section[part] = {}
+                        current_section = current_section[part]
+                    continue
+                
+                # Key = value
+                if '=' in line:
+                    key, value = line.split('=', 1)
+                    key = key.strip()
+                    value = value.strip()
+                    
+                    # Remove quotes
+                    if (value.startswith('"') and value.endswith('"')) or \
+                       (value.startswith("'") and value.endswith("'")):
+                        value = value[1:-1]
+                    
+                    # Convert types
+                    if value.lower() == 'true':
+                        value = True
+                    elif value.lower() == 'false':
+                        value = False
+                    elif value.isdigit():
+                        value = int(value)
+                    
+                    current_section[key] = value
+        
+        return result
+    except Exception as e:
+        print(f"Simple TOML parse error: {e}")
+        return {}
+
+# =============================================================================
 # FILE WRITE HELPER (preserves ownership when using sudo)
 # =============================================================================
 
@@ -11103,19 +11164,34 @@ def api_config_variables_status():
             elif os.path.exists(full_path):
                 try:
                     if config_file.endswith('.toml'):
-                        import tomli
-                        with open(full_path, 'rb') as f:
-                            data = tomli.load(f)
-                        # Navigate to field
-                        parts = field_path.split('.')
-                        current = data
-                        for part in parts:
-                            if isinstance(current, dict) and part in current:
-                                current = current[part]
-                            else:
-                                current = None
-                                break
-                        values[config_file] = current if current else ''
+                        # Try multiple TOML parsers
+                        data = None
+                        try:
+                            import tomli
+                            with open(full_path, 'rb') as f:
+                                data = tomli.load(f)
+                        except ImportError:
+                            try:
+                                import toml
+                                with open(full_path, 'r') as f:
+                                    data = toml.load(f)
+                            except ImportError:
+                                # Manual TOML parsing fallback for simple key=value
+                                data = parse_simple_toml(full_path)
+                        
+                        if data:
+                            # Navigate to field
+                            parts = field_path.split('.')
+                            current = data
+                            for part in parts:
+                                if isinstance(current, dict) and part in current:
+                                    current = current[part]
+                                else:
+                                    current = None
+                                    break
+                            values[config_file] = current if current else ''
+                        else:
+                            values[config_file] = ''
                     elif config_file.endswith('.json'):
                         with open(full_path) as f:
                             data = json.load(f)
@@ -11129,7 +11205,7 @@ def api_config_variables_status():
                                 break
                         values[config_file] = current if current else ''
                 except Exception as e:
-                    values[config_file] = f'(error: {e})'
+                    values[config_file] = f'(error: {str(e)[:50]})'
         
         # Check if all values match
         unique_values = set(v for v in values.values() if v and v not in ['', None, '(not set)'])
