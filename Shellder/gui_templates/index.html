@@ -881,20 +881,40 @@
                 
                 <!-- Stack Setup Wizard Tab -->
                 <div id="setup-tab-scripts" class="setup-tab-content">
-                    <!-- Wizard Progress Header -->
-                    <div class="wizard-header">
-                        <div class="wizard-title">
-                            <h2>🧙‍♂️ Stack Setup Wizard</h2>
-                            <p>Configure your Aegis AIO stack step by step</p>
-                        </div>
-                        <div class="wizard-progress-bar">
-                            <div id="wizardProgressFill" class="progress-fill" style="width: 0%"></div>
-                        </div>
-                        <div class="wizard-progress-text">
-                            <span id="wizardProgressText">0% Complete</span>
-                            <button class="btn btn-sm btn-primary" onclick="refreshWizardStatus()">🔄 Refresh</button>
-                        </div>
+                    <!-- Start Prompt - Shown before wizard starts -->
+                    <div id="wizardStartPrompt" class="wizard-start-prompt">
+                        <div class="start-prompt-icon">🧙‍♂️</div>
+                        <h2>Stack Setup Wizard</h2>
+                        <p>This wizard will guide you through setting up your Aegis AIO stack step by step.</p>
+                        <ul class="wizard-features">
+                            <li>✅ Check Docker & Docker Compose</li>
+                            <li>✅ Verify port availability</li>
+                            <li>✅ Detect system resources</li>
+                            <li>✅ Configure files and passwords</li>
+                            <li>✅ Optimize database settings</li>
+                            <li>✅ Start the stack</li>
+                        </ul>
+                        <button class="btn btn-lg btn-success" onclick="startWizard()">
+                            🚀 Start Setup Wizard
+                        </button>
                     </div>
+                    
+                    <!-- Wizard Content - Hidden until user starts -->
+                    <div id="wizardContent" style="display: none;">
+                        <!-- Wizard Progress Header -->
+                        <div class="wizard-header">
+                            <div class="wizard-title">
+                                <h2>🧙‍♂️ Stack Setup Wizard</h2>
+                                <p>Configure your Aegis AIO stack step by step</p>
+                            </div>
+                            <div class="wizard-progress-bar">
+                                <div id="wizardProgressFill" class="progress-fill" style="width: 0%"></div>
+                            </div>
+                            <div class="wizard-progress-text">
+                                <span id="wizardProgressText">0% Complete</span>
+                                <button class="btn btn-sm btn-primary" onclick="refreshWizardStatus()">🔄 Refresh</button>
+                            </div>
+                        </div>
                     
                     <!-- Wizard Steps Grid -->
                     <div class="wizard-steps-grid">
@@ -1022,24 +1042,23 @@
                             <button class="btn btn-secondary" onclick="runSetupScript('nginx-setup.sh')">🔒 Nginx Setup</button>
                         </div>
                     </div>
-                            
-                            <!-- Interactive Terminal for Scripts -->
-                            <div id="scriptTerminalCard" class="script-terminal-card" style="display: none;">
-                                <div class="script-terminal-header">
-                                    <span id="scriptTerminalTitle">🖥️ Interactive Terminal</span>
-                                    <div class="terminal-controls">
-                                        <span id="terminalStatus" class="terminal-status">Disconnected</span>
-                                        <button class="btn btn-sm btn-warning" onclick="stopTerminalSession()" title="Stop Script">⏹️ Stop</button>
-                                        <button class="btn btn-sm" onclick="closeTerminal()">✖ Close</button>
-                                    </div>
-                                </div>
-                                <div class="terminal-hint">
-                                    💡 <strong>Interactive terminal</strong> - Type your responses and press Enter. Use Ctrl+C to cancel.
-                                </div>
-                                <div id="terminalContainer" class="terminal-container"></div>
+                    
+                    <!-- Interactive Terminal for Scripts -->
+                    <div id="scriptTerminalCard" class="script-terminal-card" style="display: none;">
+                        <div class="script-terminal-header">
+                            <span id="scriptTerminalTitle">🖥️ Interactive Terminal</span>
+                            <div class="terminal-controls">
+                                <span id="terminalStatus" class="terminal-status">Disconnected</span>
+                                <button class="btn btn-sm btn-warning" onclick="stopTerminalSession()" title="Stop Script">⏹️ Stop</button>
+                                <button class="btn btn-sm" onclick="closeTerminal()">✖ Close</button>
                             </div>
                         </div>
+                        <div class="terminal-hint">
+                            💡 <strong>Interactive terminal</strong> - Type your responses and press Enter. Use Ctrl+C to cancel.
+                        </div>
+                        <div id="terminalContainer" class="terminal-container"></div>
                     </div>
+                    </div><!-- End wizardContent -->
                 </div>
             </div>
             

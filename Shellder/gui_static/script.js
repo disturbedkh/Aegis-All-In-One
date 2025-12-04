@@ -7130,18 +7130,38 @@ async function emergencyMemoryCleanup() {
 // =============================================================================
 
 let wizardStatus = null;
+let wizardStarted = false;
 let detectedResources = null;
 let generatedPasswords = null;
 
+// Start the wizard - called when user clicks Start Wizard button
+async function startWizard() {
+    wizardStarted = true;
+    
+    // Hide start prompt, show wizard content
+    const startPrompt = document.getElementById('wizardStartPrompt');
+    const wizardContent = document.getElementById('wizardContent');
+    if (startPrompt) startPrompt.style.display = 'none';
+    if (wizardContent) wizardContent.style.display = 'block';
+    
+    showToast('Starting Setup Wizard...', 'info');
+    await refreshWizardStatus();
+}
+
 async function refreshWizardStatus() {
+    const progressText = document.getElementById('wizardProgressText');
+    if (progressText) progressText.textContent = 'Checking...';
+    
     try {
         const response = await fetch('/api/wizard/status');
         if (!response.ok) throw new Error('Failed to get wizard status');
         wizardStatus = await response.json();
         updateWizardUI();
+        showToast('Status refreshed', 'success');
     } catch (e) {
         console.error('Failed to refresh wizard status:', e);
-        showToast('Failed to check setup status', 'error');
+        if (progressText) progressText.textContent = 'Error loading status';
+        showToast('Failed to check setup status: ' + e.message, 'error');
     }
 }
 
@@ -7157,6 +7177,13 @@ function updateWizardUI() {
     // Update Docker step
     updateStepStatus('docker', wizardStatus.steps.docker?.complete, 
         wizardStatus.steps.docker?.complete ? 'Docker is running' : 'Docker not installed or not running');
+    
+    // Update ports step (always show as checkable)
+    updateStepStatus('ports', false, 'Click to check');
+    
+    // Update resources step
+    updateStepStatus('resources', detectedResources !== null,
+        detectedResources ? `${detectedResources.ram_gb}GB RAM, ${detectedResources.cpu_cores} cores` : 'Click to detect');
     
     // Update other steps
     updateStepStatus('configs', wizardStatus.steps.config_files?.complete,
@@ -7468,11 +7495,12 @@ document.addEventListener('DOMContentLoaded', () => {
     // Check if we're on setup page
     const setupTab = document.getElementById('setup-tab-scripts');
     if (setupTab) {
-        // Refresh wizard status when setup tab is shown
+        // Only auto-refresh if wizard was already started
         const observer = new MutationObserver((mutations) => {
             for (const mutation of mutations) {
                 if (mutation.attributeName === 'class' && 
-                    setupTab.classList.contains('active')) {
+                    setupTab.classList.contains('active') && 
+                    wizardStarted) {
                     refreshWizardStatus();
                 }
             }
