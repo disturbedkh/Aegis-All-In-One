@@ -8448,43 +8448,220 @@ REQUIRED_CONFIGS = {
     }
 }
 
-# Shared field indicators - fields that appear in multiple configs and must match
+# =============================================================================
+# COMPREHENSIVE PASSWORD/SECRET DEFINITIONS
+# =============================================================================
+# Maps all secrets from setup.sh to their target files and replacement patterns
+# This enables the GUI to properly apply passwords to ALL config files
+
+AEGIS_SECRETS = {
+    # Database Credentials
+    'MYSQL_USER': {
+        'label': 'Database Username',
+        'desc': 'Username for all services to connect to MariaDB',
+        'default_placeholder': 'dbuser',
+        'category': 'database',
+        'color': '#3b82f6',
+        'targets': [
+            {'file': '.env', 'pattern': 'MYSQL_USER=(.*)'},
+            {'file': 'unown/dragonite_config.toml', 'pattern': 'user = "(.*)"', 'section': 'db.dragonite'},
+            {'file': 'unown/golbat_config.toml', 'pattern': 'user = "(.*)"', 'section': 'database'},
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[*].username'},
+            {'file': 'Poracle/config/local.json', 'json_path': 'database.client.user'},
+            {'file': 'init/01.sql', 'pattern': "'dbuser'@", 'replace_with': "'{value}'@"},
+        ]
+    },
+    'MYSQL_PASSWORD': {
+        'label': 'Database Password',
+        'desc': 'Password for database user account',
+        'default_placeholder': 'SuperSecuredbuserPassword',
+        'category': 'database',
+        'color': '#3b82f6',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'MYSQL_PASSWORD=(.*)'},
+            {'file': 'unown/dragonite_config.toml', 'pattern': 'password = "(.*)"', 'section': 'db.dragonite'},
+            {'file': 'unown/golbat_config.toml', 'pattern': 'password = "(.*)"', 'section': 'database'},
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[*].password'},
+            {'file': 'Poracle/config/local.json', 'json_path': 'database.client.password'},
+            {'file': 'init/01.sql', 'pattern': "IDENTIFIED BY '(.*)'"},
+        ]
+    },
+    'MYSQL_ROOT_PASSWORD': {
+        'label': 'MySQL Root Password',
+        'desc': 'Root/admin password for MariaDB server',
+        'default_placeholder': 'V3ryS3cUr3MYSQL_ROOT_P4ssw0rd',
+        'category': 'database',
+        'color': '#dc2626',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'MYSQL_ROOT_PASSWORD=(.*)'},
+        ]
+    },
+    
+    # Koji
+    'KOJI_SECRET': {
+        'label': 'Koji Bearer Token',
+        'desc': 'API token for accessing Koji geofence data',
+        'default_placeholder': 'SuperSecureKojiSecret',
+        'category': 'api',
+        'color': '#8b5cf6',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'KOJI_SECRET=(.*)'},
+            {'file': 'unown/dragonite_config.toml', 'pattern': 'bearer_token = "(.*)"', 'section': 'koji'},
+            {'file': 'unown/golbat_config.toml', 'pattern': 'bearer_token = "(.*)"', 'section': 'koji'},
+            {'file': 'reactmap/local.json', 'json_path': 'api.kojiOptions.bearerToken'},
+        ]
+    },
+    
+    # Golbat Secrets
+    'GOLBAT_API_SECRET': {
+        'label': 'Golbat API Secret',
+        'desc': 'Password to REQUEST data FROM Golbat (used by ReactMap, Dragonite)',
+        'default_placeholder': 'SuperSecureGolbatApiSecret',
+        'category': 'api',
+        'color': '#10b981',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'GOLBAT_API_SECRET=(.*)'},
+            {'file': 'unown/dragonite_config.toml', 'pattern': 'golbat_api_secret = "(.*)"', 'section': 'processors'},
+            {'file': 'unown/golbat_config.toml', 'pattern': 'api_secret = "(.*)"'},
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[type=golbat].secret'},
+        ]
+    },
+    'GOLBAT_RAW_SECRET': {
+        'label': 'Golbat Raw Bearer',
+        'desc': 'Password to SEND data TO Golbat (used by Dragonite)',
+        'default_placeholder': 'SuperSecureGolbatRawSecret',
+        'category': 'api',
+        'color': '#f59e0b',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'GOLBAT_RAW_SECRET=(.*)'},
+            {'file': 'unown/dragonite_config.toml', 'pattern': 'golbat_raw_bearer = "(.*)"', 'section': 'processors'},
+            {'file': 'unown/golbat_config.toml', 'pattern': 'raw_bearer = "(.*)"'},
+        ]
+    },
+    
+    # Dragonite Secrets
+    'DRAGONITE_PASSWORD': {
+        'label': 'Dragonite Admin Password',
+        'desc': 'Password to access Dragonite web panel (port 6002)',
+        'default_placeholder': 'SuperSecureDragoniteAdminPassword',
+        'category': 'api',
+        'color': '#06b6d4',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'DRAGONITE_PASSWORD=(.*)'},
+        ]
+    },
+    'DRAGONITE_API_SECRET': {
+        'label': 'Dragonite API Secret',
+        'desc': 'Secret for programmatic access to Dragonite API',
+        'default_placeholder': 'SuperSecureDragoniteApiSecret',
+        'category': 'api',
+        'color': '#06b6d4',
+        'generate_length': 32,
+        'targets': [
+            {'file': '.env', 'pattern': 'DRAGONITE_API_SECRET=(.*)'},
+        ]
+    },
+    
+    # ReactMap Secrets
+    'SESSION_SECRET': {
+        'label': 'ReactMap Session Secret',
+        'desc': 'Secret key for ReactMap session encryption',
+        'default_placeholder': '98ki^e72~!@#(85o3kXLI*#c9wu5l!ZUGA',
+        'category': 'api',
+        'color': '#ec4899',
+        'generate_length': 40,
+        'targets': [
+            {'file': 'reactmap/local.json', 'json_path': 'api.sessionSecret'},
+        ]
+    },
+    'REACTMAP_SECRET': {
+        'label': 'ReactMap API Secret',
+        'desc': 'Additional API secret for ReactMap',
+        'default_placeholder': '98ki^e72~!@#(85o3kXLI*#c9wu5l!Zx10venikyoa0',
+        'category': 'api',
+        'color': '#ec4899',
+        'generate_length': 40,
+        'targets': [
+            {'file': 'reactmap/local.json', 'json_path': 'api.reactMapSecret'},
+        ]
+    },
+    
+    # Rotom Secret
+    'ROTOM_AUTH_BEARER': {
+        'label': 'Rotom Device Auth',
+        'desc': 'Password devices use to connect to Rotom (set in Aegis app)',
+        'default_placeholder': 'SuperSecretAuthBearerForAegisDevices',
+        'category': 'api',
+        'color': '#ef4444',
+        'generate_length': 32,
+        'targets': [
+            {'file': 'unown/rotom_config.json', 'json_path': 'deviceListener.secret'},
+        ]
+    },
+    
+    # Poracle Secret
+    'PORACLE_API_SECRET': {
+        'label': 'Poracle API Secret',
+        'desc': 'Secret for ReactMap to communicate with Poracle alerts',
+        'default_placeholder': 'SuperSecurePoracleApiSecret',
+        'category': 'api',
+        'color': '#a855f7',
+        'generate_length': 32,
+        'targets': [
+            {'file': 'reactmap/local.json', 'json_path': 'webhooks[0].poracleSecret'},
+        ]
+    },
+}
+
+# Shared field indicators (simplified for config editor display)
 SHARED_FIELDS = {
     'db_user': {
         'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
         'label': 'Database Username',
         'desc': 'Must match MYSQL_USER in .env - used by all services',
-        'color': '#3b82f6'  # blue
+        'color': '#3b82f6',
+        'secret_key': 'MYSQL_USER'
     },
     'db_password': {
         'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
         'label': 'Database Password',
         'desc': 'Must match MYSQL_PASSWORD in .env - used by all services',
-        'color': '#3b82f6'
+        'color': '#3b82f6',
+        'secret_key': 'MYSQL_PASSWORD'
     },
     'koji_secret': {
         'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
         'label': 'Koji Bearer Token',
         'desc': 'Must match KOJI_SECRET in .env - used to access Koji geofences',
-        'color': '#8b5cf6'  # purple
+        'color': '#8b5cf6',
+        'secret_key': 'KOJI_SECRET'
     },
     'golbat_api_secret': {
         'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
         'label': 'Golbat API Secret',
         'desc': 'Must match across configs - Dragonite/ReactMap use this to request data from Golbat',
-        'color': '#10b981'  # green
+        'color': '#10b981',
+        'secret_key': 'GOLBAT_API_SECRET'
     },
     'golbat_raw_secret': {
         'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml'],
         'label': 'Golbat Raw Bearer',
         'desc': 'Must match across configs - Dragonite uses this to SEND data to Golbat',
-        'color': '#f59e0b'  # amber
+        'color': '#f59e0b',
+        'secret_key': 'GOLBAT_RAW_SECRET'
     },
     'rotom_device_secret': {
         'configs': ['unown/rotom_config.json'],
         'label': 'Device Auth Secret',
         'desc': 'Devices use this to authenticate with Rotom',
-        'color': '#ef4444'  # red
+        'color': '#ef4444',
+        'secret_key': 'ROTOM_AUTH_BEARER'
     }
 }
 
@@ -10110,6 +10287,352 @@ def update_json_field(content, section, field, value):
         return json.dumps(data, indent=2)
     except Exception as e:
         raise Exception(f'Failed to update JSON: {e}')
+
+# =============================================================================
+# COMPREHENSIVE SECRET MANAGEMENT API
+# =============================================================================
+
+@app.route('/api/secrets/list')
+def api_secrets_list():
+    """Get list of all secrets and their current status"""
+    aegis_root = str(AEGIS_ROOT)
+    secrets_status = {}
+    
+    for secret_key, secret_info in AEGIS_SECRETS.items():
+        # Check if secret has non-default value in .env
+        current_value = None
+        is_default = True
+        
+        # Try to read from .env
+        env_path = os.path.join(aegis_root, '.env')
+        if os.path.exists(env_path):
+            try:
+                with open(env_path, 'r') as f:
+                    for line in f:
+                        if line.startswith(f'{secret_key}='):
+                            current_value = line.split('=', 1)[1].strip().strip('"\'')
+                            is_default = current_value == secret_info.get('default_placeholder', '')
+                            break
+            except:
+                pass
+        
+        secrets_status[secret_key] = {
+            'label': secret_info['label'],
+            'desc': secret_info['desc'],
+            'category': secret_info['category'],
+            'color': secret_info['color'],
+            'is_default': is_default,
+            'has_value': current_value is not None and current_value != '',
+            'target_count': len(secret_info['targets']),
+            'generate_length': secret_info.get('generate_length', 32)
+        }
+    
+    return jsonify({
+        'secrets': secrets_status,
+        'categories': {
+            'database': {'label': '🗄️ Database', 'order': 1},
+            'api': {'label': '🔑 API Secrets', 'order': 2}
+        }
+    })
+
+@app.route('/api/secrets/apply', methods=['POST'])
+def api_secrets_apply():
+    """Apply one or more secrets to ALL their target config files"""
+    data = request.get_json()
+    secrets_to_apply = data.get('secrets', {})  # {secret_key: value}
+    
+    if not secrets_to_apply:
+        return jsonify({'error': 'No secrets provided'}), 400
+    
+    aegis_root = str(AEGIS_ROOT)
+    results = []
+    
+    for secret_key, new_value in secrets_to_apply.items():
+        if secret_key not in AEGIS_SECRETS:
+            results.append({
+                'secret': secret_key,
+                'status': 'error',
+                'reason': f'Unknown secret key: {secret_key}'
+            })
+            continue
+        
+        if not new_value:
+            results.append({
+                'secret': secret_key,
+                'status': 'skipped',
+                'reason': 'Empty value'
+            })
+            continue
+        
+        secret_info = AEGIS_SECRETS[secret_key]
+        default_placeholder = secret_info.get('default_placeholder', '')
+        target_results = []
+        
+        for target in secret_info['targets']:
+            target_file = target['file']
+            full_path = os.path.join(aegis_root, target_file)
+            
+            if not os.path.exists(full_path):
+                target_results.append({
+                    'file': target_file,
+                    'status': 'skipped',
+                    'reason': 'File does not exist'
+                })
+                continue
+            
+            try:
+                with open(full_path, 'r') as f:
+                    content = f.read()
+                
+                updated_content = content
+                
+                # Handle different file types
+                if target_file.endswith('.json'):
+                    # JSON file - use json_path if specified
+                    json_path = target.get('json_path')
+                    if json_path:
+                        updated_content = apply_secret_to_json(content, json_path, new_value, default_placeholder)
+                    else:
+                        # Simple string replacement
+                        updated_content = content.replace(default_placeholder, new_value)
+                
+                elif target_file.endswith('.toml'):
+                    # TOML file - use pattern/section if specified
+                    pattern = target.get('pattern')
+                    section = target.get('section')
+                    if pattern and section:
+                        updated_content = apply_secret_to_toml(content, section, pattern, new_value, default_placeholder)
+                    elif pattern:
+                        # Just pattern replacement
+                        updated_content = re.sub(
+                            pattern.replace('(.*)', f'({re.escape(default_placeholder)})'),
+                            pattern.replace('(.*)', new_value),
+                            content
+                        )
+                    else:
+                        updated_content = content.replace(default_placeholder, new_value)
+                
+                elif target_file.endswith('.sql'):
+                    # SQL file - simple replacement
+                    updated_content = content.replace(default_placeholder, new_value)
+                
+                else:
+                    # .env or other files - line-based replacement
+                    if 'pattern' in target:
+                        pattern = target['pattern']
+                        if '=' in pattern:
+                            # Environment variable pattern like MYSQL_PASSWORD=(.*)
+                            var_name = pattern.split('=')[0]
+                            lines = content.split('\n')
+                            new_lines = []
+                            for line in lines:
+                                if line.startswith(f'{var_name}='):
+                                    new_lines.append(f'{var_name}={new_value}')
+                                else:
+                                    new_lines.append(line)
+                            updated_content = '\n'.join(new_lines)
+                        else:
+                            updated_content = content.replace(default_placeholder, new_value)
+                    else:
+                        updated_content = content.replace(default_placeholder, new_value)
+                
+                # Write the updated content
+                if updated_content != content:
+                    result = subprocess.run(
+                        ['sudo', 'tee', full_path],
+                        input=updated_content,
+                        capture_output=True,
+                        text=True,
+                        timeout=10
+                    )
+                    
+                    if result.returncode == 0:
+                        target_results.append({
+                            'file': target_file,
+                            'status': 'success'
+                        })
+                    else:
+                        target_results.append({
+                            'file': target_file,
+                            'status': 'error',
+                            'reason': result.stderr[:100]
+                        })
+                else:
+                    target_results.append({
+                        'file': target_file,
+                        'status': 'unchanged',
+                        'reason': 'Value already set or placeholder not found'
+                    })
+                    
+            except Exception as e:
+                target_results.append({
+                    'file': target_file,
+                    'status': 'error',
+                    'reason': str(e)[:100]
+                })
+        
+        success_count = sum(1 for r in target_results if r['status'] == 'success')
+        results.append({
+            'secret': secret_key,
+            'label': secret_info['label'],
+            'status': 'success' if success_count > 0 else 'partial',
+            'targets_updated': success_count,
+            'targets_total': len(target_results),
+            'details': target_results
+        })
+    
+    return jsonify({
+        'success': True,
+        'results': results,
+        'summary': {
+            'total_secrets': len(results),
+            'successful': sum(1 for r in results if r['status'] == 'success'),
+            'partial': sum(1 for r in results if r['status'] == 'partial'),
+            'failed': sum(1 for r in results if r['status'] == 'error')
+        }
+    })
+
+def apply_secret_to_json(content, json_path, new_value, default_placeholder):
+    """Apply a secret to a JSON file using a json_path expression"""
+    try:
+        data = json.loads(content)
+        
+        # Handle special json_path patterns
+        if '[*]' in json_path:
+            # Array wildcard - e.g., database.schemas[*].password
+            parts = json_path.split('[*]')
+            prefix = parts[0].rstrip('.')
+            suffix = parts[1].lstrip('.')
+            
+            # Navigate to the array
+            target = data
+            for key in prefix.split('.'):
+                if key:
+                    target = target.get(key, {})
+            
+            # Update all items in the array
+            if isinstance(target, list):
+                for item in target:
+                    if suffix:
+                        # Navigate to the field within each item
+                        keys = suffix.split('.')
+                        obj = item
+                        for key in keys[:-1]:
+                            obj = obj.get(key, {})
+                        if keys[-1] in obj or obj.get(keys[-1]) == default_placeholder:
+                            obj[keys[-1]] = new_value
+                    else:
+                        # Direct replacement in array items
+                        pass
+        
+        elif '[type=' in json_path:
+            # Conditional array access - e.g., database.schemas[type=golbat].secret
+            match = re.match(r'(.+)\[(\w+)=(\w+)\]\.(.+)', json_path)
+            if match:
+                array_path, filter_key, filter_value, field = match.groups()
+                
+                target = data
+                for key in array_path.split('.'):
+                    if key:
+                        target = target.get(key, {})
+                
+                if isinstance(target, list):
+                    for item in target:
+                        if item.get(filter_key) == filter_value:
+                            item[field] = new_value
+        
+        elif '[0]' in json_path:
+            # First array element - e.g., webhooks[0].poracleSecret
+            parts = json_path.split('[0]')
+            prefix = parts[0].rstrip('.')
+            suffix = parts[1].lstrip('.')
+            
+            target = data
+            for key in prefix.split('.'):
+                if key:
+                    target = target.get(key, {})
+            
+            if isinstance(target, list) and len(target) > 0:
+                obj = target[0]
+                for key in suffix.split('.')[:-1]:
+                    if key:
+                        obj = obj.get(key, {})
+                final_key = suffix.split('.')[-1]
+                if final_key:
+                    obj[final_key] = new_value
+        
+        else:
+            # Simple dot notation - e.g., api.sessionSecret
+            keys = json_path.split('.')
+            target = data
+            for key in keys[:-1]:
+                if key not in target:
+                    target[key] = {}
+                target = target[key]
+            target[keys[-1]] = new_value
+        
+        return json.dumps(data, indent=2)
+    except Exception as e:
+        # Fall back to simple string replacement
+        return content.replace(default_placeholder, new_value)
+
+def apply_secret_to_toml(content, section, pattern, new_value, default_placeholder):
+    """Apply a secret to a TOML file in a specific section"""
+    lines = content.split('\n')
+    result_lines = []
+    in_section = False
+    section_pattern = re.compile(r'^\s*\[' + re.escape(section) + r'\]\s*$')
+    new_section_pattern = re.compile(r'^\s*\[')
+    
+    # Extract field name from pattern like 'password = "(.*)"'
+    field_match = re.match(r'(\w+)\s*=', pattern)
+    field_name = field_match.group(1) if field_match else None
+    
+    for line in lines:
+        if section_pattern.match(line):
+            in_section = True
+            result_lines.append(line)
+            continue
+        
+        if in_section and new_section_pattern.match(line) and not section_pattern.match(line):
+            in_section = False
+        
+        if in_section and field_name and line.strip().startswith(f'{field_name} ='):
+            # Replace the value
+            if default_placeholder in line:
+                line = line.replace(default_placeholder, new_value)
+            else:
+                # Use regex to replace the value portion
+                line = re.sub(r'=\s*"[^"]*"', f'= "{new_value}"', line)
+        
+        result_lines.append(line)
+    
+    return '\n'.join(result_lines)
+
+@app.route('/api/secrets/generate', methods=['POST'])
+def api_secrets_generate():
+    """Generate random values for specified secrets"""
+    data = request.get_json()
+    secrets_to_generate = data.get('secrets', [])  # List of secret keys
+    
+    if not secrets_to_generate:
+        # Generate all secrets
+        secrets_to_generate = list(AEGIS_SECRETS.keys())
+    
+    generated = {}
+    for secret_key in secrets_to_generate:
+        if secret_key not in AEGIS_SECRETS:
+            continue
+        
+        length = AEGIS_SECRETS[secret_key].get('generate_length', 32)
+        # Generate random alphanumeric string
+        import secrets as secrets_module
+        generated[secret_key] = secrets_module.token_urlsafe(length)[:length]
+    
+    return jsonify({
+        'success': True,
+        'generated': generated
+    })
 
 @app.route('/api/config/structured', methods=['POST'])
 def api_config_structured_save():

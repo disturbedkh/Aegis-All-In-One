@@ -2478,28 +2478,89 @@ select:focus {
     gap: 10px;
 }
 
-.password-field-item {
-    display: grid;
-    grid-template-columns: 160px 100px 1fr auto;
-    gap: 10px;
-    align-items: center;
-    padding: 10px 12px;
+/* =============================================================================
+   COMPREHENSIVE SECRETS PANEL - for managing all passwords/tokens
+   ============================================================================= */
+
+.secrets-legend {
     background: var(--bg-tertiary);
+    padding: 10px 15px;
     border-radius: var(--radius-md);
-    border: 1px solid var(--border-color);
+    margin-bottom: 16px;
+    border-left: 3px solid var(--primary);
 }
 
-.password-field-item .field-label {
-    font-weight: 500;
+.secrets-legend small {
+    color: var(--text-secondary);
     font-size: 0.85em;
+}
+
+.secrets-category {
+    margin-bottom: 20px;
+}
+
+.secrets-category h4 {
+    margin: 0 0 12px 0;
+    padding: 8px 12px;
+    background: linear-gradient(90deg, var(--bg-tertiary), transparent);
+    border-radius: var(--radius-md);
+    font-size: 0.95em;
     color: var(--text-primary);
 }
 
-.password-field-item .field-label small {
-    display: block;
-    font-weight: 400;
-    color: var(--text-muted);
+.secrets-fields {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.password-field-item {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.password-field-item:hover {
+    border-color: var(--primary);
+}
+
+.password-field-item .field-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.password-field-item .field-label {
+    font-weight: 600;
+    font-size: 0.9em;
+    color: var(--text-primary);
+}
+
+.password-field-item .field-desc {
     font-size: 0.75em;
+    color: var(--text-muted);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.password-field-item .target-count {
+    font-size: 0.7em;
+    color: var(--primary);
+    margin-top: 2px;
+}
+
+.password-field-item .field-controls {
+    display: flex;
+    gap: 8px;
+    align-items: center;
 }
 
 .password-field-item select {
@@ -2509,6 +2570,7 @@ select:focus {
     padding: 6px 8px;
     color: var(--text-primary);
     font-size: 0.85em;
+    min-width: 90px;
 }
 
 .password-field-item input {
@@ -2519,6 +2581,7 @@ select:focus {
     color: var(--text-primary);
     font-family: 'JetBrains Mono', monospace;
     font-size: 0.85em;
+    width: 220px;
 }
 
 .password-field-item input:focus {
@@ -2541,6 +2604,7 @@ select:focus {
 .password-field-item .field-actions {
     display: flex;
     gap: 4px;
+    align-items: center;
 }
 
 .password-field-item .btn-xs {
@@ -2549,7 +2613,24 @@ select:focus {
 }
 
 .password-field-item .status-icon {
-    font-size: 0.9em;
+    font-size: 1em;
+    width: 20px;
+    text-align: center;
+}
+
+/* Responsive layout for smaller screens */
+@media (max-width: 768px) {
+    .password-field-item {
+        grid-template-columns: 1fr;
+    }
+    
+    .password-field-item .field-controls {
+        flex-wrap: wrap;
+    }
+    
+    .password-field-item input {
+        width: 100%;
+    }
 }
 
 .log-context-info {

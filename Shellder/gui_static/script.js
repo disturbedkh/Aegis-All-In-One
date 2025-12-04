@@ -7709,29 +7709,29 @@ async function generatePasswordsStep() {
     togglePasswordPanel();
 }
 
-// Password panel state
-let currentPasswordStatus = null;
-let passwordFieldChoices = {};
+// Password panel state - using comprehensive secrets API
+let currentSecretsData = null;
+let secretFieldChoices = {};
 
 async function togglePasswordPanel() {
     const panel = document.getElementById('passwordPanel');
     
     if (panel.style.display === 'none') {
         // Load and show
-        showToast('Loading password configuration...', 'info');
+        showToast('Loading secrets configuration...', 'info');
         
         try {
-            const response = await fetch('/api/wizard/password-status');
-            if (!response.ok) throw new Error('Failed to load password status');
-            currentPasswordStatus = await response.json();
+            const response = await fetch('/api/secrets/list');
+            if (!response.ok) throw new Error('Failed to load secrets');
+            currentSecretsData = await response.json();
             
-            renderPasswordPanel(currentPasswordStatus);
+            renderSecretsPanel(currentSecretsData);
             panel.style.display = 'block';
             
             // Scroll panel into view
             panel.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
         } catch (e) {
-            showToast('Failed to load passwords: ' + e.message, 'error');
+            showToast('Failed to load secrets: ' + e.message, 'error');
         }
     } else {
         closePasswordPanel();
@@ -7742,86 +7742,119 @@ function closePasswordPanel() {
     document.getElementById('passwordPanel').style.display = 'none';
 }
 
-function renderPasswordPanel(status) {
+function renderSecretsPanel(data) {
     const statusEl = document.getElementById('passwordPanelStatus');
     const container = document.getElementById('passwordFieldsContainer');
     
-    passwordFieldChoices = {};
+    secretFieldChoices = {};
+    
+    // Count status
+    const secrets = data.secrets;
+    const defaultCount = Object.values(secrets).filter(s => s.is_default || !s.has_value).length;
+    const configuredCount = Object.values(secrets).filter(s => s.has_value && !s.is_default).length;
     
     // Set status message
-    if (!status.env_exists) {
+    if (defaultCount === Object.keys(secrets).length) {
         statusEl.className = 'popout-status warning';
-        statusEl.innerHTML = '⚠️ No .env file found. Configure passwords below.';
-    } else if (status.has_defaults) {
+        statusEl.innerHTML = '⚠️ All secrets need configuration. Generate secure values below.';
+    } else if (defaultCount > 0) {
         statusEl.className = 'popout-status warning';
-        statusEl.innerHTML = '⚠️ Some passwords are default values - generate secure replacements.';
-    } else if (status.all_configured) {
-        statusEl.className = 'popout-status success';
-        statusEl.innerHTML = '✅ All passwords configured. You can keep or regenerate them.';
+        statusEl.innerHTML = `⚠️ ${defaultCount} secrets need attention. ${configuredCount} configured.`;
     } else {
-        statusEl.className = 'popout-status info';
-        statusEl.innerHTML = 'Configure passwords: keep existing, generate new, or enter custom.';
+        statusEl.className = 'popout-status success';
+        statusEl.innerHTML = '✅ All secrets configured! You can keep or regenerate them.';
     }
     
-    // Build password fields
-    let html = '';
-    for (const [key, info] of Object.entries(status.fields)) {
-        const hasGoodValue = info.has_value && !info.is_default;
+    // Group by category
+    const categories = data.categories;
+    const byCategory = {};
+    for (const [key, info] of Object.entries(secrets)) {
+        const cat = info.category || 'other';
+        if (!byCategory[cat]) byCategory[cat] = [];
+        byCategory[cat].push({ key, ...info });
+    }
+    
+    // Sort categories
+    const sortedCategories = Object.entries(categories).sort((a, b) => a[1].order - b[1].order);
+    
+    // Build HTML
+    let html = `
+        <div class="secrets-legend">
+            <small>🔵 Database Credentials | 🔑 API Secrets | Target Files: each secret syncs to multiple config files</small>
+        </div>
+    `;
+    
+    for (const [catKey, catInfo] of sortedCategories) {
+        const fields = byCategory[catKey] || [];
+        if (fields.length === 0) continue;
         
-        // Initialize choice
-        passwordFieldChoices[key] = {
-            mode: hasGoodValue ? 'keep' : 'generate',
-            custom: '',
-            currentValue: info.current_value || ''
-        };
+        html += `<div class="secrets-category">
+            <h4>${catInfo.label}</h4>
+            <div class="secrets-fields">`;
         
-        const statusIcon = hasGoodValue ? '✅' : info.has_value ? '⚠️' : '❌';
-        
-        html += `
-            <div class="password-field-item" id="pwd-row-${key}">
-                <div class="field-label">
-                    ${info.label}
-                    <small>${info.type === 'token' ? 'hex token' : 'password'}</small>
+        for (const info of fields) {
+            const key = info.key;
+            const hasGoodValue = info.has_value && !info.is_default;
+            
+            // Initialize choice
+            secretFieldChoices[key] = {
+                mode: hasGoodValue ? 'keep' : 'generate',
+                custom: '',
+                length: info.generate_length || 32
+            };
+            
+            const statusIcon = hasGoodValue ? '✅' : info.has_value ? '⚠️' : '❌';
+            
+            html += `
+                <div class="password-field-item" id="pwd-row-${key}" style="border-left: 3px solid ${info.color}">
+                    <div class="field-info">
+                        <div class="field-label">${info.label}</div>
+                        <small class="field-desc" title="${info.desc}">${info.desc}</small>
+                        <small class="target-count" title="Syncs to ${info.target_count} config files">📄 ${info.target_count} files</small>
+                    </div>
+                    <div class="field-controls">
+                        <select id="pwd-mode-${key}" onchange="onSecretModeChange('${key}')">
+                            ${hasGoodValue ? '<option value="keep">Keep</option>' : ''}
+                            <option value="generate" ${!hasGoodValue ? 'selected' : ''}>Generate</option>
+                            <option value="custom">Custom</option>
+                        </select>
+                        <input type="password" 
+                               id="pwd-input-${key}" 
+                               placeholder="${hasGoodValue ? '••••••••' : 'Auto-generate'}"
+                               ${secretFieldChoices[key].mode !== 'custom' ? 'disabled' : ''}
+                               class="${hasGoodValue ? 'has-value' : info.is_default ? 'is-weak' : ''}"
+                               oninput="onSecretInput('${key}')"
+                        >
+                        <div class="field-actions">
+                            <button class="btn btn-xs" onclick="generateSingleSecret('${key}')" title="Generate random">🎲</button>
+                            <span class="status-icon">${statusIcon}</span>
+                        </div>
+                    </div>
                 </div>
-                <select id="pwd-mode-${key}" onchange="onPasswordModeChange('${key}')">
-                    ${hasGoodValue ? '<option value="keep">Keep</option>' : ''}
-                    <option value="generate" ${!hasGoodValue ? 'selected' : ''}>Generate</option>
-                    <option value="custom">Custom</option>
-                </select>
-                <input type="password" 
-                       id="pwd-input-${key}" 
-                       value="${hasGoodValue ? info.current_value : ''}"
-                       placeholder="${hasGoodValue ? '' : 'Auto-generate'}"
-                       ${passwordFieldChoices[key].mode !== 'custom' ? 'disabled' : ''}
-                       class="${hasGoodValue ? 'has-value' : info.is_default ? 'is-weak' : ''}"
-                       oninput="onPasswordInput('${key}')"
-                >
-                <div class="field-actions">
-                    <button class="btn btn-xs" onclick="generateSinglePassword('${key}')" title="Generate random">🎲</button>
-                    <span class="status-icon">${statusIcon}</span>
-                </div>
-            </div>
-        `;
+            `;
+        }
+        
+        html += '</div></div>';
     }
     
     container.innerHTML = html;
 }
 
-function onPasswordModeChange(key) {
+function onSecretModeChange(key) {
     const mode = document.getElementById(`pwd-mode-${key}`).value;
     const input = document.getElementById(`pwd-input-${key}`);
     
-    passwordFieldChoices[key].mode = mode;
+    secretFieldChoices[key].mode = mode;
     
     if (mode === 'custom') {
         input.disabled = false;
-        input.value = passwordFieldChoices[key].custom || '';
+        input.value = secretFieldChoices[key].custom || '';
         input.placeholder = 'Enter value...';
         input.focus();
     } else if (mode === 'keep') {
         input.disabled = true;
-        input.value = passwordFieldChoices[key].currentValue;
-        input.placeholder = '';
+        input.value = '';
+        input.placeholder = '••••••••';
     } else { // generate
         input.disabled = true;
         input.value = '';
@@ -7829,28 +7862,20 @@ function onPasswordModeChange(key) {
     }
 }
 
-function onPasswordInput(key) {
+function onSecretInput(key) {
     const input = document.getElementById(`pwd-input-${key}`);
-    passwordFieldChoices[key].custom = input.value;
+    secretFieldChoices[key].custom = input.value;
 }
 
-async function generateSinglePassword(key) {
+async function generateSingleSecret(key) {
     const input = document.getElementById(`pwd-input-${key}`);
     const select = document.getElementById(`pwd-mode-${key}`);
     
-    // Generate a random password
-    const isToken = currentPasswordStatus.fields[key].type === 'token';
-    let newValue;
-    
-    if (isToken) {
-        const array = new Uint8Array(16);
-        crypto.getRandomValues(array);
-        newValue = Array.from(array).map(b => b.toString(16).padStart(2, '0')).join('');
-    } else {
-        const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
-        newValue = Array.from(crypto.getRandomValues(new Uint8Array(24)))
-            .map(b => chars[b % chars.length]).join('');
-    }
+    // Generate random alphanumeric string
+    const length = secretFieldChoices[key]?.length || 32;
+    const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+    const newValue = Array.from(crypto.getRandomValues(new Uint8Array(length)))
+        .map(b => chars[b % chars.length]).join('');
     
     // Set to custom mode with generated value
     select.value = 'custom';
@@ -7858,16 +7883,46 @@ async function generateSinglePassword(key) {
     input.type = document.getElementById('showPasswordsCheckbox')?.checked ? 'text' : 'password';
     input.value = newValue;
     input.classList.add('has-value');
-    passwordFieldChoices[key] = { mode: 'custom', custom: newValue, currentValue: newValue };
+    secretFieldChoices[key] = { mode: 'custom', custom: newValue, length };
     
-    showToast(`Generated new ${isToken ? 'token' : 'password'} for ${currentPasswordStatus.fields[key].label}`, 'success');
+    const label = currentSecretsData?.secrets[key]?.label || key;
+    showToast(`Generated new value for ${label}`, 'success');
 }
 
 async function generateAllPasswords() {
-    for (const key of Object.keys(currentPasswordStatus.fields)) {
-        await generateSinglePassword(key);
+    // Generate all using backend API for consistency
+    try {
+        const response = await fetch('/api/secrets/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ secrets: Object.keys(secretFieldChoices) })
+        });
+        
+        if (!response.ok) throw new Error('Failed to generate');
+        const data = await response.json();
+        
+        for (const [key, value] of Object.entries(data.generated)) {
+            const input = document.getElementById(`pwd-input-${key}`);
+            const select = document.getElementById(`pwd-mode-${key}`);
+            
+            if (input && select) {
+                select.value = 'custom';
+                input.disabled = false;
+                input.type = document.getElementById('showPasswordsCheckbox')?.checked ? 'text' : 'password';
+                input.value = value;
+                input.classList.add('has-value');
+                secretFieldChoices[key] = { 
+                    mode: 'custom', 
+                    custom: value, 
+                    length: currentSecretsData?.secrets[key]?.generate_length || 32 
+                };
+            }
+        }
+        
+        showToast('Generated all new secrets', 'success');
+    } catch (e) {
+        showToast('Failed to generate: ' + e.message, 'error');
     }
-    showToast('Generated all new passwords', 'success');
 }
 
 function togglePasswordVisibility() {
@@ -7878,65 +7933,80 @@ function togglePasswordVisibility() {
 }
 
 async function applyPasswordChoices() {
-    const custom = {};
-    const keepExisting = [];
+    const secretsToApply = {};
     
-    for (const [key, choice] of Object.entries(passwordFieldChoices)) {
-        if (choice.mode === 'keep') {
-            keepExisting.push(key);
-        } else if (choice.mode === 'custom' && choice.custom) {
-            const fieldMap = {
-                'MYSQL_ROOT_PASSWORD': 'mysql_root_password',
-                'MYSQL_PASSWORD': 'mysql_password',
-                'BEARER_TOKEN': 'bearer_token',
-                'DRAGONITE_SECRET': 'dragonite_secret',
-                'GOLBAT_API_SECRET': 'golbat_api_secret',
-                'REACTMAP_SECRET': 'reactmap_secret',
-                'KOJI_SECRET': 'koji_secret'
-            };
-            custom[fieldMap[key]] = choice.custom;
+    // Collect values to apply
+    for (const [key, choice] of Object.entries(secretFieldChoices)) {
+        if (choice.mode === 'custom' && choice.custom) {
+            secretsToApply[key] = choice.custom;
+        } else if (choice.mode === 'generate') {
+            // Generate a new value
+            const length = choice.length || 32;
+            const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789';
+            secretsToApply[key] = Array.from(crypto.getRandomValues(new Uint8Array(length)))
+                .map(b => chars[b % chars.length]).join('');
         }
+        // 'keep' mode secrets are not included - they stay unchanged
     }
     
-    showToast('Saving passwords...', 'info');
+    if (Object.keys(secretsToApply).length === 0) {
+        showToast('No secrets to apply (all set to keep)', 'info');
+        return;
+    }
+    
+    showToast('Applying secrets to all config files...', 'info');
     
     try {
-        // Generate passwords (will use custom values where provided, keep existing where specified)
-        const genResponse = await fetch('/api/wizard/generate-passwords', {
+        // Apply secrets to ALL target files
+        const response = await fetch('/api/secrets/apply', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ custom, keep_existing: keepExisting })
+            body: JSON.stringify({ secrets: secretsToApply })
         });
         
-        if (!genResponse.ok) throw new Error('Failed to generate passwords');
-        generatedPasswords = await genResponse.json();
+        if (!response.ok) throw new Error('Failed to apply secrets');
+        const result = await response.json();
         
-        // Apply passwords
-        const applyResponse = await fetch('/api/wizard/apply-passwords', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ passwords: generatedPasswords })
-        });
-        
-        if (!applyResponse.ok) throw new Error('Failed to apply passwords');
-        
-        // Show success with the passwords in wizard output
+        // Show detailed results in wizard output
         showWizardOutput('', true);
-        appendWizardOutput('✅ PASSWORDS SAVED - COPY THESE NOW:\\n');
-        appendWizardOutput('═'.repeat(55) + '\\n');
-        for (const [key, value] of Object.entries(generatedPasswords)) {
-            appendWizardOutput(`${key.toUpperCase()}=${value}\\n`);
+        appendWizardOutput('═'.repeat(60) + '\\n');
+        appendWizardOutput('  🔐 SECRETS APPLIED - COPY THESE VALUES NOW!\\n');
+        appendWizardOutput('═'.repeat(60) + '\\n\\n');
+        
+        for (const [key, value] of Object.entries(secretsToApply)) {
+            appendWizardOutput(`${key}=${value}\\n`);
         }
-        appendWizardOutput('═'.repeat(55) + '\\n');
-        appendWizardOutput('\\n⚠️ Save these passwords securely!\\n', 'warning');
+        
+        appendWizardOutput('\\n' + '─'.repeat(60) + '\\n');
+        appendWizardOutput('📁 FILES UPDATED:\\n');
+        
+        let totalUpdated = 0;
+        for (const secretResult of result.results) {
+            if (secretResult.targets_updated > 0) {
+                appendWizardOutput(`\\n${secretResult.label}:\\n`);
+                for (const detail of secretResult.details) {
+                    if (detail.status === 'success') {
+                        appendWizardOutput(`  ✅ ${detail.file}\\n`, 'success');
+                        totalUpdated++;
+                    } else if (detail.status === 'error') {
+                        appendWizardOutput(`  ❌ ${detail.file}: ${detail.reason}\\n`, 'error');
+                    }
+                }
+            }
+        }
+        
+        appendWizardOutput('\\n' + '═'.repeat(60) + '\\n');
+        appendWizardOutput(`\\n✅ Updated ${totalUpdated} config files total\\n`, 'success');
+        appendWizardOutput('\\n⚠️ Save these credentials securely!\\n', 'warning');
+        appendWizardOutput('Restart containers to apply: docker compose up -d\\n');
         
         closePasswordPanel();
-        updateStepStatus('passwords', true, 'Passwords saved');
-        showToast('✅ Passwords saved to .env!', 'success');
+        updateStepStatus('passwords', true, `${Object.keys(secretsToApply).length} secrets applied`);
+        showToast(`✅ Applied ${Object.keys(secretsToApply).length} secrets to ${totalUpdated} files!`, 'success');
         await refreshWizardStatus();
         
     } catch (e) {
-        showToast(`Failed to save passwords: ${e.message}`, 'error');
+        showToast(`Failed to apply secrets: ${e.message}`, 'error');
     }
 }
 
