@@ -9425,16 +9425,48 @@ def api_wizard_status():
         'cpu_cores': cpu_cores
     }
     
-    # Step 5: MariaDB Config
+    # Step 5: MariaDB Setup (comprehensive - install, configure, create DBs)
     mariadb_cnf = os.path.join(aegis_root, 'mysql_data', 'mariadb.cnf')
     mariadb_configured = os.path.exists(mariadb_cnf)
     
-    status['steps']['mariadb_config'] = {
-        'name': 'MariaDB Configuration',
-        'description': 'Database optimization settings',
-        'installed': True,
-        'configured': mariadb_configured,
-        'complete': mariadb_configured
+    # Check MariaDB/MySQL installation  
+    mariadb_installed = shutil.which('mariadb') is not None or shutil.which('mysql') is not None
+    
+    # Check if database container is running and accessible
+    db_container_running = False
+    db_accessible = False
+    try:
+        result = subprocess.run(['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+                              capture_output=True, text=True, timeout=5)
+        db_container_running = 'database' in result.stdout
+    except:
+        pass
+    
+    # Check if databases are created
+    databases_created = False
+    if db_container_running:
+        try:
+            result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e', 'SHOW DATABASES'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                db_accessible = True
+                output = result.stdout
+                databases_created = all(db in output for db in ['dragonite', 'golbat', 'reactmap'])
+        except:
+            pass
+    
+    status['steps']['mariadb_setup'] = {
+        'name': 'MariaDB Setup',
+        'description': 'Database installation & configuration',
+        'installed': mariadb_installed or db_container_running,
+        'container_running': db_container_running,
+        'accessible': db_accessible,
+        'databases_created': databases_created,
+        'config_exists': mariadb_configured,
+        'configured': mariadb_configured and (db_accessible or mariadb_installed),
+        'complete': databases_created and mariadb_configured
     }
     
     # Step 6: Config Files
@@ -9987,6 +10019,460 @@ def api_wizard_check_ports():
         'ports': results,
         'all_available': all_available
     })
+
+# =============================================================================
+# MARIADB SETUP API ENDPOINTS
+# =============================================================================
+
+AEGIS_DATABASES = ['dragonite', 'golbat', 'reactmap', 'koji', 'poracle']
+
+@app.route('/api/mariadb/status')
+def api_mariadb_status():
+    """Get comprehensive MariaDB status for setup wizard"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    status = {
+        'installation': {
+            'mariadb_cli': shutil.which('mariadb') is not None,
+            'mysql_cli': shutil.which('mysql') is not None,
+            'installed': False
+        },
+        'container': {
+            'running': False,
+            'accessible': False,
+            'version': None
+        },
+        'credentials': {
+            'root_password_set': False,
+            'db_user': None,
+            'db_password_set': False,
+            'root_user': 'root'  # Default root username
+        },
+        'databases': {db: {'exists': False, 'size': None} for db in AEGIS_DATABASES},
+        'users': {},
+        'connection_test': {
+            'root': False,
+            'db_user': False
+        },
+        'config': {
+            'mariadb_cnf_exists': os.path.exists(os.path.join(aegis_root, 'mysql_data', 'mariadb.cnf')),
+            'init_sql_exists': os.path.exists(os.path.join(aegis_root, 'init', '01.sql'))
+        }
+    }
+    
+    status['installation']['installed'] = status['installation']['mariadb_cli'] or status['installation']['mysql_cli']
+    
+    # Load credentials from .env
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        if key == 'MYSQL_ROOT_PASSWORD' and value:
+                            status['credentials']['root_password_set'] = True
+                        elif key == 'MYSQL_USER' and value:
+                            status['credentials']['db_user'] = value
+                        elif key == 'MYSQL_PASSWORD' and value:
+                            status['credentials']['db_password_set'] = True
+        except:
+            pass
+    
+    # Check container status
+    try:
+        result = subprocess.run(
+            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}|{{.Status}}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if 'database' in result.stdout:
+            status['container']['running'] = True
+            
+            # Get MariaDB version
+            ver_result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-V'],
+                capture_output=True, text=True, timeout=10
+            )
+            if ver_result.returncode == 0:
+                status['container']['version'] = ver_result.stdout.strip()
+    except:
+        pass
+    
+    # Test database connection and check databases
+    if status['container']['running']:
+        # Get root password from env
+        root_pass = None
+        if os.path.exists(env_file):
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        if line.startswith('MYSQL_ROOT_PASSWORD='):
+                            root_pass = line.split('=', 1)[1].strip()
+                            break
+            except:
+                pass
+        
+        # Test root connection
+        if root_pass:
+            try:
+                result = subprocess.run(
+                    ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_pass}', '-e', 'SELECT 1'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if result.returncode == 0:
+                    status['container']['accessible'] = True
+                    status['connection_test']['root'] = True
+                    
+                    # Check databases
+                    db_result = subprocess.run(
+                        ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_pass}', '-N', '-e',
+                         "SELECT SCHEMA_NAME, ROUND(SUM(data_length + index_length)/1024/1024, 2) as size_mb "
+                         "FROM information_schema.SCHEMATA s "
+                         "LEFT JOIN information_schema.tables t ON s.SCHEMA_NAME = t.TABLE_SCHEMA "
+                         "GROUP BY SCHEMA_NAME"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if db_result.returncode == 0:
+                        for line in db_result.stdout.strip().split('\n'):
+                            if line:
+                                parts = line.split('\t')
+                                db_name = parts[0]
+                                if db_name in AEGIS_DATABASES:
+                                    status['databases'][db_name]['exists'] = True
+                                    status['databases'][db_name]['size'] = f"{parts[1]}MB" if len(parts) > 1 and parts[1] != 'NULL' else '0MB'
+                    
+                    # Check users
+                    user_result = subprocess.run(
+                        ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_pass}', '-N', '-e',
+                         "SELECT User, Host FROM mysql.user WHERE User NOT IN ('root', 'mariadb.sys', 'mysql', '')"],
+                        capture_output=True, text=True, timeout=10
+                    )
+                    if user_result.returncode == 0:
+                        for line in user_result.stdout.strip().split('\n'):
+                            if line:
+                                parts = line.split('\t')
+                                if len(parts) >= 2:
+                                    status['users'][parts[0]] = {'host': parts[1], 'exists': True}
+            except:
+                pass
+        
+        # Test db_user connection
+        db_user = status['credentials'].get('db_user')
+        db_pass = None
+        if db_user and os.path.exists(env_file):
+            try:
+                with open(env_file) as f:
+                    for line in f:
+                        if line.startswith('MYSQL_PASSWORD='):
+                            db_pass = line.split('=', 1)[1].strip()
+                            break
+            except:
+                pass
+        
+        if db_user and db_pass:
+            try:
+                result = subprocess.run(
+                    ['docker', 'exec', 'database', 'mysql', '-u', db_user, f'-p{db_pass}', '-e', 'SELECT 1'],
+                    capture_output=True, text=True, timeout=10
+                )
+                status['connection_test']['db_user'] = result.returncode == 0
+            except:
+                pass
+    
+    # Calculate completion status
+    all_dbs_exist = all(status['databases'][db]['exists'] for db in AEGIS_DATABASES)
+    status['setup_complete'] = (
+        status['container']['running'] and
+        status['container']['accessible'] and
+        all_dbs_exist and
+        status['connection_test']['db_user']
+    )
+    
+    return jsonify(status)
+
+@app.route('/api/mariadb/credentials')
+def api_mariadb_credentials():
+    """Get current MariaDB credentials from .env and other config files"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    credentials = {
+        'root_user': 'root',  # Default, MariaDB uses 'root'
+        'root_password': '',
+        'db_user': 'dbuser',  # Default from init/01.sql
+        'db_password': '',
+        'databases': AEGIS_DATABASES.copy()
+    }
+    
+    # Load from .env
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        if key == 'MYSQL_ROOT_PASSWORD':
+                            credentials['root_password'] = value
+                        elif key == 'MYSQL_USER':
+                            credentials['db_user'] = value
+                        elif key == 'MYSQL_PASSWORD':
+                            credentials['db_password'] = value
+                        elif key == 'MYSQL_DATABASE':
+                            # Add to databases if not already in list
+                            if value and value not in credentials['databases']:
+                                credentials['databases'].append(value)
+        except:
+            pass
+    
+    return jsonify(credentials)
+
+@app.route('/api/mariadb/setup', methods=['POST'])
+def api_mariadb_setup():
+    """Perform MariaDB setup: create databases and users"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    init_sql = os.path.join(aegis_root, 'init', '01.sql')
+    
+    data = request.json or {}
+    
+    # Get credentials
+    root_password = data.get('root_password', '')
+    db_user = data.get('db_user', 'dbuser')
+    db_password = data.get('db_password', '')
+    databases = data.get('databases', AEGIS_DATABASES)
+    
+    # If not provided, try to load from .env
+    if not root_password and os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    if line.startswith('MYSQL_ROOT_PASSWORD='):
+                        root_password = line.split('=', 1)[1].strip()
+                        break
+        except:
+            pass
+    
+    if not db_password and os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                for line in f:
+                    if line.startswith('MYSQL_PASSWORD='):
+                        db_password = line.split('=', 1)[1].strip()
+                        break
+        except:
+            pass
+    
+    results = {
+        'success': True,
+        'steps': [],
+        'errors': []
+    }
+    
+    # Check container is running
+    try:
+        result = subprocess.run(
+            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if 'database' not in result.stdout:
+            results['errors'].append('Database container is not running. Please start the stack first.')
+            results['success'] = False
+            return jsonify(results)
+    except Exception as e:
+        results['errors'].append(f'Failed to check container status: {e}')
+        results['success'] = False
+        return jsonify(results)
+    
+    # Test root connection
+    try:
+        test_result = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
+            capture_output=True, text=True, timeout=10
+        )
+        if test_result.returncode != 0:
+            results['errors'].append(f'Root connection failed: {test_result.stderr}')
+            results['success'] = False
+            return jsonify(results)
+        results['steps'].append('✓ Root connection verified')
+    except Exception as e:
+        results['errors'].append(f'Failed to test root connection: {e}')
+        results['success'] = False
+        return jsonify(results)
+    
+    # Create databases
+    for db in databases:
+        try:
+            result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
+                 f'CREATE DATABASE IF NOT EXISTS `{db}`'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                results['steps'].append(f'✓ Database "{db}" created/verified')
+            else:
+                results['errors'].append(f'Failed to create database {db}: {result.stderr}')
+        except Exception as e:
+            results['errors'].append(f'Error creating database {db}: {e}')
+    
+    # Create user with proper permissions
+    if db_user and db_password:
+        try:
+            # Create user (with proper escape for special chars in password)
+            escaped_pass = db_password.replace("'", "\\'")
+            result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
+                 f"CREATE USER IF NOT EXISTS '{db_user}'@'%' IDENTIFIED BY '{escaped_pass}'"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                results['steps'].append(f'✓ User "{db_user}" created/verified')
+            else:
+                results['errors'].append(f'Failed to create user: {result.stderr}')
+            
+            # Grant all privileges on aegis databases
+            result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
+                 f"GRANT ALL PRIVILEGES ON *.* TO '{db_user}'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                results['steps'].append(f'✓ Granted privileges to "{db_user}"')
+            else:
+                results['errors'].append(f'Failed to grant privileges: {result.stderr}')
+        except Exception as e:
+            results['errors'].append(f'Error creating user: {e}')
+    
+    # Test user connection
+    if db_user and db_password:
+        try:
+            result = subprocess.run(
+                ['docker', 'exec', 'database', 'mysql', '-u', db_user, f'-p{db_password}', '-e', 'SELECT 1'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                results['steps'].append(f'✓ User "{db_user}" connection verified')
+            else:
+                results['errors'].append(f'User connection test failed: {result.stderr}')
+        except Exception as e:
+            results['errors'].append(f'Error testing user connection: {e}')
+    
+    # Update init/01.sql if needed
+    if db_user and db_password:
+        try:
+            init_content = f"""# Create databases and user for Aegis All-in-One
+# This file runs ONLY on first database container creation.
+# Generated by Shellder Setup Wizard
+
+# Create the database user
+CREATE USER IF NOT EXISTS '{db_user}'@'%' IDENTIFIED BY '{db_password}';
+GRANT ALL PRIVILEGES ON *.* TO '{db_user}'@'%' WITH GRANT OPTION;
+
+# Create all required databases
+"""
+            for db in databases:
+                init_content += f"CREATE DATABASE IF NOT EXISTS `{db}`;\n"
+            
+            init_content += "\nFLUSH PRIVILEGES;\n"
+            
+            # Ensure init directory exists
+            os.makedirs(os.path.dirname(init_sql), exist_ok=True)
+            
+            # Write using safe_write_file to handle permissions
+            success, error = safe_write_file(init_sql, init_content)
+            if success:
+                results['steps'].append('✓ Updated init/01.sql')
+            else:
+                results['errors'].append(f'Failed to update init/01.sql: {error}')
+        except Exception as e:
+            results['errors'].append(f'Error updating init/01.sql: {e}')
+    
+    results['success'] = len(results['errors']) == 0
+    
+    return jsonify(results)
+
+@app.route('/api/mariadb/test-connection', methods=['POST'])
+def api_mariadb_test_connection():
+    """Test MariaDB connection with provided credentials"""
+    data = request.json or {}
+    
+    user = data.get('user', 'root')
+    password = data.get('password', '')
+    host = data.get('host', 'localhost')
+    database = data.get('database', '')
+    
+    result = {
+        'success': False,
+        'message': '',
+        'details': {}
+    }
+    
+    # Test via docker exec to the database container
+    try:
+        cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
+        if database:
+            cmd.extend(['-D', database])
+        cmd.extend(['-e', 'SELECT VERSION() as version, NOW() as time'])
+        
+        test_result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        
+        if test_result.returncode == 0:
+            result['success'] = True
+            result['message'] = 'Connection successful!'
+            # Parse output for version info
+            for line in test_result.stdout.strip().split('\n'):
+                if 'MariaDB' in line or 'MySQL' in line:
+                    result['details']['version'] = line.strip()
+        else:
+            result['message'] = test_result.stderr or 'Connection failed'
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Connection timed out'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+@app.route('/api/mariadb/install', methods=['POST'])
+def api_mariadb_install():
+    """Install MariaDB server (system-level, requires sudo)"""
+    result = {
+        'success': False,
+        'message': '',
+        'output': ''
+    }
+    
+    try:
+        # First check if it's already installed
+        check = subprocess.run(['which', 'mariadb'], capture_output=True, text=True)
+        if check.returncode == 0:
+            result['success'] = True
+            result['message'] = 'MariaDB is already installed'
+            return jsonify(result)
+        
+        # Detect package manager and install
+        if shutil.which('apt'):
+            install_result = subprocess.run(
+                ['sudo', 'apt', 'update', '&&', 'sudo', 'apt', 'install', '-y', 'mariadb-server'],
+                capture_output=True, text=True, timeout=300, shell=True
+            )
+        elif shutil.which('yum'):
+            install_result = subprocess.run(
+                ['sudo', 'yum', 'install', '-y', 'mariadb-server'],
+                capture_output=True, text=True, timeout=300
+            )
+        else:
+            result['message'] = 'Unsupported package manager. Please install MariaDB manually.'
+            return jsonify(result)
+        
+        result['output'] = install_result.stdout + '\n' + install_result.stderr
+        result['success'] = install_result.returncode == 0
+        result['message'] = 'MariaDB installed successfully' if result['success'] else 'Installation failed'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
 
 # =============================================================================
 # INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)

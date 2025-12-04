@@ -7537,8 +7537,9 @@ function updateWizardUI() {
     updateStepStatus('passwords', wizardStatus.steps.passwords?.complete,
         wizardStatus.steps.passwords?.complete ? 'Passwords configured' : 'Passwords not set');
     
-    updateStepStatus('mariadb', wizardStatus.steps.mariadb_config?.complete,
-        wizardStatus.steps.mariadb_config?.complete ? 'MariaDB optimized' : 'Needs optimization');
+    updateStepStatus('mariadb', wizardStatus.steps.mariadb_setup?.complete,
+        wizardStatus.steps.mariadb_setup?.complete ? 'Databases ready' : 
+        (wizardStatus.steps.mariadb_setup?.databases_created ? 'Needs optimization' : 'Needs setup'));
     
     updateStepStatus('logging', wizardStatus.steps.docker_logging?.complete,
         wizardStatus.steps.docker_logging?.complete ? 'Log rotation enabled' : 'Not configured');
@@ -7587,7 +7588,8 @@ async function runWizardStep(step) {
                 await generatePasswordsStep();
                 break;
             case 'mariadb':
-                await optimizeMariaDBStep();
+            case 'mariadb_setup':
+                await mariadbSetupStep();
                 break;
             case 'logging':
                 await configureLoggingStep();
@@ -8012,13 +8014,297 @@ async function applyPasswordChoices() {
     }
 }
 
-async function optimizeMariaDBStep() {
+async function mariadbSetupStep() {
+    appendWizardOutput('Loading MariaDB status...\\n');
+    
+    try {
+        const response = await fetch('/api/mariadb/status');
+        if (!response.ok) throw new Error('Failed to load MariaDB status');
+        const status = await response.json();
+        
+        // Show current status
+        appendWizardOutput('\\n━━━━━━ MariaDB Status ━━━━━━\\n');
+        
+        if (status.container.running) {
+            appendWizardOutput('✓ Database container is running\\n', 'success');
+            if (status.container.version) {
+                appendWizardOutput(`  Version: ${status.container.version}\\n`);
+            }
+        } else {
+            appendWizardOutput('⚠️ Database container not running\\n', 'warning');
+            appendWizardOutput('  Start the stack first, or run only the database container\\n');
+        }
+        
+        if (status.container.accessible) {
+            appendWizardOutput('✓ Database connection verified\\n', 'success');
+        }
+        
+        // Get credentials
+        const credResponse = await fetch('/api/mariadb/credentials');
+        const credentials = await credResponse.json();
+        
+        // Show the setup panel
+        showMariaDBSetupPanel(status, credentials);
+        
+    } catch (e) {
+        appendWizardOutput(`\\n❌ Error: ${e.message}\\n`, 'error');
+    }
+}
+
+function showMariaDBSetupPanel(status, credentials) {
+    // Remove existing panel if present
+    let panel = document.getElementById('mariadbSetupPanel');
+    if (panel) panel.remove();
+    
+    // Build databases status HTML
+    let dbStatusHtml = '';
+    const databases = ['dragonite', 'golbat', 'reactmap', 'koji', 'poracle'];
+    for (const db of databases) {
+        const dbInfo = status.databases[db] || { exists: false };
+        const statusIcon = dbInfo.exists ? '✅' : '⚪';
+        const sizeInfo = dbInfo.size ? ` (${dbInfo.size})` : '';
+        dbStatusHtml += `<span class="db-status-item">${statusIcon} ${db}${sizeInfo}</span>`;
+    }
+    
+    const html = `
+        <div id="mariadbSetupPanel" class="wizard-popout-panel" style="margin-top: 15px;">
+            <div class="popout-header">
+                <h4>🗄️ MariaDB Setup</h4>
+                <button class="btn btn-sm" onclick="closeMariaDBSetupPanel()">✖ Close</button>
+            </div>
+            <div class="popout-body">
+                <p class="popout-hint">Configure MariaDB databases and users for Aegis AIO stack.</p>
+                
+                <!-- Status Section -->
+                <div class="mariadb-status-section">
+                    <div class="status-row">
+                        <span class="status-label">Container:</span>
+                        <span class="status-value ${status.container.running ? 'status-ok' : 'status-warn'}">
+                            ${status.container.running ? '🟢 Running' : '🔴 Not Running'}
+                        </span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Connection:</span>
+                        <span class="status-value ${status.container.accessible ? 'status-ok' : 'status-warn'}">
+                            ${status.container.accessible ? '🟢 Accessible' : '🟡 Not tested'}
+                        </span>
+                    </div>
+                    <div class="status-row">
+                        <span class="status-label">Databases:</span>
+                        <div class="db-status-grid">${dbStatusHtml}</div>
+                    </div>
+                </div>
+                
+                <!-- Credentials Form -->
+                <div class="config-fields-form" style="margin-top: 15px;">
+                    <h5 style="margin-bottom: 10px;">Database Credentials</h5>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Root Username</label>
+                        <div class="field-description">MariaDB root user (usually 'root')</div>
+                        <input type="text" id="mariadb-root-user" class="form-input" 
+                               value="root" placeholder="root" readonly>
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Root Password</label>
+                        <div class="field-description">From password setup step (MYSQL_ROOT_PASSWORD)</div>
+                        <input type="text" id="mariadb-root-password" class="form-input" 
+                               value="${credentials.root_password || ''}" 
+                               placeholder="Set in Passwords step">
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Application Username</label>
+                        <div class="field-description">Username for Aegis services (Dragonite, Golbat, etc.)</div>
+                        <input type="text" id="mariadb-db-user" class="form-input" 
+                               value="${credentials.db_user || 'dbuser'}" placeholder="dbuser">
+                    </div>
+                    
+                    <div class="config-field-item">
+                        <label class="field-label">Application Password</label>
+                        <div class="field-description">From password setup step (MYSQL_PASSWORD)</div>
+                        <input type="text" id="mariadb-db-password" class="form-input" 
+                               value="${credentials.db_password || ''}" 
+                               placeholder="Set in Passwords step">
+                    </div>
+                    
+                    <h5 style="margin: 15px 0 10px 0;">Databases to Create</h5>
+                    <div class="databases-checkboxes">
+                        ${databases.map(db => `
+                            <label class="checkbox-item">
+                                <input type="checkbox" id="mariadb-db-${db}" checked 
+                                       ${status.databases[db]?.exists ? 'disabled' : ''}>
+                                <span>${db}</span>
+                                ${status.databases[db]?.exists ? '<span class="exists-badge">exists</span>' : ''}
+                            </label>
+                        `).join('')}
+                    </div>
+                </div>
+                
+                <!-- Optimization Section -->
+                <div class="optimization-section" style="margin-top: 15px; padding: 10px; background: var(--bg-tertiary); border-radius: var(--radius-md);">
+                    <h5 style="margin-bottom: 10px;">⚡ Performance Optimization</h5>
+                    <p style="font-size: 0.85em; opacity: 0.8; margin-bottom: 10px;">
+                        Optimize MariaDB based on your system resources (run "Detect Resources" first)
+                    </p>
+                    <button class="btn btn-secondary btn-sm" onclick="applyMariaDBOptimization()">
+                        📊 Apply Optimized Settings
+                    </button>
+                </div>
+                
+                <!-- Test Connection -->
+                <div style="margin-top: 15px;">
+                    <button class="btn btn-secondary" onclick="testMariaDBConnection('root')">
+                        🔌 Test Root Connection
+                    </button>
+                    <button class="btn btn-secondary" onclick="testMariaDBConnection('user')">
+                        🔌 Test User Connection
+                    </button>
+                </div>
+            </div>
+            <div class="popout-footer">
+                <button class="btn btn-secondary" onclick="closeMariaDBSetupPanel()">Cancel</button>
+                <button class="btn btn-success" onclick="runMariaDBSetup()">
+                    🚀 Setup Databases & Users
+                </button>
+            </div>
+        </div>
+    `;
+    
+    // Insert after the wizard steps grid
+    const stepsGrid = document.querySelector('.wizard-steps-grid');
+    if (stepsGrid) {
+        stepsGrid.insertAdjacentHTML('afterend', html);
+    } else {
+        const wizardContent = document.getElementById('wizardContent');
+        if (wizardContent) {
+            wizardContent.insertAdjacentHTML('beforeend', html);
+        }
+    }
+    
+    document.getElementById('mariadbSetupPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeMariaDBSetupPanel() {
+    const panel = document.getElementById('mariadbSetupPanel');
+    if (panel) panel.remove();
+}
+
+async function testMariaDBConnection(type) {
+    const rootPass = document.getElementById('mariadb-root-password')?.value || '';
+    const dbUser = document.getElementById('mariadb-db-user')?.value || '';
+    const dbPass = document.getElementById('mariadb-db-password')?.value || '';
+    
+    const user = type === 'root' ? 'root' : dbUser;
+    const password = type === 'root' ? rootPass : dbPass;
+    
+    if (!password) {
+        showToast(`Please enter ${type === 'root' ? 'root' : 'user'} password first`, 'warning');
+        return;
+    }
+    
+    showToast(`Testing ${type} connection...`, 'info');
+    appendWizardOutput(`\\nTesting ${type} connection...\\n`);
+    
+    try {
+        const response = await fetch('/api/mariadb/test-connection', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ user, password })
+        });
+        
+        const data = await response.json();
+        
+        if (data.success) {
+            appendWizardOutput(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} connection successful!\\n`, 'success');
+            if (data.details.version) {
+                appendWizardOutput(`   Version: ${data.details.version}\\n`);
+            }
+            showToast('Connection successful!', 'success');
+        } else {
+            appendWizardOutput(`❌ Connection failed: ${data.message}\\n`, 'error');
+            showToast(`Connection failed: ${data.message}`, 'error');
+        }
+    } catch (e) {
+        appendWizardOutput(`❌ Error: ${e.message}\\n`, 'error');
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function runMariaDBSetup() {
+    const rootPass = document.getElementById('mariadb-root-password')?.value || '';
+    const dbUser = document.getElementById('mariadb-db-user')?.value || '';
+    const dbPass = document.getElementById('mariadb-db-password')?.value || '';
+    
+    if (!rootPass) {
+        showToast('Root password is required', 'error');
+        return;
+    }
+    
+    if (!dbUser || !dbPass) {
+        showToast('Application username and password are required', 'error');
+        return;
+    }
+    
+    // Get selected databases
+    const databases = ['dragonite', 'golbat', 'reactmap', 'koji', 'poracle'].filter(db => {
+        const checkbox = document.getElementById(`mariadb-db-${db}`);
+        return checkbox && (checkbox.checked || checkbox.disabled);
+    });
+    
+    showToast('Running MariaDB setup...', 'info');
+    appendWizardOutput('\\n━━━━━━ Running MariaDB Setup ━━━━━━\\n');
+    
+    try {
+        const response = await fetch('/api/mariadb/setup', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                root_password: rootPass,
+                db_user: dbUser,
+                db_password: dbPass,
+                databases: databases
+            })
+        });
+        
+        const data = await response.json();
+        
+        // Show steps
+        for (const step of data.steps || []) {
+            appendWizardOutput(`${step}\\n`, 'success');
+        }
+        
+        // Show errors
+        for (const error of data.errors || []) {
+            appendWizardOutput(`❌ ${error}\\n`, 'error');
+        }
+        
+        if (data.success) {
+            appendWizardOutput('\\n✅ MariaDB setup complete!\\n', 'success');
+            showToast('MariaDB setup complete!', 'success');
+            updateStepStatus('mariadb', true, 'Databases ready');
+            closeMariaDBSetupPanel();
+            await refreshWizardStatus();
+        } else {
+            appendWizardOutput('\\n⚠️ Setup completed with errors\\n', 'warning');
+            showToast('Setup completed with some errors', 'warning');
+        }
+        
+    } catch (e) {
+        appendWizardOutput(`❌ Error: ${e.message}\\n`, 'error');
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function applyMariaDBOptimization() {
     if (!detectedResources) {
+        showToast('Please run "Detect Resources" step first', 'warning');
         appendWizardOutput('⚠️ Please run "Detect Resources" first.\\n', 'warning');
         return;
     }
     
-    appendWizardOutput('Applying optimized MariaDB settings...\\n');
+    appendWizardOutput('\\nApplying optimized MariaDB settings...\\n');
     
     const settings = {
         'innodb_buffer_pool_size': detectedResources.recommended.innodb_buffer_pool_size,
@@ -8030,21 +8316,26 @@ async function optimizeMariaDBStep() {
         'max_heap_table_size': detectedResources.recommended.tmp_table_size
     };
     
-    const response = await fetch('/api/wizard/apply-mariadb-config', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ settings })
-    });
-    
-    if (!response.ok) throw new Error('Failed to apply MariaDB config');
-    
-    appendWizardOutput('\\nApplied settings:\\n');
-    for (const [key, value] of Object.entries(settings)) {
-        appendWizardOutput(`  ${key} = ${value}\\n`);
+    try {
+        const response = await fetch('/api/wizard/apply-mariadb-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ settings })
+        });
+        
+        if (!response.ok) throw new Error('Failed to apply MariaDB config');
+        
+        appendWizardOutput('Applied settings:\\n');
+        for (const [key, value] of Object.entries(settings)) {
+            appendWizardOutput(`  ${key} = ${value}\\n`);
+        }
+        
+        appendWizardOutput('\\n✅ MariaDB configuration optimized!\\n', 'success');
+        showToast('MariaDB optimization applied', 'success');
+    } catch (e) {
+        appendWizardOutput(`❌ Error: ${e.message}\\n`, 'error');
+        showToast(`Error: ${e.message}`, 'error');
     }
-    
-    appendWizardOutput('\\n✅ MariaDB configuration optimized!\\n', 'success');
-    updateStepStatus('mariadb', true, 'Database optimized');
 }
 
 async function configureLoggingStep() {

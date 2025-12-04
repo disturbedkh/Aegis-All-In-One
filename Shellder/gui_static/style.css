@@ -2479,6 +2479,106 @@ select:focus {
 }
 
 /* =============================================================================
+   MARIADB SETUP PANEL STYLES
+   ============================================================================= */
+
+.mariadb-status-section {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 12px;
+    margin-bottom: 15px;
+}
+
+.status-row {
+    display: flex;
+    align-items: flex-start;
+    margin-bottom: 8px;
+    gap: 12px;
+}
+
+.status-row:last-child {
+    margin-bottom: 0;
+}
+
+.status-label {
+    font-weight: 500;
+    min-width: 100px;
+    color: var(--text-secondary);
+}
+
+.status-value {
+    flex: 1;
+}
+
+.status-value.status-ok {
+    color: var(--success);
+}
+
+.status-value.status-warn {
+    color: var(--warning);
+}
+
+.db-status-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.db-status-item {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    background: var(--bg-primary);
+    padding: 4px 10px;
+    border-radius: var(--radius-sm);
+    font-size: 0.85em;
+}
+
+.databases-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+    gap: 8px;
+}
+
+.checkbox-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    transition: background 0.2s ease;
+}
+
+.checkbox-item:hover {
+    background: var(--bg-hover);
+}
+
+.checkbox-item input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--primary);
+}
+
+.checkbox-item input[type="checkbox"]:disabled {
+    opacity: 0.6;
+}
+
+.exists-badge {
+    font-size: 0.7em;
+    background: var(--success);
+    color: white;
+    padding: 2px 6px;
+    border-radius: var(--radius-sm);
+    margin-left: auto;
+}
+
+.optimization-section {
+    border-left: 3px solid var(--primary);
+}
+
+/* =============================================================================
    COMPREHENSIVE SECRETS PANEL - for managing all passwords/tokens
    ============================================================================= */
 
