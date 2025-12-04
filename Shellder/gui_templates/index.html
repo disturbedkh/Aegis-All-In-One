@@ -980,7 +980,31 @@
                             <div class="step-name">Passwords</div>
                             <div class="step-desc">Generate secure credentials</div>
                             <div class="step-details" id="step-passwords-details">Checking...</div>
-                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('passwords')">Generate</button>
+                            <button class="btn btn-sm btn-primary step-action" onclick="togglePasswordPanel()">Configure</button>
+                        </div>
+                        
+                        <!-- Password Configuration Panel (Pop-out) -->
+                        <div id="passwordPanel" class="wizard-popout-panel" style="display: none;">
+                            <div class="popout-header">
+                                <h3>🔐 Password Configuration</h3>
+                                <button class="btn btn-sm" onclick="closePasswordPanel()">✕ Close</button>
+                            </div>
+                            <div id="passwordPanelStatus" class="popout-status"></div>
+                            <div class="popout-body">
+                                <div id="passwordFieldsContainer" class="password-fields-list">
+                                    <!-- Password fields loaded dynamically -->
+                                </div>
+                            </div>
+                            <div class="popout-footer">
+                                <label class="show-passwords-label">
+                                    <input type="checkbox" id="showPasswordsCheckbox" onchange="togglePasswordVisibility()">
+                                    Show values
+                                </label>
+                                <div class="popout-actions">
+                                    <button class="btn btn-secondary btn-sm" onclick="generateAllPasswords()">🎲 Generate All New</button>
+                                    <button class="btn btn-success btn-sm" onclick="applyPasswordChoices()">💾 Save Passwords</button>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- Step 6: MariaDB Config -->
@@ -2057,40 +2081,6 @@
                 Content
             </div>
             <div class="modal-footer" id="modalFooter">
-            </div>
-        </div>
-    </div>
-    
-    <!-- Password Management Modal -->
-    <div id="passwordModal" class="modal" style="display: none;">
-        <div class="modal-content large">
-            <div class="modal-header">
-                <h3>🔐 Password & Token Configuration</h3>
-                <button class="modal-close" onclick="closePasswordModal()">&times;</button>
-            </div>
-            <div class="modal-body">
-                <div id="passwordStatusMessage" class="password-status-message"></div>
-                
-                <div class="password-options">
-                    <p style="margin-bottom: 15px; color: var(--text-secondary);">
-                        For each credential below, you can: keep the existing value, generate a new secure random value, or enter your own custom value.
-                    </p>
-                    
-                    <div id="passwordFieldsContainer" class="password-fields-container">
-                        <!-- Password fields will be dynamically inserted here -->
-                    </div>
-                </div>
-                
-                <div class="password-actions" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
-                    <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 15px;">
-                        <input type="checkbox" id="showPasswordsCheckbox" onchange="togglePasswordVisibility()">
-                        <span>Show password values</span>
-                    </label>
-                </div>
-            </div>
-            <div class="modal-footer">
-                <button class="btn btn-secondary" onclick="closePasswordModal()">Cancel</button>
-                <button class="btn btn-primary" onclick="applyPasswordChoices()">💾 Save Passwords</button>
             </div>
         </div>
     </div>
