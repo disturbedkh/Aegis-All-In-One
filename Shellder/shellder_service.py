@@ -208,6 +208,54 @@ else:
     socketio = None
 
 # =============================================================================
+# FILE WRITE HELPER (preserves ownership when using sudo)
+# =============================================================================
+
+def safe_write_file(file_path, content, preserve_ownership=True):
+    """
+    Write a file using sudo tee while preserving original ownership.
+    Returns (success, error_message)
+    """
+    try:
+        original_uid = 1000
+        original_gid = 1000
+        
+        if preserve_ownership and os.path.exists(file_path):
+            try:
+                stat_info = os.stat(file_path)
+                original_uid = stat_info.st_uid
+                original_gid = stat_info.st_gid
+            except:
+                pass
+        
+        # Write using sudo tee
+        result = subprocess.run(
+            ['sudo', 'tee', file_path],
+            input=content,
+            capture_output=True,
+            text=True,
+            timeout=10
+        )
+        
+        if result.returncode != 0:
+            return False, result.stderr[:200]
+        
+        # Restore ownership
+        if preserve_ownership:
+            try:
+                subprocess.run(
+                    ['sudo', 'chown', f'{original_uid}:{original_gid}', file_path],
+                    capture_output=True,
+                    timeout=5
+                )
+            except:
+                pass  # Best effort
+        
+        return True, None
+    except Exception as e:
+        return False, str(e)
+
+# =============================================================================
 # DOCKER CLIENT
 # =============================================================================
 
@@ -10161,19 +10209,13 @@ def api_config_sync_field():
                 results.append({'config': config_path, 'status': 'error', 'reason': 'Unsupported format'})
                 continue
             
-            # Write updated config
-            result = subprocess.run(
-                ['sudo', 'tee', full_path],
-                input=updated_content,
-                capture_output=True,
-                text=True,
-                timeout=10
-            )
+            # Write updated config with ownership preservation
+            success, error_msg = safe_write_file(full_path, updated_content)
             
-            if result.returncode == 0:
+            if success:
                 results.append({'config': config_path, 'status': 'success', 'field': f"{field_path[0]}.{field_path[1]}"})
             else:
-                results.append({'config': config_path, 'status': 'error', 'reason': result.stderr})
+                results.append({'config': config_path, 'status': 'error', 'reason': error_msg})
                 
         except Exception as e:
             results.append({'config': config_path, 'status': 'error', 'reason': str(e)})
@@ -10438,6 +10480,18 @@ def api_secrets_apply():
                 
                 # Write the updated content
                 if updated_content != content:
+                    # Get original file ownership before writing
+                    try:
+                        import pwd
+                        import grp
+                        stat_info = os.stat(full_path)
+                        original_uid = stat_info.st_uid
+                        original_gid = stat_info.st_gid
+                    except:
+                        original_uid = 1000  # Default to common user
+                        original_gid = 1000
+                    
+                    # Write the file
                     result = subprocess.run(
                         ['sudo', 'tee', full_path],
                         input=updated_content,
@@ -10447,22 +10501,35 @@ def api_secrets_apply():
                     )
                     
                     if result.returncode == 0:
+                        # Restore original file ownership (prevent root ownership)
+                        try:
+                            subprocess.run(
+                                ['sudo', 'chown', f'{original_uid}:{original_gid}', full_path],
+                                capture_output=True,
+                                timeout=5
+                            )
+                        except:
+                            pass  # Best effort to restore ownership
+                        
                         target_results.append({
                             'file': target_file,
                             'status': 'success'
                         })
+                        info('SECRETS', f'Updated {target_file}')
                     else:
                         target_results.append({
                             'file': target_file,
                             'status': 'error',
                             'reason': result.stderr[:100]
                         })
+                        error('SECRETS', f'Failed to write {target_file}: {result.stderr[:100]}')
                 else:
                     target_results.append({
                         'file': target_file,
                         'status': 'unchanged',
                         'reason': 'Value already set or placeholder not found'
                     })
+                    debug('SECRETS', f'{target_file} unchanged - placeholder not found or already set')
                     
             except Exception as e:
                 target_results.append({
@@ -10663,17 +10730,11 @@ def api_config_structured_save():
         # Create directory if needed
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         
-        # Write file
-        result = subprocess.run(
-            ['sudo', 'tee', full_path],
-            input=content,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Write file with ownership preservation
+        success, error_msg = safe_write_file(full_path, content)
         
-        if result.returncode != 0:
-            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        if not success:
+            return jsonify({'error': f'Failed to write: {error_msg}'}), 500
         
         return jsonify({'success': True, 'path': config_path})
     except Exception as e:
@@ -10785,17 +10846,11 @@ def api_config_file_write():
         # Create directory if needed
         os.makedirs(os.path.dirname(full_path), exist_ok=True)
         
-        # Write using sudo tee for permission handling
-        result = subprocess.run(
-            ['sudo', 'tee', full_path],
-            input=content,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        # Write using safe_write_file to preserve ownership
+        success, error_msg = safe_write_file(full_path, content)
         
-        if result.returncode != 0:
-            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        if not success:
+            return jsonify({'error': f'Failed to write: {error_msg}'}), 500
         
         return jsonify({'success': True, 'path': path})
     except Exception as e:
@@ -10886,18 +10941,12 @@ def api_config_env_write():
                 # Add new line
                 lines.append(f'{key}={value}\n')
         
-        # Write back
+        # Write back with ownership preservation
         content = ''.join(lines)
-        result = subprocess.run(
-            ['sudo', 'tee', env_file],
-            input=content,
-            capture_output=True,
-            text=True,
-            timeout=10
-        )
+        success, error_msg = safe_write_file(env_file, content)
         
-        if result.returncode != 0:
-            return jsonify({'error': f'Failed to write: {result.stderr}'}), 500
+        if not success:
+            return jsonify({'error': f'Failed to write: {error_msg}'}), 500
         
         return jsonify({'success': True, 'updated': list(updates.keys())})
     except Exception as e:

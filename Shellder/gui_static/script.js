@@ -7818,12 +7818,14 @@ function renderSecretsPanel(data) {
                             <option value="generate" ${!hasGoodValue ? 'selected' : ''}>Generate</option>
                             <option value="custom">Custom</option>
                         </select>
-                        <input type="password" 
+                        <input type="text" 
                                id="pwd-input-${key}" 
-                               placeholder="${hasGoodValue ? '••••••••' : 'Auto-generate'}"
+                               placeholder="${hasGoodValue ? '(current value hidden)' : 'Auto-generate'}"
                                ${secretFieldChoices[key].mode !== 'custom' ? 'disabled' : ''}
-                               class="${hasGoodValue ? 'has-value' : info.is_default ? 'is-weak' : ''}"
+                               class="secret-input ${hasGoodValue ? 'has-value' : info.is_default ? 'is-weak' : ''}"
                                oninput="onSecretInput('${key}')"
+                               autocomplete="off"
+                               spellcheck="false"
                         >
                         <div class="field-actions">
                             <button class="btn btn-xs" onclick="generateSingleSecret('${key}')" title="Generate random">🎲</button>
