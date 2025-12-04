@@ -5502,3 +5502,228 @@ select:focus {
     color: var(--text-secondary);
 }
 
+/* =============================================================================
+   STACK SETUP WIZARD
+============================================================================= */
+
+.wizard-header {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, var(--bg-tertiary) 100%);
+    border-radius: var(--radius-lg);
+    padding: 24px;
+    margin-bottom: 24px;
+    border: 1px solid var(--border-color);
+}
+
+.wizard-title h2 {
+    margin: 0 0 8px 0;
+    font-size: 24px;
+    color: var(--text-primary);
+}
+
+.wizard-title p {
+    margin: 0;
+    color: var(--text-muted);
+    font-size: 14px;
+}
+
+.wizard-progress-bar {
+    height: 8px;
+    background: var(--bg-primary);
+    border-radius: 4px;
+    margin: 20px 0 12px 0;
+    overflow: hidden;
+}
+
+.wizard-progress-bar .progress-fill {
+    height: 100%;
+    background: linear-gradient(90deg, var(--accent-primary), var(--success));
+    border-radius: 4px;
+    transition: width 0.5s ease;
+}
+
+.wizard-progress-text {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+/* Wizard Steps Grid */
+.wizard-steps-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    gap: 16px;
+    margin-bottom: 24px;
+}
+
+.wizard-step-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    transition: all var(--transition-normal);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+}
+
+.wizard-step-card:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.wizard-step-card.complete {
+    border-color: var(--success);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(46, 204, 113, 0.05) 100%);
+}
+
+.wizard-step-card.pending {
+    opacity: 0.9;
+}
+
+.wizard-step-final {
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(52, 152, 219, 0.1) 100%);
+    border-color: var(--accent-primary);
+}
+
+.step-header {
+    display: flex;
+    justify-content: space-between;
+    width: 100%;
+    margin-bottom: 12px;
+}
+
+.step-number {
+    width: 24px;
+    height: 24px;
+    background: var(--accent-primary);
+    color: white;
+    border-radius: 50%;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.step-status {
+    font-size: 18px;
+}
+
+.wizard-step-card .step-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+}
+
+.wizard-step-card .step-name {
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-primary);
+    margin-bottom: 6px;
+}
+
+.wizard-step-card .step-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+    margin-bottom: 8px;
+}
+
+.wizard-step-card .step-details {
+    font-size: 10px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+    min-height: 28px;
+}
+
+.wizard-step-card .step-action {
+    width: 100%;
+    padding: 8px 12px;
+    font-size: 12px;
+}
+
+/* Wizard Output Panel */
+.wizard-output-panel {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    margin-bottom: 24px;
+    overflow: hidden;
+}
+
+.wizard-output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-weight: 600;
+    font-size: 14px;
+}
+
+.wizard-output-content {
+    background: #1a1a2e;
+    color: #00ff88;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    padding: 16px;
+    min-height: 200px;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
+.wizard-output-success {
+    color: #00ff88;
+}
+
+.wizard-output-error {
+    color: #ff6b6b;
+}
+
+.wizard-output-warning {
+    color: #ffd93d;
+}
+
+.wizard-output-info {
+    color: #6bceff;
+}
+
+.wizard-output-code {
+    color: #c8a2fa;
+    background: rgba(200, 162, 250, 0.1);
+    padding: 0 4px;
+    border-radius: 3px;
+}
+
+/* Quick Actions */
+.wizard-quick-actions {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    border: 1px solid var(--border-color);
+    margin-bottom: 24px;
+}
+
+.wizard-quick-actions h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.quick-actions-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+    gap: 12px;
+}
+
+.quick-actions-grid .btn {
+    padding: 12px 16px;
+    font-size: 13px;
+    justify-content: center;
+}
+

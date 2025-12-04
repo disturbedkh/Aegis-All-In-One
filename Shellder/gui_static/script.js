@@ -7124,3 +7124,359 @@ async function emergencyMemoryCleanup() {
 }
 
 // Memory health monitoring is now handled by startSystemResourcesMonitoring()
+
+// =============================================================================
+// STACK SETUP WIZARD
+// =============================================================================
+
+let wizardStatus = null;
+let detectedResources = null;
+let generatedPasswords = null;
+
+async function refreshWizardStatus() {
+    try {
+        const response = await fetch('/api/wizard/status');
+        if (!response.ok) throw new Error('Failed to get wizard status');
+        wizardStatus = await response.json();
+        updateWizardUI();
+    } catch (e) {
+        console.error('Failed to refresh wizard status:', e);
+        showToast('Failed to check setup status', 'error');
+    }
+}
+
+function updateWizardUI() {
+    if (!wizardStatus) return;
+    
+    // Update progress bar
+    const progressFill = document.getElementById('wizardProgressFill');
+    const progressText = document.getElementById('wizardProgressText');
+    if (progressFill) progressFill.style.width = `${wizardStatus.overall_progress}%`;
+    if (progressText) progressText.textContent = `${wizardStatus.overall_progress}% Complete`;
+    
+    // Update Docker step
+    updateStepStatus('docker', wizardStatus.steps.docker?.complete, 
+        wizardStatus.steps.docker?.complete ? 'Docker is running' : 'Docker not installed or not running');
+    
+    // Update other steps
+    updateStepStatus('configs', wizardStatus.steps.config_files?.complete,
+        wizardStatus.steps.config_files?.complete ? 'Config files ready' : 'Configs need to be copied');
+    
+    updateStepStatus('passwords', wizardStatus.steps.passwords?.complete,
+        wizardStatus.steps.passwords?.complete ? 'Passwords configured' : 'Passwords not set');
+    
+    updateStepStatus('mariadb', wizardStatus.steps.mariadb_config?.complete,
+        wizardStatus.steps.mariadb_config?.complete ? 'MariaDB optimized' : 'Needs optimization');
+    
+    updateStepStatus('logging', wizardStatus.steps.docker_logging?.complete,
+        wizardStatus.steps.docker_logging?.complete ? 'Log rotation enabled' : 'Not configured');
+    
+    updateStepStatus('start', wizardStatus.steps.database?.complete,
+        wizardStatus.steps.database?.complete ? 'Stack is running' : 'Not started');
+    
+    // Enable start button if prerequisites are met
+    const startBtn = document.getElementById('startStackBtn');
+    if (startBtn) {
+        startBtn.disabled = !wizardStatus.ready_to_start;
+    }
+}
+
+function updateStepStatus(stepName, complete, details) {
+    const statusEl = document.getElementById(`step-${stepName}-status`);
+    const detailsEl = document.getElementById(`step-${stepName}-details`);
+    const cardEl = document.getElementById(`wizard-step-${stepName}`);
+    
+    if (statusEl) statusEl.textContent = complete ? '✅' : '⏳';
+    if (detailsEl) detailsEl.textContent = details || '';
+    if (cardEl) {
+        cardEl.classList.remove('complete', 'pending');
+        cardEl.classList.add(complete ? 'complete' : 'pending');
+    }
+}
+
+async function runWizardStep(step) {
+    showWizardOutput(`Running: ${step}...`, true);
+    
+    try {
+        switch(step) {
+            case 'docker':
+                await runDockerInstall();
+                break;
+            case 'ports':
+                await checkPortsStep();
+                break;
+            case 'resources':
+                await detectResourcesStep();
+                break;
+            case 'configs':
+                await copyConfigsStep();
+                break;
+            case 'passwords':
+                await generatePasswordsStep();
+                break;
+            case 'mariadb':
+                await optimizeMariaDBStep();
+                break;
+            case 'logging':
+                await configureLoggingStep();
+                break;
+            case 'start':
+                await startStackStep();
+                break;
+        }
+        
+        // Refresh status after any step
+        await refreshWizardStatus();
+        
+    } catch (e) {
+        appendWizardOutput(`\n❌ Error: ${e.message}`, 'error');
+        showToast(`Step failed: ${e.message}`, 'error');
+    }
+}
+
+async function runDockerInstall() {
+    appendWizardOutput('Checking Docker installation...\\n');
+    
+    const response = await fetch('/api/wizard/status');
+    const status = await response.json();
+    
+    if (status.steps.docker?.complete) {
+        appendWizardOutput('✅ Docker is already installed and running!\\n', 'success');
+        return;
+    }
+    
+    appendWizardOutput('⚠️ Docker needs to be installed.\\n', 'warning');
+    appendWizardOutput('\\nTo install Docker, run this in your terminal:\\n\\n');
+    appendWizardOutput('  curl -fsSL https://get.docker.com | sudo sh\\n', 'code');
+    appendWizardOutput('  sudo systemctl enable docker\\n', 'code');
+    appendWizardOutput('  sudo systemctl start docker\\n', 'code');
+    appendWizardOutput('\\nOr use the Quick Actions below to run the full setup script.\\n');
+}
+
+async function checkPortsStep() {
+    appendWizardOutput('Checking required ports...\\n');
+    
+    const response = await fetch('/api/wizard/check-ports');
+    if (!response.ok) throw new Error('Failed to check ports');
+    const data = await response.json();
+    
+    appendWizardOutput('\\n┌────────┬─────────────────────┬────────────┐\\n');
+    appendWizardOutput('│ Port   │ Service             │ Status     │\\n');
+    appendWizardOutput('├────────┼─────────────────────┼────────────┤\\n');
+    
+    for (const [port, info] of Object.entries(data.ports)) {
+        const status = info.available ? '✅ Free' : `❌ ${info.process || 'In Use'}`;
+        appendWizardOutput(`│ ${port.toString().padEnd(6)} │ ${info.service.padEnd(19)} │ ${status.padEnd(10)} │\\n`);
+    }
+    
+    appendWizardOutput('└────────┴─────────────────────┴────────────┘\\n');
+    
+    if (data.all_available) {
+        appendWizardOutput('\\n✅ All required ports are available!\\n', 'success');
+        updateStepStatus('ports', true, 'All ports free');
+    } else {
+        appendWizardOutput('\\n⚠️ Some ports are in use. Stop conflicting services first.\\n', 'warning');
+        updateStepStatus('ports', false, 'Port conflicts detected');
+    }
+}
+
+async function detectResourcesStep() {
+    appendWizardOutput('Detecting system resources...\\n');
+    
+    const response = await fetch('/api/wizard/detect-resources');
+    if (!response.ok) throw new Error('Failed to detect resources');
+    detectedResources = await response.json();
+    
+    appendWizardOutput('\\n┌─────────────────────────────────────────────┐\\n');
+    appendWizardOutput('│           DETECTED SYSTEM RESOURCES          │\\n');
+    appendWizardOutput('├─────────────────────────────────────────────┤\\n');
+    appendWizardOutput(`│  RAM:         ${detectedResources.ram_gb} GB                          │\\n`);
+    appendWizardOutput(`│  CPU Cores:   ${detectedResources.cpu_cores}                             │\\n`);
+    appendWizardOutput(`│  Storage:     ${detectedResources.storage_type.toUpperCase()}                          │\\n`);
+    appendWizardOutput('└─────────────────────────────────────────────┘\\n');
+    
+    appendWizardOutput('\\nRecommended MariaDB Settings:\\n');
+    for (const [key, value] of Object.entries(detectedResources.recommended)) {
+        appendWizardOutput(`  ${key}: ${value}\\n`);
+    }
+    
+    updateStepStatus('resources', true, `${detectedResources.ram_gb}GB RAM, ${detectedResources.cpu_cores} cores`);
+    appendWizardOutput('\\n✅ Resources detected successfully!\\n', 'success');
+}
+
+async function copyConfigsStep() {
+    appendWizardOutput('Copying configuration files from examples...\\n');
+    
+    const response = await fetch('/api/wizard/copy-configs', { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to copy configs');
+    const data = await response.json();
+    
+    if (data.copied.length > 0) {
+        appendWizardOutput('\\n✅ Copied files:\\n', 'success');
+        for (const file of data.copied) {
+            appendWizardOutput(`  • ${file}\\n`);
+        }
+    } else {
+        appendWizardOutput('\\nℹ️ All config files already exist.\\n', 'info');
+    }
+    
+    if (data.errors.length > 0) {
+        appendWizardOutput('\\n⚠️ Errors:\\n', 'warning');
+        for (const err of data.errors) {
+            appendWizardOutput(`  • ${err.file}: ${err.error}\\n`);
+        }
+    }
+    
+    updateStepStatus('configs', true, 'Config files ready');
+}
+
+async function generatePasswordsStep() {
+    appendWizardOutput('Generating secure passwords and tokens...\\n');
+    
+    // Generate passwords
+    const genResponse = await fetch('/api/wizard/generate-passwords', { method: 'POST' });
+    if (!genResponse.ok) throw new Error('Failed to generate passwords');
+    generatedPasswords = await genResponse.json();
+    
+    appendWizardOutput('\\nGenerated credentials (stored in .env):\\n');
+    appendWizardOutput('─'.repeat(50) + '\\n');
+    for (const [key, value] of Object.entries(generatedPasswords)) {
+        // Show masked version for security
+        const masked = value.substring(0, 4) + '•'.repeat(12) + value.substring(value.length - 4);
+        appendWizardOutput(`  ${key}: ${masked}\\n`);
+    }
+    
+    // Apply passwords
+    appendWizardOutput('\\nApplying passwords to .env file...\\n');
+    const applyResponse = await fetch('/api/wizard/apply-passwords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ passwords: generatedPasswords })
+    });
+    
+    if (!applyResponse.ok) throw new Error('Failed to apply passwords');
+    
+    appendWizardOutput('\\n✅ Passwords generated and saved to .env!\\n', 'success');
+    appendWizardOutput('⚠️ Keep these credentials safe!\\n', 'warning');
+    updateStepStatus('passwords', true, 'Credentials configured');
+}
+
+async function optimizeMariaDBStep() {
+    if (!detectedResources) {
+        appendWizardOutput('⚠️ Please run "Detect Resources" first.\\n', 'warning');
+        return;
+    }
+    
+    appendWizardOutput('Applying optimized MariaDB settings...\\n');
+    
+    const settings = {
+        'innodb_buffer_pool_size': detectedResources.recommended.innodb_buffer_pool_size,
+        'innodb_buffer_pool_instances': detectedResources.recommended.innodb_buffer_pool_instances,
+        'innodb_read_io_threads': detectedResources.recommended.innodb_io_threads,
+        'innodb_write_io_threads': detectedResources.recommended.innodb_io_threads,
+        'max_connections': detectedResources.recommended.max_connections,
+        'tmp_table_size': detectedResources.recommended.tmp_table_size,
+        'max_heap_table_size': detectedResources.recommended.tmp_table_size
+    };
+    
+    const response = await fetch('/api/wizard/apply-mariadb-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings })
+    });
+    
+    if (!response.ok) throw new Error('Failed to apply MariaDB config');
+    
+    appendWizardOutput('\\nApplied settings:\\n');
+    for (const [key, value] of Object.entries(settings)) {
+        appendWizardOutput(`  ${key} = ${value}\\n`);
+    }
+    
+    appendWizardOutput('\\n✅ MariaDB configuration optimized!\\n', 'success');
+    updateStepStatus('mariadb', true, 'Database optimized');
+}
+
+async function configureLoggingStep() {
+    appendWizardOutput('Docker log configuration requires root access.\\n');
+    appendWizardOutput('\\nRecommended configuration for /etc/docker/daemon.json:\\n\\n');
+    appendWizardOutput('{\\n', 'code');
+    appendWizardOutput('  "log-driver": "json-file",\\n', 'code');
+    appendWizardOutput('  "log-opts": {\\n', 'code');
+    appendWizardOutput('    "max-size": "50m",\\n', 'code');
+    appendWizardOutput('    "max-file": "3",\\n', 'code');
+    appendWizardOutput('    "compress": "true"\\n', 'code');
+    appendWizardOutput('  }\\n', 'code');
+    appendWizardOutput('}\\n', 'code');
+    appendWizardOutput('\\nRun this in terminal:\\n');
+    appendWizardOutput('  sudo nano /etc/docker/daemon.json\\n', 'code');
+    appendWizardOutput('  sudo systemctl restart docker\\n', 'code');
+    
+    updateStepStatus('logging', false, 'Manual configuration');
+}
+
+async function startStackStep() {
+    if (!wizardStatus?.ready_to_start) {
+        appendWizardOutput('⚠️ Complete previous steps before starting the stack.\\n', 'warning');
+        return;
+    }
+    
+    appendWizardOutput('Starting Docker stack...\\n');
+    appendWizardOutput('This may take a few minutes as images are pulled.\\n\\n');
+    
+    const response = await fetch('/api/wizard/start-stack', { method: 'POST' });
+    if (!response.ok) throw new Error('Failed to start stack');
+    const data = await response.json();
+    
+    if (data.success) {
+        appendWizardOutput('\\n✅ Stack started successfully!\\n', 'success');
+        appendWizardOutput('\\nContainers are now starting. Check the Containers page for status.\\n');
+        updateStepStatus('start', true, 'Stack running');
+    } else {
+        appendWizardOutput('\\n❌ Stack start failed:\\n', 'error');
+        appendWizardOutput(data.stderr || data.error || 'Unknown error');
+    }
+}
+
+function showWizardOutput(title, clear = false) {
+    const panel = document.getElementById('wizardOutputPanel');
+    const titleEl = document.getElementById('wizardOutputTitle');
+    const contentEl = document.getElementById('wizardOutputContent');
+    
+    if (panel) panel.style.display = 'block';
+    if (titleEl) titleEl.textContent = title;
+    if (contentEl && clear) contentEl.innerHTML = '';
+}
+
+function appendWizardOutput(text, type = '') {
+    const contentEl = document.getElementById('wizardOutputContent');
+    if (!contentEl) return;
+    
+    const span = document.createElement('span');
+    span.className = `wizard-output-${type}`;
+    span.textContent = text.replace(/\\n/g, '\n');
+    contentEl.appendChild(span);
+    contentEl.scrollTop = contentEl.scrollHeight;
+}
+
+function closeWizardOutput() {
+    const panel = document.getElementById('wizardOutputPanel');
+    if (panel) panel.style.display = 'none';
+}
+
+// Initialize wizard when navigating to setup page
+document.addEventListener('DOMContentLoaded', () => {
+    // Check if we're on setup page
+    const setupTab = document.getElementById('setup-tab-scripts');
+    if (setupTab) {
+        // Refresh wizard status when setup tab is shown
+        const observer = new MutationObserver((mutations) => {
+            for (const mutation of mutations) {
+                if (mutation.attributeName === 'class' && 
+                    setupTab.classList.contains('active')) {
+                    refreshWizardStatus();
+                }
+            }
+        });
+        observer.observe(setupTab, { attributes: true });
+    }
+});

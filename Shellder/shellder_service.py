@@ -8589,6 +8589,489 @@ def api_setup_scripts():
     return jsonify({'scripts': scripts})
 
 # =============================================================================
+# STACK SETUP WIZARD API
+# =============================================================================
+
+import secrets
+import string
+
+@app.route('/api/wizard/status')
+def api_wizard_status():
+    """Get overall wizard/setup status for all steps"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    status = {
+        'steps': {},
+        'overall_progress': 0,
+        'ready_to_start': False
+    }
+    
+    # Step 1: Docker
+    docker_installed = shutil.which('docker') is not None
+    compose_installed = shutil.which('docker') is not None  # docker compose is now built-in
+    docker_running = False
+    try:
+        result = subprocess.run(['docker', 'info'], capture_output=True, timeout=5)
+        docker_running = result.returncode == 0
+    except:
+        pass
+    
+    status['steps']['docker'] = {
+        'name': 'Docker & Compose',
+        'description': 'Container runtime environment',
+        'installed': docker_installed and compose_installed,
+        'configured': docker_running,
+        'complete': docker_installed and docker_running
+    }
+    
+    # Step 2: Docker Logging
+    daemon_json = '/etc/docker/daemon.json'
+    log_configured = False
+    if os.path.exists(daemon_json):
+        try:
+            with open(daemon_json) as f:
+                config = json.load(f)
+                log_configured = 'log-driver' in config or 'log-opts' in config
+        except:
+            pass
+    
+    status['steps']['docker_logging'] = {
+        'name': 'Docker Logging',
+        'description': 'Log rotation to prevent disk issues',
+        'installed': True,
+        'configured': log_configured,
+        'complete': log_configured
+    }
+    
+    # Step 3: Chrome (optional for scanner)
+    chrome_installed = shutil.which('google-chrome') is not None or shutil.which('google-chrome-stable') is not None
+    chrome_version = None
+    if chrome_installed:
+        try:
+            result = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True, timeout=5)
+            if result.returncode == 0:
+                chrome_version = result.stdout.strip().split()[-1] if result.stdout else None
+        except:
+            pass
+    
+    status['steps']['chrome'] = {
+        'name': 'Google Chrome',
+        'description': 'Required for scanner (specific version)',
+        'installed': chrome_installed,
+        'version': chrome_version,
+        'configured': chrome_installed,
+        'complete': chrome_installed,
+        'optional': True
+    }
+    
+    # Step 4: System Resources (always complete - just detection)
+    ram_gb = 0
+    cpu_cores = 0
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if 'MemTotal' in line:
+                    ram_kb = int(line.split()[1])
+                    ram_gb = ram_kb // (1024 * 1024)
+                    break
+        cpu_cores = os.cpu_count() or 4
+    except:
+        ram_gb = 4
+        cpu_cores = 4
+    
+    status['steps']['resources'] = {
+        'name': 'System Resources',
+        'description': f'{ram_gb}GB RAM, {cpu_cores} CPU cores detected',
+        'installed': True,
+        'configured': True,
+        'complete': True,
+        'ram_gb': ram_gb,
+        'cpu_cores': cpu_cores
+    }
+    
+    # Step 5: MariaDB Config
+    mariadb_cnf = os.path.join(aegis_root, 'mysql_data', 'mariadb.cnf')
+    mariadb_configured = os.path.exists(mariadb_cnf)
+    
+    status['steps']['mariadb_config'] = {
+        'name': 'MariaDB Configuration',
+        'description': 'Database optimization settings',
+        'installed': True,
+        'configured': mariadb_configured,
+        'complete': mariadb_configured
+    }
+    
+    # Step 6: Config Files
+    env_file = os.path.join(aegis_root, '.env')
+    compose_file = os.path.exists(os.path.join(aegis_root, 'docker-compose.yaml')) or \
+                   os.path.exists(os.path.join(aegis_root, 'docker-compose.yml'))
+    
+    status['steps']['config_files'] = {
+        'name': 'Configuration Files',
+        'description': 'Environment and service configs',
+        'installed': True,
+        'configured': os.path.exists(env_file) and compose_file,
+        'complete': os.path.exists(env_file) and compose_file
+    }
+    
+    # Step 7: Passwords
+    passwords_set = False
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                content = f.read()
+                passwords_set = 'MYSQL_ROOT_PASSWORD=' in content and \
+                               'MYSQL_PASSWORD=' in content and \
+                               'changeme' not in content.lower()
+        except:
+            pass
+    
+    status['steps']['passwords'] = {
+        'name': 'Passwords & Tokens',
+        'description': 'Secure credentials generation',
+        'installed': True,
+        'configured': passwords_set,
+        'complete': passwords_set
+    }
+    
+    # Step 8: Database Container
+    db_running = False
+    try:
+        result = subprocess.run(['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+                              capture_output=True, text=True, timeout=5)
+        db_running = 'database' in result.stdout
+    except:
+        pass
+    
+    status['steps']['database'] = {
+        'name': 'Database Service',
+        'description': 'MariaDB container',
+        'installed': True,
+        'configured': db_running,
+        'complete': db_running
+    }
+    
+    # Calculate overall progress
+    completed = sum(1 for s in status['steps'].values() if s.get('complete'))
+    total = len(status['steps'])
+    status['overall_progress'] = int((completed / total) * 100)
+    status['ready_to_start'] = status['steps']['docker']['complete'] and \
+                               status['steps']['config_files']['complete'] and \
+                               status['steps']['passwords']['complete']
+    
+    return jsonify(status)
+
+@app.route('/api/wizard/detect-resources')
+def api_wizard_detect_resources():
+    """Detect system resources for optimization"""
+    resources = {
+        'ram_mb': 4096,
+        'ram_gb': 4,
+        'cpu_cores': 4,
+        'storage_type': 'unknown'
+    }
+    
+    # Detect RAM
+    try:
+        with open('/proc/meminfo') as f:
+            for line in f:
+                if 'MemTotal' in line:
+                    resources['ram_mb'] = int(line.split()[1]) // 1024
+                    resources['ram_gb'] = resources['ram_mb'] // 1024
+                    break
+    except:
+        pass
+    
+    # Detect CPU
+    resources['cpu_cores'] = os.cpu_count() or 4
+    
+    # Detect storage type (basic heuristic)
+    try:
+        result = subprocess.run(['lsblk', '-d', '-o', 'NAME,ROTA'], capture_output=True, text=True, timeout=5)
+        if result.returncode == 0:
+            # ROTA=0 means SSD, ROTA=1 means HDD
+            if '0' in result.stdout:
+                resources['storage_type'] = 'ssd'
+            else:
+                resources['storage_type'] = 'hdd'
+    except:
+        resources['storage_type'] = 'ssd'  # Default assumption
+    
+    # Calculate recommended MariaDB settings
+    ram_mb = resources['ram_mb']
+    buffer_pool_mb = ram_mb * 30 // 100
+    
+    if buffer_pool_mb < 512:
+        buffer_pool = '512M'
+    elif buffer_pool_mb < 1024:
+        buffer_pool = '512M'
+    elif buffer_pool_mb < 2048:
+        buffer_pool = '1G'
+    elif buffer_pool_mb < 4096:
+        buffer_pool = '2G'
+    elif buffer_pool_mb < 8192:
+        buffer_pool = '4G'
+    elif buffer_pool_mb < 16384:
+        buffer_pool = '8G'
+    else:
+        buffer_pool = '16G'
+    
+    io_threads = max(2, min(8, resources['cpu_cores'] // 2))
+    max_connections = 100 if resources['ram_gb'] <= 2 else 200 if resources['ram_gb'] <= 4 else 300 if resources['ram_gb'] <= 8 else 500
+    
+    resources['recommended'] = {
+        'innodb_buffer_pool_size': buffer_pool,
+        'innodb_buffer_pool_instances': min(8, max(1, buffer_pool_mb // 1024)),
+        'innodb_io_threads': io_threads,
+        'max_connections': max_connections,
+        'tmp_table_size': '64M' if resources['ram_gb'] <= 2 else '128M' if resources['ram_gb'] <= 4 else '256M'
+    }
+    
+    return jsonify(resources)
+
+@app.route('/api/wizard/generate-passwords', methods=['POST'])
+def api_wizard_generate_passwords():
+    """Generate secure random passwords"""
+    def generate_password(length=24):
+        chars = string.ascii_letters + string.digits
+        return ''.join(secrets.choice(chars) for _ in range(length))
+    
+    def generate_token(length=32):
+        return secrets.token_hex(length // 2)
+    
+    passwords = {
+        'mysql_root_password': generate_password(24),
+        'mysql_password': generate_password(24),
+        'bearer_token': generate_token(32),
+        'dragonite_secret': generate_token(32),
+        'golbat_api_secret': generate_token(32),
+        'reactmap_secret': generate_token(32),
+        'koji_secret': generate_token(32)
+    }
+    
+    return jsonify(passwords)
+
+@app.route('/api/wizard/apply-passwords', methods=['POST'])
+def api_wizard_apply_passwords():
+    """Apply generated passwords to .env file"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    data = request.json or {}
+    passwords = data.get('passwords', {})
+    
+    if not passwords:
+        return jsonify({'error': 'No passwords provided'}), 400
+    
+    try:
+        # Read existing .env or create new
+        env_content = {}
+        if os.path.exists(env_file):
+            with open(env_file) as f:
+                for line in f:
+                    line = line.strip()
+                    if '=' in line and not line.startswith('#'):
+                        key, value = line.split('=', 1)
+                        env_content[key] = value
+        
+        # Update with new passwords
+        mapping = {
+            'mysql_root_password': 'MYSQL_ROOT_PASSWORD',
+            'mysql_password': 'MYSQL_PASSWORD',
+            'bearer_token': 'BEARER_TOKEN',
+            'dragonite_secret': 'DRAGONITE_SECRET',
+            'golbat_api_secret': 'GOLBAT_API_SECRET',
+            'reactmap_secret': 'REACTMAP_SECRET',
+            'koji_secret': 'KOJI_SECRET'
+        }
+        
+        for key, env_key in mapping.items():
+            if key in passwords:
+                env_content[env_key] = passwords[key]
+        
+        # Write back
+        with open(env_file, 'w') as f:
+            for key, value in env_content.items():
+                f.write(f'{key}={value}\n')
+        
+        return jsonify({'success': True, 'message': 'Passwords applied to .env'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/wizard/apply-mariadb-config', methods=['POST'])
+def api_wizard_apply_mariadb_config():
+    """Apply optimized MariaDB configuration"""
+    aegis_root = str(AEGIS_ROOT)
+    mariadb_cnf = os.path.join(aegis_root, 'mysql_data', 'mariadb.cnf')
+    
+    data = request.json or {}
+    settings = data.get('settings', {})
+    
+    if not settings:
+        return jsonify({'error': 'No settings provided'}), 400
+    
+    try:
+        # Ensure directory exists
+        os.makedirs(os.path.dirname(mariadb_cnf), exist_ok=True)
+        
+        # Read existing config or use template
+        if os.path.exists(mariadb_cnf):
+            with open(mariadb_cnf) as f:
+                content = f.read()
+        else:
+            content = """[mysqld]
+# MariaDB Configuration - Auto-generated by Shellder Setup Wizard
+innodb_buffer_pool_size = 1G
+innodb_buffer_pool_instances = 1
+innodb_read_io_threads = 4
+innodb_write_io_threads = 4
+innodb_purge_threads = 4
+innodb_io_capacity = 1000
+innodb_io_capacity_max = 4000
+max_connections = 200
+tmp_table_size = 128M
+max_heap_table_size = 128M
+innodb_log_file_size = 256M
+innodb_flush_log_at_trx_commit = 2
+innodb_flush_method = O_DIRECT
+"""
+        
+        # Apply settings
+        for key, value in settings.items():
+            pattern = f'^{key} = .*$'
+            replacement = f'{key} = {value}'
+            import re
+            if re.search(pattern, content, re.MULTILINE):
+                content = re.sub(pattern, replacement, content, flags=re.MULTILINE)
+            else:
+                # Add new setting
+                content += f'\n{key} = {value}'
+        
+        # Write config
+        with open(mariadb_cnf, 'w') as f:
+            f.write(content)
+        
+        return jsonify({'success': True, 'message': 'MariaDB configuration updated'})
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/wizard/copy-configs', methods=['POST'])
+def api_wizard_copy_configs():
+    """Copy default config files from examples"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    copied = []
+    errors = []
+    
+    # Config files to copy (source -> dest)
+    configs = [
+        ('unown/dragonite_config.toml.example', 'unown/dragonite_config.toml'),
+        ('unown/golbat_config.toml.example', 'unown/golbat_config.toml'),
+        ('unown/rotom_config.json.example', 'unown/rotom_config.json'),
+        ('reactmap/local.json.example', 'reactmap/local.json'),
+        ('fletchling.toml.example', 'fletchling.toml'),
+        ('.env.example', '.env'),
+    ]
+    
+    for src, dest in configs:
+        src_path = os.path.join(aegis_root, src)
+        dest_path = os.path.join(aegis_root, dest)
+        
+        if os.path.exists(src_path) and not os.path.exists(dest_path):
+            try:
+                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+                shutil.copy2(src_path, dest_path)
+                copied.append(dest)
+            except Exception as e:
+                errors.append({'file': dest, 'error': str(e)})
+    
+    return jsonify({
+        'success': len(errors) == 0,
+        'copied': copied,
+        'errors': errors
+    })
+
+@app.route('/api/wizard/start-stack', methods=['POST'])
+def api_wizard_start_stack():
+    """Start the Docker stack"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    try:
+        # Run docker compose up -d
+        result = subprocess.run(
+            ['docker', 'compose', 'up', '-d'],
+            capture_output=True,
+            text=True,
+            timeout=300,
+            cwd=aegis_root
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'stdout': result.stdout,
+            'stderr': result.stderr
+        })
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Stack startup timed out'}), 504
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/wizard/check-ports')
+def api_wizard_check_ports():
+    """Check if required ports are available"""
+    ports = {
+        6001: 'ReactMap',
+        6002: 'Dragonite Admin', 
+        6003: 'Rotom UI',
+        6004: 'Koji',
+        6005: 'phpMyAdmin',
+        6006: 'Grafana',
+        7070: 'Rotom Devices',
+        5090: 'Xilriws'
+    }
+    
+    results = {}
+    
+    for port, service in ports.items():
+        in_use = False
+        process = None
+        
+        try:
+            result = subprocess.run(
+                ['ss', '-tulnp'],
+                capture_output=True,
+                text=True,
+                timeout=5
+            )
+            if f':{port} ' in result.stdout:
+                in_use = True
+                # Try to extract process name
+                for line in result.stdout.split('\n'):
+                    if f':{port} ' in line:
+                        if 'users:' in line:
+                            process = line.split('users:')[1].split(')')[0].strip('(("').split('"')[0]
+                        break
+        except:
+            pass
+        
+        results[port] = {
+            'service': service,
+            'in_use': in_use,
+            'process': process,
+            'available': not in_use
+        }
+    
+    all_available = all(r['available'] for r in results.values())
+    
+    return jsonify({
+        'ports': results,
+        'all_available': all_available
+    })
+
+# =============================================================================
 # INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)
 # =============================================================================
 

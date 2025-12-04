@@ -879,36 +879,149 @@
                     </div>
                 </div>
                 
-                <!-- Setup Scripts Tab -->
+                <!-- Stack Setup Wizard Tab -->
                 <div id="setup-tab-scripts" class="setup-tab-content">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>🚀 Setup Scripts</h2>
-                            <span class="text-muted">Run setup and configuration scripts</span>
+                    <!-- Wizard Progress Header -->
+                    <div class="wizard-header">
+                        <div class="wizard-title">
+                            <h2>🧙‍♂️ Stack Setup Wizard</h2>
+                            <p>Configure your Aegis AIO stack step by step</p>
                         </div>
-                        <div class="card-body">
-                            <div class="setup-scripts-grid">
-                                <div class="setup-script-card" onclick="runSetupScript('setup.sh')">
-                                    <div class="script-icon">🔧</div>
-                                    <div class="script-name">Full Setup</div>
-                                    <div class="script-desc">Initial setup - Docker, configs, passwords</div>
-                                </div>
-                                <div class="setup-script-card" onclick="runSetupScript('dbsetup.sh')">
-                                    <div class="script-icon">🗄️</div>
-                                    <div class="script-name">Database Setup</div>
-                                    <div class="script-desc">MariaDB installation & configuration</div>
-                                </div>
-                                <div class="setup-script-card" onclick="runSetupScript('nginx-setup.sh')">
-                                    <div class="script-icon">🔒</div>
-                                    <div class="script-name">Nginx & SSL</div>
-                                    <div class="script-desc">Web server & certificates</div>
-                                </div>
-                                <div class="setup-script-card" onclick="runSetupScript('check.sh')">
-                                    <div class="script-icon">✅</div>
-                                    <div class="script-name">Health Check</div>
-                                    <div class="script-desc">System health verification</div>
-                                </div>
+                        <div class="wizard-progress-bar">
+                            <div id="wizardProgressFill" class="progress-fill" style="width: 0%"></div>
+                        </div>
+                        <div class="wizard-progress-text">
+                            <span id="wizardProgressText">0% Complete</span>
+                            <button class="btn btn-sm btn-primary" onclick="refreshWizardStatus()">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Wizard Steps Grid -->
+                    <div class="wizard-steps-grid">
+                        <!-- Step 1: Docker -->
+                        <div class="wizard-step-card" id="wizard-step-docker">
+                            <div class="step-header">
+                                <div class="step-number">1</div>
+                                <div class="step-status" id="step-docker-status">⏳</div>
                             </div>
+                            <div class="step-icon">🐳</div>
+                            <div class="step-name">Docker & Compose</div>
+                            <div class="step-desc">Container runtime environment</div>
+                            <div class="step-details" id="step-docker-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('docker')">Install Docker</button>
+                        </div>
+                        
+                        <!-- Step 2: Port Check -->
+                        <div class="wizard-step-card" id="wizard-step-ports">
+                            <div class="step-header">
+                                <div class="step-number">2</div>
+                                <div class="step-status" id="step-ports-status">⏳</div>
+                            </div>
+                            <div class="step-icon">🔌</div>
+                            <div class="step-name">Port Availability</div>
+                            <div class="step-desc">Check required ports are free</div>
+                            <div class="step-details" id="step-ports-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('ports')">Check Ports</button>
+                        </div>
+                        
+                        <!-- Step 3: System Resources -->
+                        <div class="wizard-step-card" id="wizard-step-resources">
+                            <div class="step-header">
+                                <div class="step-number">3</div>
+                                <div class="step-status" id="step-resources-status">⏳</div>
+                            </div>
+                            <div class="step-icon">💻</div>
+                            <div class="step-name">System Resources</div>
+                            <div class="step-desc">Detect RAM, CPU, storage</div>
+                            <div class="step-details" id="step-resources-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('resources')">Detect</button>
+                        </div>
+                        
+                        <!-- Step 4: Config Files -->
+                        <div class="wizard-step-card" id="wizard-step-configs">
+                            <div class="step-header">
+                                <div class="step-number">4</div>
+                                <div class="step-status" id="step-configs-status">⏳</div>
+                            </div>
+                            <div class="step-icon">📁</div>
+                            <div class="step-name">Config Files</div>
+                            <div class="step-desc">Copy example configs</div>
+                            <div class="step-details" id="step-configs-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('configs')">Copy Configs</button>
+                        </div>
+                        
+                        <!-- Step 5: Passwords -->
+                        <div class="wizard-step-card" id="wizard-step-passwords">
+                            <div class="step-header">
+                                <div class="step-number">5</div>
+                                <div class="step-status" id="step-passwords-status">⏳</div>
+                            </div>
+                            <div class="step-icon">🔐</div>
+                            <div class="step-name">Passwords</div>
+                            <div class="step-desc">Generate secure credentials</div>
+                            <div class="step-details" id="step-passwords-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('passwords')">Generate</button>
+                        </div>
+                        
+                        <!-- Step 6: MariaDB Config -->
+                        <div class="wizard-step-card" id="wizard-step-mariadb">
+                            <div class="step-header">
+                                <div class="step-number">6</div>
+                                <div class="step-status" id="step-mariadb-status">⏳</div>
+                            </div>
+                            <div class="step-icon">🗄️</div>
+                            <div class="step-name">MariaDB Config</div>
+                            <div class="step-desc">Database optimization</div>
+                            <div class="step-details" id="step-mariadb-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('mariadb')">Optimize</button>
+                        </div>
+                        
+                        <!-- Step 7: Docker Logging -->
+                        <div class="wizard-step-card" id="wizard-step-logging">
+                            <div class="step-header">
+                                <div class="step-number">7</div>
+                                <div class="step-status" id="step-logging-status">⏳</div>
+                            </div>
+                            <div class="step-icon">📋</div>
+                            <div class="step-name">Docker Logging</div>
+                            <div class="step-desc">Log rotation config</div>
+                            <div class="step-details" id="step-logging-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('logging')">Configure</button>
+                        </div>
+                        
+                        <!-- Step 8: Start Stack -->
+                        <div class="wizard-step-card wizard-step-final" id="wizard-step-start">
+                            <div class="step-header">
+                                <div class="step-number">8</div>
+                                <div class="step-status" id="step-start-status">⏳</div>
+                            </div>
+                            <div class="step-icon">🚀</div>
+                            <div class="step-name">Start Stack</div>
+                            <div class="step-desc">Launch containers</div>
+                            <div class="step-details" id="step-start-details">Complete steps first</div>
+                            <button class="btn btn-sm btn-success step-action" id="startStackBtn" onclick="runWizardStep('start')" disabled>🚀 Start</button>
+                        </div>
+                    </div>
+                    
+                    <!-- Wizard Output Panel -->
+                    <div id="wizardOutputPanel" class="wizard-output-panel" style="display: none;">
+                        <div class="wizard-output-header">
+                            <span id="wizardOutputTitle">Step Output</span>
+                            <button class="btn btn-sm" onclick="closeWizardOutput()">✖ Close</button>
+                        </div>
+                        <div id="wizardOutputContent" class="wizard-output-content"></div>
+                    </div>
+                    
+                    <!-- Quick Actions -->
+                    <div class="wizard-quick-actions">
+                        <h3>⚡ Quick Actions (Interactive Terminal)</h3>
+                        <div class="quick-actions-grid">
+                            <button class="btn btn-secondary" onclick="runSetupScript('setup.sh')">🔧 Full Setup Script</button>
+                            <button class="btn btn-secondary" onclick="runSetupScript('check.sh')">✅ Health Check</button>
+                            <button class="btn btn-secondary" onclick="runSetupScript('dbsetup.sh')">🗄️ DB Setup</button>
+                            <button class="btn btn-secondary" onclick="runSetupScript('nginx-setup.sh')">🔒 Nginx Setup</button>
+                        </div>
+                    </div>
                             
                             <!-- Interactive Terminal for Scripts -->
                             <div id="scriptTerminalCard" class="script-terminal-card" style="display: none;">
