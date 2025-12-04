@@ -8155,11 +8155,14 @@ function showMariaDBSetupPanel(status, credentials) {
                 
                 <!-- Test Connection -->
                 <div style="margin-top: 15px;">
+                    <p style="font-size: 0.85em; opacity: 0.8; margin-bottom: 8px;">
+                        Test connection directly to localhost:3306
+                    </p>
                     <button class="btn btn-secondary" onclick="testMariaDBConnection('root')">
-                        🔌 Test Root Connection
+                        🔌 Test Root (localhost:3306)
                     </button>
                     <button class="btn btn-secondary" onclick="testMariaDBConnection('user')">
-                        🔌 Test User Connection
+                        🔌 Test User (localhost:3306)
                     </button>
                 </div>
             </div>
@@ -8204,26 +8207,42 @@ async function testMariaDBConnection(type) {
         return;
     }
     
-    showToast(`Testing ${type} connection...`, 'info');
-    appendWizardOutput(`\\nTesting ${type} connection...\\n`);
+    showToast(`Testing ${type} connection to localhost:3306...`, 'info');
+    appendWizardOutput(`\\nTesting ${type} connection to localhost:3306...\\n`);
     
     try {
         const response = await fetch('/api/mariadb/test-connection', {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ user, password })
+            body: JSON.stringify({ 
+                user, 
+                password,
+                host: 'localhost',
+                port: 3306
+            })
         });
         
         const data = await response.json();
         
         if (data.success) {
-            appendWizardOutput(`✅ ${type.charAt(0).toUpperCase() + type.slice(1)} connection successful!\\n`, 'success');
+            const typeLabel = type.charAt(0).toUpperCase() + type.slice(1);
+            appendWizardOutput(`✅ ${typeLabel} connection successful!\\n`, 'success');
+            appendWizardOutput(`   Host: ${data.details.host || 'localhost'}:${data.details.port || 3306}\\n`);
             if (data.details.version) {
                 appendWizardOutput(`   Version: ${data.details.version}\\n`);
+            }
+            if (data.details.method) {
+                appendWizardOutput(`   Method: ${data.details.method}\\n`);
+            }
+            if (data.details.note) {
+                appendWizardOutput(`   ℹ️ ${data.details.note}\\n`, 'info');
             }
             showToast('Connection successful!', 'success');
         } else {
             appendWizardOutput(`❌ Connection failed: ${data.message}\\n`, 'error');
+            if (data.details?.port_open === false) {
+                appendWizardOutput('   Port 3306 is not open. Is MariaDB running?\\n', 'warning');
+            }
             showToast(`Connection failed: ${data.message}`, 'error');
         }
     } catch (e) {
