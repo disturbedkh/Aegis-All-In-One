@@ -5481,6 +5481,9 @@ async function loadSetupStatus() {
     }
 }
 
+// Store config vars data for dropdown
+let cachedConfigVarsData = null;
+
 // Quick load of config variables count and sync status for the stat card
 async function loadConfigVarsQuickStatus() {
     const countEl = document.getElementById('configVarsStatusCount');
@@ -5490,6 +5493,7 @@ async function loadConfigVarsQuickStatus() {
     
     try {
         const data = await fetchAPI('/api/config/variables-status');
+        cachedConfigVarsData = data;  // Cache for dropdown
         
         // Update count: configured/total
         const configured = data.summary.configured || 0;
@@ -5523,6 +5527,127 @@ async function loadConfigVarsQuickStatus() {
             syncLight.title = 'Failed to load status';
         }
     }
+}
+
+// Toggle config variables dropdown
+function toggleConfigVarsDropdown(event) {
+    event.stopPropagation();
+    const dropdown = document.getElementById('configVarsDropdown');
+    if (!dropdown) return;
+    
+    const isOpen = dropdown.classList.contains('show');
+    
+    // Close all other dropdowns first
+    document.querySelectorAll('.stat-dropdown.show').forEach(d => d.classList.remove('show'));
+    
+    if (!isOpen) {
+        dropdown.classList.add('show');
+        populateConfigVarsDropdown();
+    }
+}
+
+// Close dropdown when clicking outside
+document.addEventListener('click', (e) => {
+    if (!e.target.closest('.stat-card')) {
+        document.querySelectorAll('.stat-dropdown.show').forEach(d => d.classList.remove('show'));
+    }
+});
+
+// Populate the dropdown with config variables status
+async function populateConfigVarsDropdown() {
+    const content = document.getElementById('configVarsDropdownContent');
+    if (!content) return;
+    
+    // Use cached data or fetch fresh
+    let data = cachedConfigVarsData;
+    if (!data) {
+        content.innerHTML = '<div class="loading-small">Loading...</div>';
+        try {
+            data = await fetchAPI('/api/config/variables-status');
+            cachedConfigVarsData = data;
+        } catch (e) {
+            content.innerHTML = '<div class="loading-small">Failed to load</div>';
+            return;
+        }
+    }
+    
+    let html = '';
+    
+    // Summary row
+    html += `
+        <div class="dropdown-summary">
+            <div class="dropdown-summary-item ok">✅ ${data.summary.configured || 0} configured</div>
+            <div class="dropdown-summary-item warning">⚠️ ${data.summary.missing || 0} missing</div>
+            <div class="dropdown-summary-item error">❌ ${data.summary.mismatched || 0} mismatched</div>
+        </div>
+    `;
+    
+    // Show categories with their variables
+    for (const [catKey, cat] of Object.entries(data.categories)) {
+        const vars = Object.entries(cat.variables);
+        const issues = vars.filter(([_, v]) => !v.has_value || v.sync_status === 'mismatch');
+        
+        // Only show categories with issues, or first few categories
+        if (issues.length === 0 && catKey !== 'database' && catKey !== 'security') continue;
+        
+        html += `
+            <div class="dropdown-category">
+                <div class="dropdown-category-title">${cat.icon || '📁'} ${cat.title.replace(/^[^\s]+\s*/, '')}</div>
+                <div class="dropdown-var-list">
+        `;
+        
+        // Show variables (limit to important ones or issues)
+        const varsToShow = issues.length > 0 ? issues : vars.slice(0, 3);
+        for (const [varName, varInfo] of varsToShow) {
+            let statusClass = 'empty';
+            if (varInfo.sync_status === 'mismatch') statusClass = 'mismatch';
+            else if (varInfo.has_value) statusClass = 'ok';
+            else if (varInfo.required) statusClass = 'missing';
+            
+            const displayValue = varInfo.secret 
+                ? (varInfo.has_value ? '•••' : '-') 
+                : (varInfo.value || varInfo.default || '-');
+            
+            html += `
+                <div class="dropdown-var-item">
+                    <span class="var-status ${statusClass}"></span>
+                    <span class="var-name">${varInfo.label}</span>
+                    <span class="var-value">${truncateValue(displayValue, 12)}</span>
+                </div>
+            `;
+        }
+        
+        // Show count if more variables
+        if (vars.length > varsToShow.length) {
+            html += `<div class="dropdown-var-item" style="justify-content: center; color: var(--text-secondary); font-size: 0.8em;">
+                +${vars.length - varsToShow.length} more...
+            </div>`;
+        }
+        
+        html += `</div></div>`;
+    }
+    
+    content.innerHTML = html;
+}
+
+function truncateValue(val, maxLen = 30) {
+    if (!val || val === '-') return val;
+    const str = String(val);
+    return str.length > maxLen ? str.substring(0, maxLen) + '...' : str;
+}
+
+// Navigate to Config Status tab
+function goToConfigStatus(event) {
+    event.stopPropagation();
+    
+    // Close dropdown
+    document.querySelectorAll('.stat-dropdown.show').forEach(d => d.classList.remove('show'));
+    
+    // Navigate to setup page and show env tab (which is now Config Status)
+    navigateTo('setup');
+    setTimeout(() => {
+        showSetupTab('env');
+    }, 100);
 }
 
 // =============================================================================

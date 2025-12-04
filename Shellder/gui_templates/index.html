@@ -742,14 +742,26 @@
                             <div class="stat-label">Config Files</div>
                         </div>
                     </div>
-                    <div class="stat-card" id="configVarsCard">
+                    <div class="stat-card clickable" id="configVarsCard" onclick="toggleConfigVarsDropdown(event)">
                         <div class="stat-icon">⚙️</div>
                         <div class="stat-info">
                             <div class="stat-value">
                                 <span id="configVarsStatusCount">-/-</span>
                                 <span id="configVarsSyncLight" class="sync-light checking" title="Checking sync status..."></span>
                             </div>
-                            <div class="stat-label">Config Variables</div>
+                            <div class="stat-label">Config Variables ▼</div>
+                        </div>
+                        <!-- Dropdown Menu -->
+                        <div class="stat-dropdown" id="configVarsDropdown">
+                            <div class="dropdown-header">Config Variables Status</div>
+                            <div class="dropdown-content" id="configVarsDropdownContent">
+                                <div class="loading-small">Loading...</div>
+                            </div>
+                            <div class="dropdown-footer">
+                                <button class="btn btn-sm btn-primary" onclick="goToConfigStatus(event)">
+                                    📋 View Full Config Status
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <div class="stat-card" id="gitStatusCard">
