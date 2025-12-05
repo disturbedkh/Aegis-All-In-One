@@ -860,39 +860,44 @@ async function checkMCPStatus() {
 }
 
 function updateMCPConfig(port) {
-    // Update the Shellder URL command with current info
-    const ip = document.getElementById('linuxIPInput')?.value || 'YOUR_IP';
-    updateShellderURLDisplay(ip, port);
+    updateSSHCommand();
 }
 
 function updateMCPConfigWithIP() {
-    const ip = document.getElementById('linuxIPInput')?.value || 'YOUR_IP';
-    const port = window.location.port || '5050';
-    updateShellderURLDisplay(ip, port);
+    updateSSHCommand();
 }
 
-function updateShellderURLDisplay(ip, port) {
-    const urlCmd = document.getElementById('shellderURLCommand');
-    const endpointsRef = document.getElementById('apiEndpointsRef');
-    
-    if (urlCmd) {
-        urlCmd.textContent = `Use Shellder API at http://${ip}:${port} for debugging`;
+function updateSSHCommand() {
+    const ip = document.getElementById('linuxIPInput')?.value || 'YOUR_LINUX_IP';
+    const sshCmd = document.getElementById('sshTunnelCmd');
+    if (sshCmd) {
+        sshCmd.textContent = 'ssh -L 5050:localhost:5050 pokemap@' + ip;
     }
-    
-    if (endpointsRef) {
-        endpointsRef.textContent = `Shellder Debug API at http://${ip}:${port}
+}
 
-Available endpoints:
-- GET /api/ai-debug/diagnose - System diagnostics
-- GET /api/ai-debug/file?path=FILE - Read file
-- POST /api/ai-debug/file - Write file {"path":"...", "content":"..."}
-- POST /api/ai-debug/exec - Run command {"cmd":"..."}
-- GET /api/ai-debug/docker?cmd=ps - Docker status
-- GET /api/ai-debug/docker?cmd=logs&container=NAME - Container logs
-- POST /api/ai-debug/sql - Query DB {"database":"golbat", "query":"..."}
-- GET /api/ai-debug/logs?type=shellder - Get logs
-- GET /api/ai-debug/system - System info
-- GET /api/debug/tail - Live log stream`;
+function copySSHTunnel() {
+    const sshCmd = document.getElementById('sshTunnelCmd');
+    if (sshCmd) {
+        navigator.clipboard.writeText(sshCmd.textContent).then(() => {
+            showToast('SSH tunnel command copied!', 'success');
+        });
+    }
+}
+
+function copyAIInstructionsBlock() {
+    const block = document.getElementById('aiInstructionsBlock');
+    if (block) {
+        navigator.clipboard.writeText(block.textContent).then(() => {
+            showToast('AI instructions copied! Paste to your AI assistant.', 'success');
+        }).catch(() => {
+            const textarea = document.createElement('textarea');
+            textarea.value = block.textContent;
+            document.body.appendChild(textarea);
+            textarea.select();
+            document.execCommand('copy');
+            document.body.removeChild(textarea);
+            showToast('AI instructions copied!', 'success');
+        });
     }
 }
 
@@ -933,23 +938,6 @@ async function detectLinuxIP() {
     }
 }
 
-function copyShellderURL() {
-    const urlCmd = document.getElementById('shellderURLCommand');
-    if (urlCmd) {
-        navigator.clipboard.writeText(urlCmd.textContent).then(() => {
-            showToast('Shellder URL copied!', 'success');
-        });
-    }
-}
-
-function copyAPIEndpoints() {
-    const endpoints = document.getElementById('apiEndpointsRef');
-    if (endpoints) {
-        navigator.clipboard.writeText(endpoints.textContent).then(() => {
-            showToast('API endpoints copied! Paste to your AI assistant.', 'success');
-        });
-    }
-}
 
 function copyMCPCommand(type) {
     let cmd = '';

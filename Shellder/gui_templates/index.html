@@ -1658,116 +1658,104 @@
                     </div>
                 </div>
                 
-                <!-- MCP Server Configuration -->
+                <!-- AI Integration -->
                 <div class="card" style="margin-top: 20px;">
                     <div class="card-header">
-                        <h2>🔗 MCP Server (Cursor/AI Integration)</h2>
+                        <h2>🤖 AI Integration (Terminal Commands)</h2>
                         <div class="card-actions">
-                            <button class="btn btn-sm" onclick="checkMCPStatus()">🔄 Check Status</button>
+                            <button class="btn btn-sm" onclick="checkMCPStatus()">🔄 Check API</button>
                         </div>
                     </div>
                     <div class="card-body">
                         <p class="section-desc">
-                            Connect Cursor or other AI assistants directly to Shellder using MCP (Model Context Protocol).
-                            This gives AI tools direct access to diagnose, read files, run commands, and more.
+                            Your AI assistant can access Shellder's debug API using terminal commands.
+                            Copy the instructions below and paste them to your AI.
                         </p>
                         
-                        <!-- MCP Status -->
+                        <!-- API Status -->
                         <div class="mcp-status-bar" id="mcpStatusBar">
                             <span class="status-dot" id="mcpStatusDot"></span>
                             <span id="mcpStatusText">Checking...</span>
                         </div>
                         
-                        <!-- Setup Steps -->
-                        <div class="mcp-setup-steps">
-                            <h4>📋 Setup Instructions</h4>
-                            
-                            <div class="setup-step">
-                                <div class="step-number">1</div>
-                                <div class="step-content">
-                                    <strong>Get Your Linux Machine's IP</strong>
-                                    <p style="font-size: 12px; color: var(--text-secondary);">
-                                        Run on Linux: <code>hostname -I | awk '{print $1}'</code>
-                                    </p>
-                                    <div class="form-group" style="margin-top: 8px;">
-                                        <label style="font-size: 12px;">Your Linux IP:</label>
-                                        <input type="text" id="linuxIPInput" class="form-input" placeholder="e.g., 192.168.1.100" 
-                                               style="width: 200px;" onchange="updateMCPConfigWithIP()">
-                                        <button class="btn btn-xs" onclick="detectLinuxIP()">🔍 Detect</button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="setup-step">
-                                <div class="step-number">2</div>
-                                <div class="step-content">
-                                    <strong>Add Fetch MCP to Cursor Settings</strong>
-                                    <p style="font-size: 12px; color: var(--text-secondary);">
-                                        Go to: Cursor Settings → Features → MCP Servers → Add new MCP server
-                                    </p>
-                                    <div class="code-block mcp-config">
-                                        <pre id="mcpConfigJson">{
-  "mcpServers": {
-    "fetch": {
-      "command": "npx",
-      "args": ["-y", "@anthropic-ai/mcp-server-fetch"]
-    }
-  }
-}</pre>
-                                        <button class="btn btn-xs" onclick="copyMCPConfig()">📋 Copy Config</button>
-                                    </div>
-                                    <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
-                                        This uses the official Anthropic Fetch MCP server which can make HTTP requests.
-                                    </p>
-                                </div>
-                            </div>
-                            
-                            <div class="setup-step">
-                                <div class="step-number">3</div>
-                                <div class="step-content">
-                                    <strong>Tell AI Your Shellder URL</strong>
-                                    <p style="font-size: 12px; color: var(--text-secondary);">
-                                        After setup, tell your AI assistant:
-                                    </p>
-                                    <div class="code-block">
-                                        <code id="shellderURLCommand">Use Shellder API at http://YOUR_IP:5050 for debugging</code>
-                                        <button class="btn btn-xs" onclick="copyShellderURL()">📋</button>
-                                    </div>
-                                </div>
-                            </div>
-                            
-                            <div class="setup-step">
-                                <div class="step-number">4</div>
-                                <div class="step-content">
-                                    <strong>Restart Cursor</strong>
-                                    <p style="font-size: 12px; color: var(--text-secondary);">
-                                        Restart Cursor to load the Fetch MCP server.
-                                    </p>
-                                </div>
+                        <!-- Quick Setup -->
+                        <div class="ai-quick-setup">
+                            <h4>⚡ Quick Setup - Copy & Paste to AI</h4>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 12px;">
+                                Copy this entire block and paste it to your AI assistant (Claude, ChatGPT, etc.):
+                            </p>
+                            <div class="code-block mcp-config" style="position: relative;">
+                                <pre id="aiInstructionsBlock">## Shellder Debug API Access
+
+I have access to the Shellder Debug API. Use these curl commands in the terminal:
+
+### System Diagnostics
+```bash
+curl http://localhost:5050/api/ai-debug/diagnose
+```
+
+### Read Files
+```bash
+curl "http://localhost:5050/api/ai-debug/file?path=.env"
+curl "http://localhost:5050/api/ai-debug/file?path=docker-compose.yaml"
+```
+
+### Execute Commands  
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"cmd": "docker ps"}' \
+  http://localhost:5050/api/ai-debug/exec
+```
+
+### Docker Operations
+```bash
+curl "http://localhost:5050/api/ai-debug/docker?cmd=ps"
+curl "http://localhost:5050/api/ai-debug/docker?cmd=logs&container=dragonite&lines=50"
+```
+
+### Database Queries
+```bash
+curl -X POST -H "Content-Type: application/json" \
+  -d '{"database": "golbat", "query": "SHOW TABLES"}' \
+  http://localhost:5050/api/ai-debug/sql
+```
+
+### Get Logs
+```bash
+curl "http://localhost:5050/api/ai-debug/logs?type=shellder&lines=100"
+```
+
+### Live Log Stream
+```bash
+curl -N http://localhost:5050/api/debug/tail
+```</pre>
+                                <button class="btn btn-primary" onclick="copyAIInstructionsBlock()" style="position: absolute; top: 10px; right: 10px;">
+                                    📋 Copy All
+                                </button>
                             </div>
                         </div>
                         
-                        <!-- API Endpoints Reference -->
-                        <div class="mcp-endpoints-ref" style="margin-top: 20px;">
-                            <h4>🔗 API Endpoints for AI</h4>
+                        <!-- Remote Access (if needed) -->
+                        <div class="remote-access-section" style="margin-top: 20px;">
+                            <h4>🌐 Remote Access (Windows → Linux)</h4>
                             <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
-                                Copy this to tell your AI what endpoints are available:
+                                If Cursor is on Windows and Shellder is on Linux, use SSH port forwarding:
                             </p>
-                            <div class="code-block mcp-config">
-                                <pre id="apiEndpointsRef">Shellder Debug API at http://YOUR_IP:5050
-
-Available endpoints:
-- GET /api/ai-debug/diagnose - System diagnostics
-- GET /api/ai-debug/file?path=FILE - Read file
-- POST /api/ai-debug/file - Write file {"path":"...", "content":"..."}
-- POST /api/ai-debug/exec - Run command {"cmd":"..."}
-- GET /api/ai-debug/docker?cmd=ps - Docker status
-- GET /api/ai-debug/docker?cmd=logs&container=NAME - Container logs
-- POST /api/ai-debug/sql - Query DB {"database":"golbat", "query":"..."}
-- GET /api/ai-debug/logs?type=shellder - Get logs
-- GET /api/ai-debug/system - System info
-- GET /api/debug/tail - Live log stream</pre>
-                                <button class="btn btn-xs" onclick="copyAPIEndpoints()">📋 Copy for AI</button>
+                            <div class="code-block">
+                                <code id="sshTunnelCmd">ssh -L 5050:localhost:5050 pokemap@YOUR_LINUX_IP</code>
+                                <button class="btn btn-xs" onclick="copySSHTunnel()">📋</button>
+                            </div>
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+                                Run this in a terminal and keep it open. Then localhost:5050 will reach your Linux machine.
+                            </p>
+                            
+                            <div class="form-group" style="margin-top: 12px;">
+                                <label style="font-size: 12px;">Your Linux IP (for SSH command):</label>
+                                <div style="display: flex; gap: 8px; align-items: center;">
+                                    <input type="text" id="linuxIPInput" class="form-input" placeholder="e.g., 192.168.1.100" 
+                                           style="width: 200px;" onchange="updateSSHCommand()">
+                                    <button class="btn btn-xs" onclick="detectLinuxIP()">🔍 Detect</button>
+                                </div>
                             </div>
                         </div>
                         
