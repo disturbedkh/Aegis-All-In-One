@@ -2046,6 +2046,101 @@
                     <button class="log-tab" data-source="shellder" onclick="switchLogSource('shellder')">
                         🐚 Shellder
                     </button>
+                    <button class="log-tab" data-source="custom" onclick="switchLogSource('custom')">
+                        ⚙️ Custom
+                    </button>
+                </div>
+                
+                <!-- Custom Log Panel (shown when Custom tab is active) -->
+                <div id="customLogPanel" class="custom-log-panel" style="display: none;">
+                    <div class="custom-log-section">
+                        <h4>📦 Select Containers</h4>
+                        <div class="container-checkboxes">
+                            <label class="checkbox-label"><input type="checkbox" value="dragonite" checked> 🐉 Dragonite</label>
+                            <label class="checkbox-label"><input type="checkbox" value="golbat" checked> 🦇 Golbat</label>
+                            <label class="checkbox-label"><input type="checkbox" value="rotom" checked> 📱 Rotom</label>
+                            <label class="checkbox-label"><input type="checkbox" value="reactmap"> 🗺️ ReactMap</label>
+                            <label class="checkbox-label"><input type="checkbox" value="koji"> 📍 Koji</label>
+                            <label class="checkbox-label"><input type="checkbox" value="xilriws"> 🔐 Xilriws</label>
+                            <label class="checkbox-label"><input type="checkbox" value="database"> 🗄️ Database</label>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-log-section">
+                        <h4>🕐 Time Range</h4>
+                        <div class="time-range-inputs">
+                            <div class="form-group">
+                                <label>From:</label>
+                                <input type="datetime-local" id="logTimeFrom" class="form-input">
+                            </div>
+                            <div class="form-group">
+                                <label>To:</label>
+                                <input type="datetime-local" id="logTimeTo" class="form-input">
+                            </div>
+                            <div class="time-presets">
+                                <button class="btn btn-xs" onclick="setTimePreset('15m')">15m</button>
+                                <button class="btn btn-xs" onclick="setTimePreset('1h')">1h</button>
+                                <button class="btn btn-xs" onclick="setTimePreset('6h')">6h</button>
+                                <button class="btn btn-xs" onclick="setTimePreset('24h')">24h</button>
+                                <button class="btn btn-xs" onclick="setTimePreset('7d')">7d</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-log-section">
+                        <h4>🔍 Search & Filter</h4>
+                        <div class="search-filters">
+                            <div class="form-group">
+                                <label>Search Text:</label>
+                                <input type="text" id="logSearchText" class="form-input" placeholder="Search in logs...">
+                            </div>
+                            <div class="form-group">
+                                <label>Regex Pattern:</label>
+                                <input type="text" id="logSearchRegex" class="form-input" placeholder="e.g., error|warning|fail">
+                            </div>
+                            <label class="checkbox-label">
+                                <input type="checkbox" id="logCaseSensitive">
+                                <span>Case sensitive</span>
+                            </label>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-log-section">
+                        <h4>🚫 Exclude Events</h4>
+                        <div class="exclude-filters">
+                            <label class="checkbox-label"><input type="checkbox" id="excludeDebug"> Hide DEBUG</label>
+                            <label class="checkbox-label"><input type="checkbox" id="excludeInfo"> Hide INFO</label>
+                            <label class="checkbox-label"><input type="checkbox" id="excludeHeartbeat"> Hide heartbeat/ping</label>
+                            <label class="checkbox-label"><input type="checkbox" id="excludeHealth"> Hide health checks</label>
+                        </div>
+                        <div class="form-group" style="margin-top: 10px;">
+                            <label>Custom exclude patterns (one per line):</label>
+                            <textarea id="customExcludePatterns" class="form-input" rows="3" 
+                                      placeholder="patterns to exclude...&#10;e.g., GET /health&#10;heartbeat"></textarea>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-log-section">
+                        <h4>⚡ Log Level Filter</h4>
+                        <div class="level-filters">
+                            <label class="checkbox-label level-error"><input type="checkbox" value="error" checked> 🔴 ERROR</label>
+                            <label class="checkbox-label level-warn"><input type="checkbox" value="warn" checked> 🟠 WARN</label>
+                            <label class="checkbox-label level-info"><input type="checkbox" value="info" checked> 🔵 INFO</label>
+                            <label class="checkbox-label level-debug"><input type="checkbox" value="debug" checked> ⚪ DEBUG</label>
+                        </div>
+                    </div>
+                    
+                    <div class="custom-log-actions">
+                        <button class="btn btn-primary" onclick="loadCustomLogs()">🔍 Search Logs</button>
+                        <button class="btn" onclick="resetCustomFilters()">↺ Reset Filters</button>
+                        <button class="btn" onclick="saveLogPreset()">💾 Save Preset</button>
+                        <select id="logPresets" class="form-select" onchange="loadLogPreset(this.value)">
+                            <option value="">Load Preset...</option>
+                            <option value="errors">Errors Only</option>
+                            <option value="scanner">Scanner Activity</option>
+                            <option value="auth">Auth Issues</option>
+                        </select>
+                    </div>
                 </div>
                 
                 <!-- Log Controls -->

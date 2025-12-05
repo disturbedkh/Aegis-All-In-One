@@ -1353,6 +1353,194 @@ html, body {
     color: var(--text-tertiary);
 }
 
+/* Custom Log Panel */
+.custom-log-panel {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.custom-log-section {
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.custom-log-section:last-of-type {
+    margin-bottom: 0;
+    padding-bottom: 0;
+    border-bottom: none;
+}
+
+.custom-log-section h4 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+/* Container Checkboxes */
+.container-checkboxes {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+    gap: 8px;
+}
+
+.container-checkboxes .checkbox-label {
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    transition: background var(--transition-fast);
+}
+
+.container-checkboxes .checkbox-label:hover {
+    background: var(--bg-hover);
+}
+
+/* Time Range Inputs */
+.time-range-inputs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+
+.time-range-inputs .form-group {
+    flex: 1;
+    min-width: 200px;
+    margin: 0;
+}
+
+.time-range-inputs label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+.time-presets {
+    display: flex;
+    gap: 6px;
+}
+
+/* Search Filters */
+.search-filters {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    align-items: end;
+}
+
+.search-filters .form-group {
+    margin: 0;
+}
+
+.search-filters label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-bottom: 4px;
+}
+
+/* Exclude Filters */
+.exclude-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+}
+
+.exclude-filters .checkbox-label {
+    font-size: 13px;
+}
+
+/* Level Filters */
+.level-filters {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.level-filters .checkbox-label {
+    padding: 8px 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    transition: all var(--transition-fast);
+}
+
+.level-filters .checkbox-label:hover {
+    border-color: var(--accent-primary);
+}
+
+.level-filters .level-error {
+    border-left: 3px solid var(--danger);
+}
+
+.level-filters .level-warn {
+    border-left: 3px solid var(--warning);
+}
+
+.level-filters .level-info {
+    border-left: 3px solid var(--info);
+}
+
+.level-filters .level-debug {
+    border-left: 3px solid var(--text-tertiary);
+}
+
+/* Custom Log Actions */
+.custom-log-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 10px;
+    align-items: center;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.custom-log-actions select {
+    min-width: 160px;
+}
+
+/* Responsive adjustments */
+@media (max-width: 768px) {
+    .container-checkboxes {
+        grid-template-columns: repeat(2, 1fr);
+    }
+    
+    .time-range-inputs {
+        flex-direction: column;
+    }
+    
+    .time-range-inputs .form-group {
+        min-width: 100%;
+    }
+    
+    .time-presets {
+        width: 100%;
+        justify-content: center;
+    }
+    
+    .search-filters {
+        grid-template-columns: 1fr;
+    }
+    
+    .level-filters {
+        justify-content: center;
+    }
+    
+    .custom-log-actions {
+        flex-direction: column;
+    }
+    
+    .custom-log-actions button,
+    .custom-log-actions select {
+        width: 100%;
+    }
+}
+
 /* =============================================================================
    GIT STATUS
    ============================================================================= */

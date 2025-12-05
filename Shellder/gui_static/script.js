@@ -3328,7 +3328,8 @@ const logSourceTitles = {
     'koji': '📍 Koji Logs',
     'xilriws': '🔐 Xilriws Logs',
     'database': '🗄️ Database Logs',
-    'shellder': '🐚 Shellder Logs'
+    'shellder': '🐚 Shellder Logs',
+    'custom': '⚙️ Custom Search'
 };
 
 // Switch log source
@@ -3346,8 +3347,27 @@ function switchLogSource(source) {
         titleEl.textContent = logSourceTitles[source] || `📊 ${source} Logs`;
     }
     
-    // Load logs
-    loadStackLogs();
+    // Show/hide custom panel
+    const customPanel = document.getElementById('customLogPanel');
+    if (customPanel) {
+        customPanel.style.display = source === 'custom' ? 'block' : 'none';
+    }
+    
+    // Load logs (except for custom which requires user to click Search)
+    if (source !== 'custom') {
+        loadStackLogs();
+    } else {
+        // Update preset dropdown when switching to custom
+        updatePresetDropdown();
+        
+        // Set default time range to last hour
+        setTimePreset('1h');
+        
+        const logEl = document.getElementById('logContent');
+        if (logEl) {
+            logEl.textContent = 'Configure your search options above and click "Search Logs"';
+        }
+    }
 }
 
 // Load stack logs based on current source
@@ -3510,6 +3530,455 @@ async function loadContainerLogStatus() {
         });
     } catch (e) {
         console.error('Failed to load container status:', e);
+    }
+}
+
+// =============================================================================
+// CUSTOM LOG SEARCH
+// =============================================================================
+
+// Show/hide custom panel based on source
+function updateCustomPanel() {
+    const customPanel = document.getElementById('customLogPanel');
+    if (customPanel) {
+        customPanel.style.display = currentLogSource === 'custom' ? 'block' : 'none';
+    }
+}
+
+// Set time preset
+function setTimePreset(preset) {
+    const now = new Date();
+    let from = new Date();
+    
+    switch (preset) {
+        case '15m': from.setMinutes(now.getMinutes() - 15); break;
+        case '1h': from.setHours(now.getHours() - 1); break;
+        case '6h': from.setHours(now.getHours() - 6); break;
+        case '24h': from.setDate(now.getDate() - 1); break;
+        case '7d': from.setDate(now.getDate() - 7); break;
+    }
+    
+    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
+    const formatDateTime = (d) => {
+        return d.toISOString().slice(0, 16);
+    };
+    
+    document.getElementById('logTimeFrom').value = formatDateTime(from);
+    document.getElementById('logTimeTo').value = formatDateTime(now);
+}
+
+// Load custom filtered logs
+async function loadCustomLogs() {
+    const logEl = document.getElementById('logContent');
+    if (!logEl) return;
+    
+    logEl.textContent = 'Loading custom logs...';
+    
+    // Get selected containers
+    const selectedContainers = [];
+    document.querySelectorAll('#customLogPanel .container-checkboxes input:checked').forEach(cb => {
+        selectedContainers.push(cb.value);
+    });
+    
+    if (selectedContainers.length === 0) {
+        logEl.textContent = 'Please select at least one container';
+        return;
+    }
+    
+    // Get time range
+    const timeFrom = document.getElementById('logTimeFrom')?.value;
+    const timeTo = document.getElementById('logTimeTo')?.value;
+    
+    // Get search filters
+    const searchText = document.getElementById('logSearchText')?.value?.trim() || '';
+    const searchRegex = document.getElementById('logSearchRegex')?.value?.trim() || '';
+    const caseSensitive = document.getElementById('logCaseSensitive')?.checked || false;
+    
+    // Get exclude filters
+    const excludeDebug = document.getElementById('excludeDebug')?.checked || false;
+    const excludeInfo = document.getElementById('excludeInfo')?.checked || false;
+    const excludeHeartbeat = document.getElementById('excludeHeartbeat')?.checked || false;
+    const excludeHealth = document.getElementById('excludeHealth')?.checked || false;
+    const customExcludes = document.getElementById('customExcludePatterns')?.value?.trim() || '';
+    
+    // Get level filters
+    const levelFilters = [];
+    document.querySelectorAll('#customLogPanel .level-filters input:checked').forEach(cb => {
+        levelFilters.push(cb.value);
+    });
+    
+    const lines = document.getElementById('logLines')?.value || 500;
+    
+    try {
+        // Fetch logs from each selected container
+        let combinedLogs = [];
+        
+        for (const container of selectedContainers) {
+            const endpoint = `/api/logs/docker/${container}?lines=${lines}`;
+            const result = await fetchAPI(endpoint);
+            
+            if (result.logs) {
+                // Parse log lines and add container prefix
+                const containerLogs = result.logs.split('\n').map(line => {
+                    if (line.trim()) {
+                        return { container, line, timestamp: extractTimestamp(line) };
+                    }
+                    return null;
+                }).filter(Boolean);
+                
+                combinedLogs = combinedLogs.concat(containerLogs);
+            }
+        }
+        
+        // Sort by timestamp
+        combinedLogs.sort((a, b) => {
+            if (a.timestamp && b.timestamp) {
+                return new Date(a.timestamp) - new Date(b.timestamp);
+            }
+            return 0;
+        });
+        
+        // Apply time filter
+        if (timeFrom || timeTo) {
+            const fromDate = timeFrom ? new Date(timeFrom) : null;
+            const toDate = timeTo ? new Date(timeTo) : null;
+            
+            combinedLogs = combinedLogs.filter(log => {
+                if (!log.timestamp) return true; // Keep logs without timestamps
+                const logDate = new Date(log.timestamp);
+                if (fromDate && logDate < fromDate) return false;
+                if (toDate && logDate > toDate) return false;
+                return true;
+            });
+        }
+        
+        // Apply text/regex search
+        if (searchText || searchRegex) {
+            const searchLower = searchText.toLowerCase();
+            let regex = null;
+            
+            if (searchRegex) {
+                try {
+                    regex = new RegExp(searchRegex, caseSensitive ? '' : 'i');
+                } catch (e) {
+                    showToast('Invalid regex pattern', 'error');
+                }
+            }
+            
+            combinedLogs = combinedLogs.filter(log => {
+                const line = caseSensitive ? log.line : log.line.toLowerCase();
+                const text = caseSensitive ? searchText : searchLower;
+                
+                if (searchText && !line.includes(text)) return false;
+                if (regex && !regex.test(log.line)) return false;
+                return true;
+            });
+        }
+        
+        // Apply exclusion filters
+        combinedLogs = combinedLogs.filter(log => {
+            const lineLower = log.line.toLowerCase();
+            
+            if (excludeDebug && lineLower.includes('debug')) return false;
+            if (excludeInfo && (lineLower.includes('[info]') || lineLower.includes('| i |'))) return false;
+            if (excludeHeartbeat && (lineLower.includes('heartbeat') || lineLower.includes('ping'))) return false;
+            if (excludeHealth && (lineLower.includes('health') || lineLower.includes('GET /health'))) return false;
+            
+            // Custom exclude patterns
+            if (customExcludes) {
+                const patterns = customExcludes.split('\n').filter(p => p.trim());
+                for (const pattern of patterns) {
+                    if (lineLower.includes(pattern.toLowerCase())) return false;
+                }
+            }
+            
+            return true;
+        });
+        
+        // Apply level filters
+        if (levelFilters.length < 4) { // Not all levels selected
+            combinedLogs = combinedLogs.filter(log => {
+                const lineLower = log.line.toLowerCase();
+                
+                const isError = lineLower.includes('error') || lineLower.includes('| e |') || lineLower.includes('[error]');
+                const isWarn = lineLower.includes('warn') || lineLower.includes('| w |') || lineLower.includes('[warn]');
+                const isInfo = lineLower.includes('info') || lineLower.includes('| i |') || lineLower.includes('[info]');
+                const isDebug = lineLower.includes('debug') || lineLower.includes('| d |') || lineLower.includes('[debug]');
+                
+                if (isError && levelFilters.includes('error')) return true;
+                if (isWarn && levelFilters.includes('warn')) return true;
+                if (isInfo && levelFilters.includes('info')) return true;
+                if (isDebug && levelFilters.includes('debug')) return true;
+                
+                // If no level detected, include by default
+                if (!isError && !isWarn && !isInfo && !isDebug) return true;
+                
+                return false;
+            });
+        }
+        
+        // Format output with container labels and converted timestamps
+        const formattedLogs = combinedLogs.map(log => {
+            const containerLabel = `[${log.container.toUpperCase().padEnd(10)}]`;
+            const convertedLine = convertLogTimestamp(log.line);
+            return `${containerLabel} ${convertedLine}`;
+        }).join('\n');
+        
+        originalLogContent = formattedLogs;
+        logEl.textContent = formattedLogs || 'No logs match your filters';
+        
+        // Update stats
+        const countEl = document.getElementById('logLineCount');
+        if (countEl) countEl.textContent = `${combinedLogs.length} lines`;
+        
+        const lastUpdateEl = document.getElementById('logLastUpdate');
+        if (lastUpdateEl) lastUpdateEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        
+        logEl.scrollTop = logEl.scrollHeight;
+        
+    } catch (e) {
+        logEl.textContent = `Error loading logs: ${e.message}`;
+    }
+}
+
+// Extract timestamp from log line
+function extractTimestamp(line) {
+    // Try various timestamp formats
+    const patterns = [
+        // ISO format: 2025-12-05T15:08:06.863506872Z
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/,
+        // Docker format: 2025-12-05 15:08:06
+        /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/,
+        // Time only: 15:08:06
+        /(\d{2}:\d{2}:\d{2}\.\d+)/,
+        // Golbat/Dragonite format: 15:08:06.86
+        /^\[?(\d{2}:\d{2}:\d{2}\.\d+)/
+    ];
+    
+    for (const pattern of patterns) {
+        const match = line.match(pattern);
+        if (match) {
+            return match[1];
+        }
+    }
+    
+    return null;
+}
+
+// Convert log timestamp to browser local time
+function convertLogTimestamp(line) {
+    // Find timestamp in various formats and convert to local time
+    const patterns = [
+        // ISO format with Z (UTC): 2025-12-05T15:08:06.863506872Z
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?Z/, isUTC: true },
+        // ISO format without Z
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(?!Z)/, isUTC: false }
+    ];
+    
+    for (const pattern of patterns) {
+        const match = line.match(pattern.regex);
+        if (match) {
+            try {
+                let date;
+                if (pattern.isUTC) {
+                    date = new Date(match[0]);
+                } else {
+                    // Assume server time
+                    date = new Date(match[1]);
+                }
+                
+                const localTime = date.toLocaleString();
+                return line.replace(match[0], `[${localTime}]`);
+            } catch (e) {
+                // Keep original if conversion fails
+            }
+        }
+    }
+    
+    return line;
+}
+
+// Reset custom filters
+function resetCustomFilters() {
+    // Reset containers to default
+    document.querySelectorAll('#customLogPanel .container-checkboxes input').forEach((cb, i) => {
+        cb.checked = i < 3; // First 3 checked by default
+    });
+    
+    // Reset time
+    document.getElementById('logTimeFrom').value = '';
+    document.getElementById('logTimeTo').value = '';
+    
+    // Reset search
+    document.getElementById('logSearchText').value = '';
+    document.getElementById('logSearchRegex').value = '';
+    document.getElementById('logCaseSensitive').checked = false;
+    
+    // Reset excludes
+    document.getElementById('excludeDebug').checked = false;
+    document.getElementById('excludeInfo').checked = false;
+    document.getElementById('excludeHeartbeat').checked = false;
+    document.getElementById('excludeHealth').checked = false;
+    document.getElementById('customExcludePatterns').value = '';
+    
+    // Reset levels
+    document.querySelectorAll('#customLogPanel .level-filters input').forEach(cb => {
+        cb.checked = true;
+    });
+    
+    showToast('Filters reset', 'info');
+}
+
+// Save log preset (to localStorage)
+function saveLogPreset() {
+    const name = prompt('Enter preset name:');
+    if (!name) return;
+    
+    const preset = {
+        containers: [],
+        timeRange: {
+            from: document.getElementById('logTimeFrom')?.value,
+            to: document.getElementById('logTimeTo')?.value
+        },
+        search: {
+            text: document.getElementById('logSearchText')?.value,
+            regex: document.getElementById('logSearchRegex')?.value,
+            caseSensitive: document.getElementById('logCaseSensitive')?.checked
+        },
+        exclude: {
+            debug: document.getElementById('excludeDebug')?.checked,
+            info: document.getElementById('excludeInfo')?.checked,
+            heartbeat: document.getElementById('excludeHeartbeat')?.checked,
+            health: document.getElementById('excludeHealth')?.checked,
+            custom: document.getElementById('customExcludePatterns')?.value
+        },
+        levels: []
+    };
+    
+    // Get selected containers
+    document.querySelectorAll('#customLogPanel .container-checkboxes input:checked').forEach(cb => {
+        preset.containers.push(cb.value);
+    });
+    
+    // Get selected levels
+    document.querySelectorAll('#customLogPanel .level-filters input:checked').forEach(cb => {
+        preset.levels.push(cb.value);
+    });
+    
+    // Save to localStorage
+    const presets = JSON.parse(localStorage.getItem('shellderLogPresets') || '{}');
+    presets[name] = preset;
+    localStorage.setItem('shellderLogPresets', JSON.stringify(presets));
+    
+    showToast(`Preset "${name}" saved`, 'success');
+    
+    // Update preset dropdown
+    updatePresetDropdown();
+}
+
+// Load log preset
+function loadLogPreset(presetName) {
+    if (!presetName) return;
+    
+    // Built-in presets
+    const builtInPresets = {
+        'errors': {
+            containers: ['dragonite', 'golbat', 'rotom', 'xilriws', 'database'],
+            levels: ['error', 'warn'],
+            exclude: { debug: true, info: true, heartbeat: true, health: true }
+        },
+        'scanner': {
+            containers: ['dragonite', 'golbat', 'rotom'],
+            levels: ['error', 'warn', 'info'],
+            search: { text: '' },
+            exclude: { heartbeat: true, health: true }
+        },
+        'auth': {
+            containers: ['xilriws', 'dragonite'],
+            search: { regex: 'auth|login|token|cookie|error|fail' },
+            levels: ['error', 'warn', 'info']
+        }
+    };
+    
+    // Check built-in first, then localStorage
+    let preset = builtInPresets[presetName];
+    if (!preset) {
+        const savedPresets = JSON.parse(localStorage.getItem('shellderLogPresets') || '{}');
+        preset = savedPresets[presetName];
+    }
+    
+    if (!preset) {
+        showToast('Preset not found', 'error');
+        return;
+    }
+    
+    // Apply preset
+    if (preset.containers) {
+        document.querySelectorAll('#customLogPanel .container-checkboxes input').forEach(cb => {
+            cb.checked = preset.containers.includes(cb.value);
+        });
+    }
+    
+    if (preset.timeRange) {
+        document.getElementById('logTimeFrom').value = preset.timeRange.from || '';
+        document.getElementById('logTimeTo').value = preset.timeRange.to || '';
+    }
+    
+    if (preset.search) {
+        document.getElementById('logSearchText').value = preset.search.text || '';
+        document.getElementById('logSearchRegex').value = preset.search.regex || '';
+        document.getElementById('logCaseSensitive').checked = preset.search.caseSensitive || false;
+    }
+    
+    if (preset.exclude) {
+        document.getElementById('excludeDebug').checked = preset.exclude.debug || false;
+        document.getElementById('excludeInfo').checked = preset.exclude.info || false;
+        document.getElementById('excludeHeartbeat').checked = preset.exclude.heartbeat || false;
+        document.getElementById('excludeHealth').checked = preset.exclude.health || false;
+        document.getElementById('customExcludePatterns').value = preset.exclude.custom || '';
+    }
+    
+    if (preset.levels) {
+        document.querySelectorAll('#customLogPanel .level-filters input').forEach(cb => {
+            cb.checked = preset.levels.includes(cb.value);
+        });
+    }
+    
+    showToast(`Preset "${presetName}" loaded`, 'success');
+    
+    // Reset dropdown
+    document.getElementById('logPresets').value = '';
+}
+
+// Update preset dropdown with saved presets
+function updatePresetDropdown() {
+    const dropdown = document.getElementById('logPresets');
+    if (!dropdown) return;
+    
+    // Keep built-in options
+    dropdown.innerHTML = `
+        <option value="">Load Preset...</option>
+        <option value="errors">Errors Only</option>
+        <option value="scanner">Scanner Activity</option>
+        <option value="auth">Auth Issues</option>
+    `;
+    
+    // Add saved presets
+    const savedPresets = JSON.parse(localStorage.getItem('shellderLogPresets') || '{}');
+    const savedNames = Object.keys(savedPresets);
+    
+    if (savedNames.length > 0) {
+        const optgroup = document.createElement('optgroup');
+        optgroup.label = 'Saved Presets';
+        
+        savedNames.forEach(name => {
+            const option = document.createElement('option');
+            option.value = name;
+            option.textContent = name;
+            optgroup.appendChild(option);
+        });
+        
+        dropdown.appendChild(optgroup);
     }
 }
 
