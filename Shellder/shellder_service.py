@@ -14837,27 +14837,27 @@ def api_file_chown_all():
     current_group = None
     
     try:
+        import pwd
+        import grp
+        
         # First try SUDO_USER (set when running via sudo)
         current_user = os.environ.get('SUDO_USER')
         if current_user:
-            import pwd
             user_info = pwd.getpwnam(current_user)
-            current_group = pwd.getpwgid(user_info.pw_gid).pw_name
+            current_group = grp.getgrgid(user_info.pw_gid).gr_name
         
         # If no SUDO_USER, try to get owner of the Aegis directory
         if not current_user:
-            import pwd
             aegis_stat = os.stat(AEGIS_ROOT)
             user_info = pwd.getpwuid(aegis_stat.st_uid)
             current_user = user_info.pw_name
-            current_group = pwd.getpwgid(user_info.pw_gid).pw_name
+            current_group = grp.getgrgid(user_info.pw_gid).gr_name
         
         # Last resort: use os.getlogin() or getuid
         if not current_user:
             try:
                 current_user = os.getlogin()
             except:
-                import pwd
                 current_user = pwd.getpwuid(os.getuid()).pw_name
             current_group = current_user
             
