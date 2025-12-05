@@ -4404,7 +4404,10 @@ class StatsCollector:
         """
         import re
         
-        # Regex patterns for Xilriws log format
+        # ANSI escape code stripper (handles color codes like [36m, [0m, [1m, etc.)
+        ansi_pattern = re.compile(r'\x1b\[[0-9;]*m|\[(?:\d+;)*\d*m')
+        
+        # Regex patterns for Xilriws log format (after stripping ANSI codes)
         log_pattern = re.compile(r'^(\d{2}:\d{2}:\d{2}\.\d{2})\s*\|\s*([ISEWC])\s*\|\s*(\w+)\s*\|\s*(.*)$')
         proxy_pattern = re.compile(r'[Pp]roxy[:\s]+(\d+\.\d+\.\d+\.\d+:\d+|[\w.-]+:\d+)')
         cookie_storage_pattern = re.compile(r'Cookie storage at (\d+)/(\d+)')
@@ -4460,7 +4463,10 @@ class StatsCollector:
                         if not line.strip():
                             continue
                         
-                        match = log_pattern.match(line.strip())
+                        # Strip ANSI color codes before parsing
+                        clean_line = ansi_pattern.sub('', line.strip())
+                        
+                        match = log_pattern.match(clean_line)
                         if not match:
                             continue
                         
@@ -4470,16 +4476,34 @@ class StatsCollector:
                         msg_lower = message.lower()
                         
                         # Track proxy switches
-                        if component == 'Proxy' and 'Switching to Proxy' in message:
-                            proxy_match = proxy_pattern.search(message)
-                            if proxy_match:
-                                current_proxy = proxy_match.group(1)
-                                stats['current_proxy'] = current_proxy
-                                if current_proxy not in stats['proxy_stats']:
-                                    stats['proxy_stats'][current_proxy] = {
+                        if component == 'Proxy':
+                            if 'Switching to Proxy' in message:
+                                proxy_match = proxy_pattern.search(message)
+                                if proxy_match:
+                                    current_proxy = proxy_match.group(1)
+                                    stats['current_proxy'] = current_proxy
+                                    if current_proxy not in stats['proxy_stats']:
+                                        stats['proxy_stats'][current_proxy] = {
+                                            'requests': 0, 'success': 0, 'fail': 0,
+                                            'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                        }
+                            elif 'No proxies configured' in message or 'using local IP' in message.lower():
+                                current_proxy = 'local'
+                                stats['current_proxy'] = 'local'
+                                if 'local' not in stats['proxy_stats']:
+                                    stats['proxy_stats']['local'] = {
                                         'requests': 0, 'success': 0, 'fail': 0,
                                         'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
                                     }
+                        
+                        # If no proxy set yet, assume local
+                        if current_proxy is None:
+                            current_proxy = 'local'
+                            if 'local' not in stats['proxy_stats']:
+                                stats['proxy_stats']['local'] = {
+                                    'requests': 0, 'success': 0, 'fail': 0,
+                                    'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                }
                         
                         # Track cookie storage
                         if component == 'Cookie':
@@ -4532,27 +4556,38 @@ class StatsCollector:
                                 if proxy_in_msg:
                                     error_proxy = proxy_in_msg.group(1)
                                 
-                                if 'Page timed out' in message:
+                                # Use current_proxy or 'local' for stats tracking
+                                tracking_proxy = error_proxy or current_proxy or 'local'
+                                if tracking_proxy not in stats['proxy_stats']:
+                                    stats['proxy_stats'][tracking_proxy] = {
+                                        'requests': 0, 'success': 0, 'fail': 0,
+                                        'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                    }
+                                
+                                if 'Page timed out' in message or 'timed out' in msg_lower:
                                     stats['browser_timeout'] += 1
                                     error_recorded = True
-                                    if error_proxy and error_proxy in stats['proxy_stats']:
-                                        stats['proxy_stats'][error_proxy]['timeout'] += 1
-                                        stats['proxy_stats'][error_proxy]['fail'] += 1
-                                        stats['proxy_stats'][error_proxy]['requests'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['timeout'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['requests'] += 1
                                 elif "Page couldn't be reached" in message or "couldn't be reached" in msg_lower:
                                     stats['browser_unreachable'] += 1
                                     error_recorded = True
-                                    if error_proxy and error_proxy in stats['proxy_stats']:
-                                        stats['proxy_stats'][error_proxy]['unreachable'] += 1
-                                        stats['proxy_stats'][error_proxy]['fail'] += 1
-                                        stats['proxy_stats'][error_proxy]['requests'] += 1
-                                elif "Didn't pass JS check" in message or 'Code 15' in message:
+                                    stats['proxy_stats'][tracking_proxy]['unreachable'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['requests'] += 1
+                                elif "Didn't pass JS check" in message or 'Code 15' in message or 'code 15' in msg_lower:
                                     stats['browser_bot_protection'] += 1
                                     error_recorded = True
-                                    if error_proxy and error_proxy in stats['proxy_stats']:
-                                        stats['proxy_stats'][error_proxy]['bot_blocked'] += 1
-                                        stats['proxy_stats'][error_proxy]['fail'] += 1
-                                        stats['proxy_stats'][error_proxy]['requests'] += 1
+                                    error_proxy = current_proxy or 'local'
+                                    if error_proxy not in stats['proxy_stats']:
+                                        stats['proxy_stats'][error_proxy] = {
+                                            'requests': 0, 'success': 0, 'fail': 0,
+                                            'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                        }
+                                    stats['proxy_stats'][error_proxy]['bot_blocked'] += 1
+                                    stats['proxy_stats'][error_proxy]['fail'] += 1
+                                    stats['proxy_stats'][error_proxy]['requests'] += 1
                                 elif 'Timeout on JS challenge' in message:
                                     stats['browser_js_timeout'] += 1
                                     error_recorded = True
