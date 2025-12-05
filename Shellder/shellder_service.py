@@ -5976,13 +5976,25 @@ def api_debug_debuglog():
     lines = request.args.get('lines', 500, type=int)
     format_type = request.args.get('format', 'text')  # 'text' or 'json'
     
-    # Check both possible locations (logs/ subdirectory and root)
-    debug_log = SHELLDER_DIR / 'logs' / 'debuglog.txt'
-    if not debug_log.exists():
-        debug_log = SHELLDER_DIR / 'debuglog.txt'
+    # Use LOG_DIR which is the correct path for logs
+    debug_log = LOG_DIR / 'debuglog.txt'
     
     if not debug_log.exists():
-        return jsonify({'error': 'debuglog.txt not found', 'path': str(debug_log), 'checked': [str(SHELLDER_DIR / 'logs' / 'debuglog.txt'), str(SHELLDER_DIR / 'debuglog.txt')]}), 404
+        # Create an empty log file if it doesn't exist
+        try:
+            LOG_DIR.mkdir(parents=True, exist_ok=True)
+            debug_log.touch()
+            # Fix ownership
+            try:
+                import pwd
+                real_user = os.environ.get('SUDO_USER')
+                if real_user:
+                    user_info = pwd.getpwnam(real_user)
+                    os.chown(debug_log, user_info.pw_uid, user_info.pw_gid)
+            except:
+                pass
+        except Exception as e:
+            return jsonify({'error': f'Could not create debuglog.txt: {e}', 'path': str(debug_log)}), 500
     
     try:
         with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
@@ -6011,19 +6023,14 @@ def api_debug_debuglog():
 @app.route('/api/debug/debuglog/download')
 def api_debug_debuglog_download():
     """Download the full debuglog.txt file"""
-    # Check both possible locations
-    debug_log = SHELLDER_DIR / 'logs' / 'debuglog.txt'
-    log_dir = SHELLDER_DIR / 'logs'
-    if not debug_log.exists():
-        debug_log = SHELLDER_DIR / 'debuglog.txt'
-        log_dir = SHELLDER_DIR
+    debug_log = LOG_DIR / 'debuglog.txt'
     
     if not debug_log.exists():
-        return jsonify({'error': 'debuglog.txt not found'}), 404
+        return jsonify({'error': 'debuglog.txt not found', 'path': str(debug_log)}), 404
     
     info('API', 'Debug log download requested', {'client': request.remote_addr})
     return send_from_directory(
-        log_dir,
+        LOG_DIR,
         'debuglog.txt',
         as_attachment=True,
         download_name=f'shellder-debug-{datetime.now().strftime("%Y%m%d-%H%M%S")}.txt'
@@ -6048,6 +6055,30 @@ def api_debug_clear():
     client_log = LOG_DIR / 'client_debug.json'
     if client_log.exists():
         client_log.unlink()
+    
+    # Clear the main debuglog.txt
+    debug_log = LOG_DIR / 'debuglog.txt'
+    if debug_log.exists():
+        try:
+            with open(debug_log, 'w') as f:
+                f.write(f"=== Log cleared at {datetime.now().isoformat()} ===\n")
+            # Fix ownership
+            try:
+                import pwd
+                real_user = os.environ.get('SUDO_USER')
+                if real_user:
+                    user_info = pwd.getpwnam(real_user)
+                    os.chown(debug_log, user_info.pw_uid, user_info.pw_gid)
+            except:
+                pass
+        except Exception as e:
+            return jsonify({'success': False, 'error': f'Failed to clear log: {e}'}), 500
+    
+    # Also call the debug_logger clear function if available
+    try:
+        clear_log()
+    except:
+        pass
     
     return jsonify({'success': True, 'message': 'Debug logs cleared'})
 
