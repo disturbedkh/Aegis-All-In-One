@@ -12483,18 +12483,18 @@ def api_config_schema(config_path):
     current_values = {}
     if os.path.exists(full_path):
         try:
-            with open(full_path, 'r') as f:
-                content = f.read()
-            
             if schema['format'] == 'toml':
+                # Try tomli first, fall back to our simple parser
                 try:
                     import tomli
-                    current_values = tomli.loads(content)
+                    with open(full_path, 'rb') as f:
+                        current_values = tomli.load(f)
                 except ImportError:
-                    # Fallback to basic parsing
-                    pass
+                    # Use our simple TOML parser as fallback
+                    current_values = parse_simple_toml(full_path)
             elif schema['format'] == 'json':
-                current_values = json.loads(content)
+                with open(full_path, 'r') as f:
+                    current_values = json.load(f)
         except Exception as e:
             current_values = {'_parse_error': str(e)}
     
