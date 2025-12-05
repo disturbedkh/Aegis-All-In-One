@@ -36,6 +36,10 @@
                         <span class="nav-icon">🐳</span>
                         <span>Containers</span>
                     </a>
+                    <a href="#" class="nav-item" data-page="shellder-config" onclick="navigateTo('shellder-config'); return false;">
+                        <span class="nav-icon">🐚</span>
+                        <span>Shellder</span>
+                    </a>
                     <a href="#" class="nav-item" data-page="setup" onclick="navigateTo('setup'); return false;">
                         <span class="nav-icon">⚙️</span>
                         <span>Setup & Config</span>
@@ -709,6 +713,181 @@
                         <div id="containerDetailList" class="container-detail-list">
                             <div class="loading">Loading containers...</div>
                         </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Shellder Configuration Page -->
+            <div id="page-shellder-config" class="page">
+                <!-- Config Status Overview -->
+                <div class="stats-grid stats-grid-4">
+                    <div class="stat-card">
+                        <div class="stat-icon">🐚</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="shellderConfigStatus">-</div>
+                            <div class="stat-label">Config Loaded</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">📦</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="shellderComponentsEnabled">-</div>
+                            <div class="stat-label">Components Enabled</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🐳</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="shellderLocalComponents">-</div>
+                            <div class="stat-label">Local (Docker)</div>
+                        </div>
+                    </div>
+                    <div class="stat-card">
+                        <div class="stat-icon">🌐</div>
+                        <div class="stat-info">
+                            <div class="stat-value" id="shellderRemoteComponents">-</div>
+                            <div class="stat-label">Remote</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="dashboard-grid">
+                    <!-- Stack Components -->
+                    <div class="card full-width">
+                        <div class="card-header">
+                            <h2>🔧 Stack Components</h2>
+                            <div class="header-actions">
+                                <button class="btn btn-sm" onclick="loadShellderConfig()">🔄 Refresh</button>
+                                <button class="btn btn-sm btn-primary" onclick="reloadShellderConfigFile()">♻️ Reload Config</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="text-muted" style="margin-bottom: 16px;">
+                                Configure stack components for local Docker containers or remote services.
+                                This allows Shellder to manage distributed and hybrid deployments.
+                            </p>
+                            <div id="shellderComponentsGrid" class="shellder-components-grid">
+                                <div class="loading">Loading configuration...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Component Editor Modal -->
+                <div id="componentEditorModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-lg">
+                        <div class="modal-header">
+                            <h2>📝 Configure <span id="componentEditorName">Component</span></h2>
+                            <button class="btn btn-icon" onclick="closeComponentEditor()">✖</button>
+                        </div>
+                        <div class="modal-body">
+                            <form id="componentEditorForm" onsubmit="saveComponentConfig(event)">
+                                <input type="hidden" id="componentEditorKey" name="component">
+                                
+                                <div class="form-grid">
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="componentEnabled" name="enabled">
+                                            <span>Enabled</span>
+                                        </label>
+                                        <span class="form-hint">Enable or disable this component</span>
+                                    </div>
+                                    
+                                    <div class="form-group">
+                                        <label class="checkbox-label">
+                                            <input type="checkbox" id="componentLocal" name="local" onchange="toggleLocalRemote()">
+                                            <span>Local (Docker Container)</span>
+                                        </label>
+                                        <span class="form-hint">Uncheck for remote service</span>
+                                    </div>
+                                </div>
+                                
+                                <div id="localSettings" class="form-section">
+                                    <h3>🐳 Local Docker Settings</h3>
+                                    <div class="form-grid">
+                                        <div class="form-group">
+                                            <label for="componentContainer">Container Name</label>
+                                            <input type="text" id="componentContainer" name="container_name" class="form-input">
+                                            <span class="form-hint">Docker container name</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div id="remoteSettings" class="form-section" style="display: none;">
+                                    <h3>🌐 Remote Service Settings</h3>
+                                    <div class="form-grid">
+                                        <div class="form-group">
+                                            <label for="componentHost">Host / IP Address</label>
+                                            <input type="text" id="componentHost" name="host" class="form-input" placeholder="192.168.1.100 or hostname">
+                                            <span class="form-hint">Remote server address</span>
+                                        </div>
+                                        <div class="form-group">
+                                            <label for="componentPort">Port</label>
+                                            <input type="number" id="componentPort" name="port" class="form-input">
+                                            <span class="form-hint">Service port number</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-section">
+                                    <h3>📁 Configuration Paths</h3>
+                                    <div class="form-grid">
+                                        <div class="form-group full-width">
+                                            <label for="componentConfigFile">Config File</label>
+                                            <input type="text" id="componentConfigFile" name="config_file" class="form-input" placeholder="Relative to Aegis root">
+                                            <span class="form-hint">Path to component's configuration file</span>
+                                        </div>
+                                    </div>
+                                </div>
+                                
+                                <div class="form-actions">
+                                    <button type="submit" class="btn btn-primary">💾 Save Changes</button>
+                                    <button type="button" class="btn" onclick="closeComponentEditor()">Cancel</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- General Settings -->
+                <div class="dashboard-grid">
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>📂 General Paths</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-list" id="shellderGeneralPaths">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔒 Remote Access</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="info-list" id="shellderRemoteSettings">
+                                <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Raw Config Editor -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>📄 Configuration File</h2>
+                        <div class="header-actions">
+                            <button class="btn btn-sm" onclick="loadRawShellderConfig()">🔄 Load</button>
+                            <button class="btn btn-sm btn-primary" onclick="saveRawShellderConfig()">💾 Save</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted" style="margin-bottom: 8px;">
+                            <code id="shellderConfigPath">Shellder/shellder_config.toml</code>
+                        </p>
+                        <textarea id="rawShellderConfig" class="code-editor" rows="25" spellcheck="false" placeholder="Loading configuration file..."></textarea>
                     </div>
                 </div>
             </div>

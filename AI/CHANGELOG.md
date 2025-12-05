@@ -22,11 +22,20 @@
 - AI Debug API reference (AI/AI_DEBUG_API.md)
 - Project structure guide (AI/STRUCTURE.md)
 - This changelog file
+- **Stack Configuration System** - Configurable component paths and remote support
+  - `Shellder/shellder_config.toml` - Master configuration file
+  - `Shellder/config_loader.py` - Python configuration loader
+  - `Shellder/config_loader.sh` - Shell script configuration loader
+  - Web UI "Shellder" page under Overview for configuration management
+  - API endpoints: `/api/stack-config`, `/api/stack-config/components`, etc.
+  - Support for local Docker containers OR remote services per component
+- Sidebar menu scrollbar for small screens
 
 ### Changed
 - Moved DEEP_ANALYSIS.md to AI/ folder
 - Moved STACK_SIMULATION.md to AI/ folder
 - Updated .gitignore to exclude node_modules in mcp-server
+- Updated shellder_service.py to use configurable component paths
 
 ---
 

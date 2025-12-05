@@ -1,0 +1,315 @@
+# =============================================================================
+# Shellder Stack Configuration
+# =============================================================================
+# This file defines paths, hosts, and settings for all Aegis AIO stack components.
+# Defaults point to the standard Aegis AIO directory structure.
+# Modify these values to integrate remote components or custom paths.
+#
+# IMPORTANT: After changing this file, restart Shellder for changes to take effect.
+# =============================================================================
+
+[general]
+# Base directory for Aegis AIO (absolute path recommended for remote setups)
+# Default: Parent directory of Shellder folder
+aegis_root = ""
+
+# Shellder data directory (for SQLite DB, logs, etc.)
+shellder_data_dir = "Shellder/data"
+
+# Docker compose file location (relative to aegis_root or absolute)
+docker_compose_file = "docker-compose.yaml"
+
+# Environment file location
+env_file = ".env"
+
+# =============================================================================
+# DATABASE (MariaDB)
+# =============================================================================
+[database]
+enabled = true
+local = true                    # true = local Docker container, false = remote
+
+# For local Docker
+container_name = "database"
+
+# For remote database
+host = "localhost"
+port = 3306
+
+# Database credentials (leave empty to read from .env)
+# WARNING: Storing passwords here is less secure than using .env
+username = ""
+password = ""
+root_password = ""
+
+# Database names
+db_golbat = "golbat"
+db_dragonite = "dragonite"
+db_reactmap = "reactmap"
+db_koji = "koji"
+db_poracle = "poracle"
+
+# =============================================================================
+# DRAGONITE (Scanner Backend)
+# =============================================================================
+[dragonite]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "dragonite"
+
+# For remote Dragonite
+host = "localhost"
+api_port = 7272
+admin_port = 6002
+
+# Config file path (relative to aegis_root or absolute)
+config_file = "unown/dragonite_config.toml"
+config_default = "unown/dragonite_config-default.toml"
+
+# Admin container (separate from main dragonite)
+admin_container_name = "admin"
+
+# =============================================================================
+# GOLBAT (Data Processor)
+# =============================================================================
+[golbat]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "golbat"
+
+# For remote Golbat
+host = "localhost"
+api_port = 9001
+grpc_port = 50001
+
+# Config file path
+config_file = "unown/golbat_config.toml"
+config_default = "unown/golbat_config-default.toml"
+
+# Cache directory
+cache_dir = "unown/golbat_cache"
+
+# =============================================================================
+# ROTOM (Device Manager)
+# =============================================================================
+[rotom]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "rotom"
+
+# For remote Rotom
+host = "localhost"
+device_port = 7070           # Port for Aegis devices to connect
+controller_port = 7071       # Port for Dragonite controller connection
+web_port = 6003              # Web UI port
+
+# Config file path
+config_file = "unown/rotom_config.json"
+config_default = "unown/rotom_config-default.json"
+
+# Jobs directory
+jobs_dir = "unown/rotom_jobs"
+
+# =============================================================================
+# XILRIWS (Auth Proxy)
+# =============================================================================
+[xilriws]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "xilriws"
+
+# For remote Xilriws
+host = "localhost"
+port = 5090
+
+# Proxy list file
+proxies_file = "unown/proxies.txt"
+
+# =============================================================================
+# REACTMAP (Map Frontend)
+# =============================================================================
+[reactmap]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "reactmap"
+
+# For remote ReactMap
+host = "localhost"
+port = 6001
+
+# Config file path
+config_file = "reactmap/local.json"
+config_default = "reactmap/local-default.json"
+env_file = "reactmap/env"
+
+# =============================================================================
+# KOJI (Geofence Manager)
+# =============================================================================
+[koji]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "koji"
+
+# For remote Koji
+host = "localhost"
+port = 6004
+
+# =============================================================================
+# PORACLE (Alert Bot)
+# =============================================================================
+[poracle]
+enabled = false              # Disabled by default (optional component)
+local = true
+
+# For local Docker
+container_name = "poracle"
+
+# For remote Poracle
+host = "localhost"
+port = 6007
+
+# Config directory
+config_dir = "Poracle/config"
+config_file = "Poracle/config/local.json"
+geofence_dir = "Poracle/geofence"
+
+# =============================================================================
+# FLETCHLING (Nest Detection)
+# =============================================================================
+[fletchling]
+enabled = false              # Disabled by default (optional component)
+local = true
+
+# For local Docker
+container_name = "fletchling"
+
+# Config file
+config_file = "fletchling.toml"
+data_dir = "fletchling"
+
+# =============================================================================
+# GRAFANA (Statistics Dashboard)
+# =============================================================================
+[grafana]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "grafana"
+
+# For remote Grafana
+host = "localhost"
+port = 6006
+
+# Dashboard directory
+dashboards_dir = "grafana"
+
+# =============================================================================
+# VICTORIAMETRICS (Metrics Storage)
+# =============================================================================
+[victoriametrics]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "victoriametrics"
+
+# For remote VictoriaMetrics
+host = "localhost"
+port = 8428
+
+# Data directory
+data_dir = "victoriametrics/data"
+
+# VMAgent settings
+[victoriametrics.vmagent]
+container_name = "vmagent"
+config_file = "vmagent/prometheus.yml"
+data_dir = "vmagent/data"
+
+# =============================================================================
+# PHPMYADMIN (Database Admin)
+# =============================================================================
+[phpmyadmin]
+enabled = true
+local = true
+
+# For local Docker
+container_name = "pma"
+
+# For remote phpMyAdmin
+host = "localhost"
+port = 6005
+
+# =============================================================================
+# SHELLDER (This Service)
+# =============================================================================
+[shellder]
+# Web dashboard port
+web_port = 5000
+
+# AI Debug API port (internal, for MCP server)
+api_port = 5050
+
+# Log settings
+log_file = "Shellder/shellder.log"
+log_level = "INFO"          # DEBUG, INFO, WARNING, ERROR
+
+# SQLite database
+db_file = "Shellder/shellder.db"
+
+# =============================================================================
+# NGINX & SECURITY
+# =============================================================================
+[nginx]
+enabled = true               # Whether nginx is used for reverse proxy
+
+# Nginx configuration paths (system paths, not relative to aegis_root)
+config_dir = "/etc/nginx"
+sites_available = "/etc/nginx/sites-available"
+sites_enabled = "/etc/nginx/sites-enabled"
+ssl_dir = "/etc/letsencrypt/live"
+
+# =============================================================================
+# REMOTE ACCESS SETTINGS
+# =============================================================================
+[remote]
+# SSH settings for remote component access
+ssh_enabled = false
+ssh_user = ""
+ssh_key_file = ""           # Path to SSH private key
+
+# API authentication for remote Shellder instances
+api_key = ""                # Set this to secure remote API access
+
+# Allowed remote hosts (comma-separated, empty = local only)
+allowed_hosts = ""
+
+# =============================================================================
+# CUSTOM PATHS
+# =============================================================================
+[paths]
+# Override any specific paths here
+# Example: logs_dir = "/var/log/aegis"
+
+# MySQL data directory
+mysql_data = "mysql_data"
+
+# Init scripts directory
+init_dir = "init"
+
+# Logs directory (for scanner logs)
+scanner_logs = "unown/logs"
+

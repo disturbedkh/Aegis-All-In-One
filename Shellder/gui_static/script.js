@@ -10970,3 +10970,330 @@ document.addEventListener('DOMContentLoaded', () => {
         observer.observe(setupTab, { attributes: true });
     }
 });
+
+// =============================================================================
+// SHELLDER CONFIGURATION PAGE
+// =============================================================================
+
+let shellderConfigData = null;
+let currentEditingComponent = null;
+
+// Component icons mapping
+const componentIcons = {
+    database: '🗄️',
+    dragonite: '🐉',
+    golbat: '🦇',
+    rotom: '📱',
+    xilriws: '🔐',
+    reactmap: '🗺️',
+    koji: '📍',
+    poracle: '🔔',
+    fletchling: '🪺',
+    grafana: '📊',
+    victoriametrics: '📈',
+    phpmyadmin: '🔧',
+    shellder: '🐚'
+};
+
+// Load Shellder configuration
+async function loadShellderConfig() {
+    try {
+        const data = await fetchAPI('/api/stack-config/components');
+        shellderConfigData = data;
+        
+        // Update stats
+        const enabled = data.components.filter(c => c.enabled).length;
+        const local = data.components.filter(c => c.enabled && c.local).length;
+        const remote = data.components.filter(c => c.enabled && !c.local).length;
+        
+        updateElement('shellderConfigStatus', data.config_loaded ? '✓ Loaded' : '✗ Not Loaded');
+        updateElement('shellderComponentsEnabled', `${enabled}/${data.components.length}`);
+        updateElement('shellderLocalComponents', local.toString());
+        updateElement('shellderRemoteComponents', remote.toString());
+        
+        // Render components grid
+        renderShellderComponents(data.components);
+        
+        // Load general settings
+        loadShellderGeneralSettings();
+        
+    } catch (error) {
+        console.error('Error loading Shellder config:', error);
+        showToast('Failed to load configuration', 'error');
+    }
+}
+
+// Render components grid
+function renderShellderComponents(components) {
+    const container = document.getElementById('shellderComponentsGrid');
+    if (!container) return;
+    
+    if (!components || components.length === 0) {
+        container.innerHTML = '<div class="empty-state">No components configured</div>';
+        return;
+    }
+    
+    container.innerHTML = components.map(comp => `
+        <div class="component-card ${comp.enabled ? '' : 'disabled'}" onclick="editComponent('${comp.name}')">
+            <div class="component-card-header">
+                <div class="component-card-title">
+                    <span class="icon">${componentIcons[comp.name] || '📦'}</span>
+                    <h3>${comp.name}</h3>
+                </div>
+                <div class="component-card-badges">
+                    <span class="component-badge ${comp.enabled ? 'enabled' : 'disabled'}">
+                        ${comp.enabled ? 'Enabled' : 'Disabled'}
+                    </span>
+                    <span class="component-badge ${comp.local ? 'local' : 'remote'}">
+                        ${comp.local ? 'Local' : 'Remote'}
+                    </span>
+                </div>
+            </div>
+            <div class="component-card-details">
+                <div class="component-detail">
+                    <span class="component-detail-label">${comp.local ? 'Container' : 'Host'}</span>
+                    <span class="component-detail-value">${comp.local ? comp.container : comp.host}</span>
+                </div>
+                <div class="component-detail">
+                    <span class="component-detail-label">Port</span>
+                    <span class="component-detail-value">${comp.port || '-'}</span>
+                </div>
+                ${comp.config_file ? `
+                <div class="component-detail full-width">
+                    <span class="component-detail-label">Config</span>
+                    <span class="component-detail-value">${comp.config_file.split('/').pop()}</span>
+                </div>
+                ` : ''}
+            </div>
+        </div>
+    `).join('');
+}
+
+// Load general settings
+async function loadShellderGeneralSettings() {
+    try {
+        const data = await fetchAPI('/api/stack-config');
+        
+        // Update general paths
+        const pathsContainer = document.getElementById('shellderGeneralPaths');
+        if (pathsContainer && data.general) {
+            pathsContainer.innerHTML = `
+                <div class="info-item">
+                    <span class="info-label">Aegis Root</span>
+                    <span class="info-value">${data.aegis_root || 'Auto-detected'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Docker Compose</span>
+                    <span class="info-value">${data.general.docker_compose_file || 'docker-compose.yaml'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Environment File</span>
+                    <span class="info-value">${data.general.env_file || '.env'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Config File</span>
+                    <span class="info-value">${data.config_file || 'Not found'}</span>
+                </div>
+            `;
+        }
+        
+        // Update remote settings
+        const remoteContainer = document.getElementById('shellderRemoteSettings');
+        if (remoteContainer && data.remote) {
+            remoteContainer.innerHTML = `
+                <div class="info-item">
+                    <span class="info-label">SSH Enabled</span>
+                    <span class="info-value">${data.remote.ssh_enabled ? 'Yes' : 'No'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">API Key</span>
+                    <span class="info-value">${data.remote.api_key ? '••••••••' : 'Not set'}</span>
+                </div>
+                <div class="info-item">
+                    <span class="info-label">Allowed Hosts</span>
+                    <span class="info-value">${data.remote.allowed_hosts || 'Local only'}</span>
+                </div>
+            `;
+        }
+        
+        // Update config path display
+        const pathDisplay = document.getElementById('shellderConfigPath');
+        if (pathDisplay && data.config_file) {
+            pathDisplay.textContent = data.config_file;
+        }
+        
+    } catch (error) {
+        console.error('Error loading general settings:', error);
+    }
+}
+
+// Edit component
+async function editComponent(componentName) {
+    currentEditingComponent = componentName;
+    
+    try {
+        const data = await fetchAPI('/api/stack-config');
+        const compConfig = data.components[componentName];
+        
+        if (!compConfig) {
+            showToast('Component configuration not found', 'error');
+            return;
+        }
+        
+        // Update modal title
+        document.getElementById('componentEditorName').textContent = componentName;
+        document.getElementById('componentEditorKey').value = componentName;
+        
+        // Fill form fields
+        document.getElementById('componentEnabled').checked = compConfig.enabled;
+        document.getElementById('componentLocal').checked = compConfig.local;
+        document.getElementById('componentContainer').value = compConfig.container_name || '';
+        document.getElementById('componentHost').value = compConfig.config?.host || 'localhost';
+        document.getElementById('componentPort').value = compConfig.config?.port || compConfig.config?.api_port || '';
+        document.getElementById('componentConfigFile').value = compConfig.config?.config_file || '';
+        
+        // Toggle local/remote sections
+        toggleLocalRemote();
+        
+        // Show modal
+        document.getElementById('componentEditorModal').style.display = 'flex';
+        
+    } catch (error) {
+        console.error('Error loading component config:', error);
+        showToast('Failed to load component configuration', 'error');
+    }
+}
+
+// Toggle local/remote settings visibility
+function toggleLocalRemote() {
+    const isLocal = document.getElementById('componentLocal').checked;
+    document.getElementById('localSettings').style.display = isLocal ? 'block' : 'none';
+    document.getElementById('remoteSettings').style.display = isLocal ? 'none' : 'block';
+}
+
+// Close component editor
+function closeComponentEditor() {
+    document.getElementById('componentEditorModal').style.display = 'none';
+    currentEditingComponent = null;
+}
+
+// Save component configuration
+async function saveComponentConfig(event) {
+    event.preventDefault();
+    
+    if (!currentEditingComponent) return;
+    
+    const formData = new FormData(event.target);
+    const values = {
+        enabled: formData.get('enabled') === 'on',
+        local: formData.get('local') === 'on',
+        container_name: formData.get('container_name'),
+        host: formData.get('host'),
+        config_file: formData.get('config_file')
+    };
+    
+    // Add port if provided
+    const port = formData.get('port');
+    if (port) {
+        values.port = parseInt(port);
+    }
+    
+    try {
+        const response = await fetchAPI('/api/stack-config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                section: currentEditingComponent,
+                values: values
+            })
+        });
+        
+        if (response.success) {
+            showToast(`${currentEditingComponent} configuration saved`, 'success');
+            closeComponentEditor();
+            loadShellderConfig();
+        } else {
+            showToast(response.error || 'Failed to save configuration', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving component config:', error);
+        showToast('Failed to save configuration', 'error');
+    }
+}
+
+// Reload configuration file
+async function reloadShellderConfigFile() {
+    try {
+        const response = await fetchAPI('/api/stack-config/reload', { method: 'POST' });
+        if (response.success) {
+            showToast('Configuration reloaded', 'success');
+            loadShellderConfig();
+            loadRawShellderConfig();
+        } else {
+            showToast(response.error || 'Failed to reload configuration', 'error');
+        }
+    } catch (error) {
+        console.error('Error reloading config:', error);
+        showToast('Failed to reload configuration', 'error');
+    }
+}
+
+// Load raw configuration file
+async function loadRawShellderConfig() {
+    const textarea = document.getElementById('rawShellderConfig');
+    if (!textarea) return;
+    
+    try {
+        const data = await fetchAPI('/api/stack-config/file');
+        if (data.content) {
+            textarea.value = data.content;
+        } else if (data.error) {
+            textarea.value = `# Error: ${data.error}\n# Create shellder_config.toml to customize stack settings`;
+        }
+    } catch (error) {
+        console.error('Error loading raw config:', error);
+        textarea.value = '# Failed to load configuration file';
+    }
+}
+
+// Save raw configuration file
+async function saveRawShellderConfig() {
+    const textarea = document.getElementById('rawShellderConfig');
+    if (!textarea) return;
+    
+    const content = textarea.value;
+    if (!content.trim()) {
+        showToast('Configuration cannot be empty', 'error');
+        return;
+    }
+    
+    try {
+        const response = await fetchAPI('/api/stack-config/file', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ content })
+        });
+        
+        if (response.success) {
+            showToast('Configuration saved and reloaded', 'success');
+            loadShellderConfig();
+        } else {
+            showToast(response.error || 'Failed to save configuration', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving raw config:', error);
+        showToast('Failed to save configuration', 'error');
+    }
+}
+
+// Load Shellder config when navigating to the page
+const originalNavigateTo = typeof navigateTo === 'function' ? navigateTo : null;
+if (originalNavigateTo) {
+    window.navigateTo = function(page) {
+        originalNavigateTo(page);
+        if (page === 'shellder-config') {
+            loadShellderConfig();
+            loadRawShellderConfig();
+        }
+    };
+}

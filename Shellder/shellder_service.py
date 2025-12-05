@@ -132,6 +132,30 @@ except ImportError:
 # CONFIGURATION
 # =============================================================================
 
+# Import stack configuration loader
+try:
+    from config_loader import (
+        get_config, reload_config, get_aegis_root,
+        is_component_enabled, is_component_local, 
+        get_component_url, get_container_name, get_path
+    )
+    STACK_CONFIG = get_config()
+    CONFIG_LOADED = True
+    info('STARTUP', 'Stack configuration loaded from shellder_config.toml')
+except ImportError as e:
+    STACK_CONFIG = None
+    CONFIG_LOADED = False
+    print(f"Warning: config_loader not available: {e}")
+    # Define stub functions
+    def get_config(): return None
+    def reload_config(): return None
+    def get_aegis_root(): return None
+    def is_component_enabled(c): return True
+    def is_component_local(c): return True
+    def get_component_url(c, p='port'): return f"http://localhost"
+    def get_container_name(c): return c
+    def get_path(s, k): return None
+
 SHELLDER_PORT = int(os.environ.get('SHELLDER_PORT', 5000))
 AEGIS_ROOT = Path(os.environ.get('AEGIS_ROOT', '/aegis'))
 
@@ -142,6 +166,12 @@ LOCAL_MODE = os.environ.get('SHELLDER_LOCAL_MODE', '0') == '1'
 if not AEGIS_ROOT.exists():
     SCRIPT_DIR = Path(__file__).parent
     AEGIS_ROOT = SCRIPT_DIR.parent
+
+# Override AEGIS_ROOT from config if specified
+if CONFIG_LOADED and STACK_CONFIG:
+    config_root = STACK_CONFIG.get('general', 'aegis_root')
+    if config_root:
+        AEGIS_ROOT = Path(config_root)
 
 SHELLDER_DIR = AEGIS_ROOT / 'Shellder'
 TEMPLATES_DIR = SHELLDER_DIR / 'gui_templates'
@@ -157,6 +187,81 @@ LOG_DIR = Path('/app/logs') if Path('/app/logs').exists() else SHELLDER_DIR / 'l
 # Locally: Shellder/data
 SHELLDER_DB = DATA_DIR / 'shellder.db'
 SHELLDER_LOG = LOG_DIR / 'shellder.log'
+
+# =============================================================================
+# STACK COMPONENT PATHS (from config or defaults)
+# =============================================================================
+
+def get_component_config_path(component: str) -> Path:
+    """Get the config file path for a component."""
+    if CONFIG_LOADED and STACK_CONFIG:
+        path = STACK_CONFIG.get_path(component, 'config_file')
+        if path:
+            return path
+    # Fallback defaults
+    defaults = {
+        'dragonite': AEGIS_ROOT / 'unown' / 'dragonite_config.toml',
+        'golbat': AEGIS_ROOT / 'unown' / 'golbat_config.toml',
+        'rotom': AEGIS_ROOT / 'unown' / 'rotom_config.json',
+        'reactmap': AEGIS_ROOT / 'reactmap' / 'local.json',
+        'xilriws': AEGIS_ROOT / 'unown' / 'proxies.txt',
+        'poracle': AEGIS_ROOT / 'Poracle' / 'config' / 'local.json',
+        'fletchling': AEGIS_ROOT / 'fletchling.toml',
+    }
+    return defaults.get(component, AEGIS_ROOT / component)
+
+def get_component_container(component: str) -> str:
+    """Get the Docker container name for a component."""
+    if CONFIG_LOADED and STACK_CONFIG:
+        return STACK_CONFIG.get_container_name(component)
+    # Fallback defaults
+    defaults = {
+        'database': 'database',
+        'dragonite': 'dragonite',
+        'admin': 'admin',
+        'golbat': 'golbat',
+        'rotom': 'rotom',
+        'xilriws': 'xilriws',
+        'reactmap': 'reactmap',
+        'koji': 'koji',
+        'poracle': 'poracle',
+        'fletchling': 'fletchling',
+        'grafana': 'grafana',
+        'victoriametrics': 'victoriametrics',
+        'vmagent': 'vmagent',
+        'phpmyadmin': 'pma',
+        'shellder': 'shellder',
+    }
+    return defaults.get(component, component)
+
+def get_component_host_port(component: str, port_key: str = 'port') -> tuple:
+    """Get host and port for a component (local or remote)."""
+    if CONFIG_LOADED and STACK_CONFIG:
+        host = STACK_CONFIG.get_host(component)
+        port = STACK_CONFIG.get_port(component, port_key)
+        return (host, port)
+    # Fallback defaults
+    port_defaults = {
+        ('database', 'port'): ('localhost', 3306),
+        ('dragonite', 'api_port'): ('localhost', 7272),
+        ('dragonite', 'admin_port'): ('localhost', 6002),
+        ('golbat', 'api_port'): ('localhost', 9001),
+        ('golbat', 'grpc_port'): ('localhost', 50001),
+        ('rotom', 'device_port'): ('localhost', 7070),
+        ('rotom', 'web_port'): ('localhost', 6003),
+        ('xilriws', 'port'): ('localhost', 5090),
+        ('reactmap', 'port'): ('localhost', 6001),
+        ('koji', 'port'): ('localhost', 6004),
+        ('grafana', 'port'): ('localhost', 6006),
+        ('phpmyadmin', 'port'): ('localhost', 6005),
+    }
+    return port_defaults.get((component, port_key), ('localhost', 0))
+
+def is_component_remote(component: str) -> bool:
+    """Check if a component is configured as remote (not local Docker)."""
+    if CONFIG_LOADED and STACK_CONFIG:
+        return not STACK_CONFIG.is_local(component)
+    return False  # Default to local
 
 # Ensure directories exist (with graceful error handling for permission issues)
 try:
@@ -6929,6 +7034,216 @@ def api_ai_debug_help():
             'Use /api/debug/tail for live log streaming',
             'All file paths are relative to Aegis root directory'
         ]
+    })
+
+# =============================================================================
+# STACK CONFIGURATION API
+# =============================================================================
+
+@app.route('/api/stack-config')
+def api_stack_config_get():
+    """
+    Get current stack configuration.
+    
+    Returns the full configuration including all component settings,
+    paths, and remote access configuration.
+    """
+    if not CONFIG_LOADED or not STACK_CONFIG:
+        return jsonify({
+            'error': 'Stack configuration not loaded',
+            'config_file': str(SHELLDER_DIR / 'shellder_config.toml'),
+            'config_loaded': False
+        }), 500
+    
+    # Build component status
+    components = {}
+    for comp in STACK_CONFIG.get_all_components():
+        comp_config = STACK_CONFIG.get_section(comp)
+        components[comp] = {
+            'enabled': STACK_CONFIG.is_enabled(comp),
+            'local': STACK_CONFIG.is_local(comp),
+            'container_name': STACK_CONFIG.get_container_name(comp),
+            'host': STACK_CONFIG.get_host(comp),
+            'config': comp_config
+        }
+    
+    return jsonify({
+        'config_loaded': True,
+        'config_file': str(STACK_CONFIG.config_path),
+        'aegis_root': str(STACK_CONFIG.aegis_root),
+        'shellder_dir': str(STACK_CONFIG.shellder_dir),
+        'general': STACK_CONFIG.get_section('general'),
+        'components': components,
+        'paths': STACK_CONFIG.get_section('paths'),
+        'nginx': STACK_CONFIG.get_section('nginx'),
+        'remote': STACK_CONFIG.get_section('remote'),
+    })
+
+@app.route('/api/stack-config', methods=['POST'])
+def api_stack_config_update():
+    """
+    Update stack configuration.
+    
+    Body should contain section and values to update:
+    {
+        "section": "dragonite",
+        "values": {
+            "enabled": true,
+            "local": false,
+            "host": "192.168.1.100"
+        }
+    }
+    """
+    if not CONFIG_LOADED or not STACK_CONFIG:
+        return jsonify({'error': 'Stack configuration not loaded'}), 500
+    
+    data = request.get_json() or {}
+    section = data.get('section')
+    values = data.get('values', {})
+    
+    if not section:
+        return jsonify({'error': 'Section is required'}), 400
+    
+    try:
+        # Update config in memory
+        current = STACK_CONFIG.get_section(section)
+        current.update(values)
+        
+        # Save to file
+        if STACK_CONFIG.save():
+            return jsonify({
+                'success': True,
+                'section': section,
+                'updated': values
+            })
+        else:
+            return jsonify({'error': 'Failed to save configuration'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stack-config/reload', methods=['POST'])
+def api_stack_config_reload():
+    """Reload configuration from file."""
+    global STACK_CONFIG
+    try:
+        if CONFIG_LOADED:
+            STACK_CONFIG = reload_config()
+            return jsonify({
+                'success': True,
+                'message': 'Configuration reloaded',
+                'config_file': str(STACK_CONFIG.config_path)
+            })
+        else:
+            return jsonify({'error': 'Config loader not available'}), 500
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stack-config/file')
+def api_stack_config_file():
+    """Get the raw configuration file contents."""
+    config_path = SHELLDER_DIR / 'shellder_config.toml'
+    if config_path.exists():
+        try:
+            content = config_path.read_text()
+            return jsonify({
+                'path': str(config_path),
+                'content': content,
+                'exists': True
+            })
+        except Exception as e:
+            return jsonify({'error': str(e)}), 500
+    else:
+        return jsonify({
+            'path': str(config_path),
+            'exists': False,
+            'error': 'Configuration file not found'
+        }), 404
+
+@app.route('/api/stack-config/file', methods=['POST'])
+def api_stack_config_file_save():
+    """Save raw configuration file contents."""
+    data = request.get_json() or {}
+    content = data.get('content', '')
+    
+    if not content:
+        return jsonify({'error': 'Content is required'}), 400
+    
+    config_path = SHELLDER_DIR / 'shellder_config.toml'
+    try:
+        # Backup existing file
+        if config_path.exists():
+            backup_path = config_path.with_suffix('.toml.bak')
+            import shutil
+            shutil.copy2(config_path, backup_path)
+        
+        # Write new content
+        config_path.write_text(content)
+        
+        # Reload config
+        if CONFIG_LOADED:
+            global STACK_CONFIG
+            STACK_CONFIG = reload_config()
+        
+        return jsonify({
+            'success': True,
+            'path': str(config_path),
+            'message': 'Configuration saved and reloaded'
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/stack-config/components')
+def api_stack_config_components():
+    """Get summary of all components and their status."""
+    components = []
+    
+    all_components = [
+        'database', 'dragonite', 'golbat', 'rotom', 'xilriws',
+        'reactmap', 'koji', 'poracle', 'fletchling', 'grafana',
+        'victoriametrics', 'phpmyadmin'
+    ]
+    
+    for comp in all_components:
+        if CONFIG_LOADED and STACK_CONFIG:
+            enabled = STACK_CONFIG.is_enabled(comp)
+            local = STACK_CONFIG.is_local(comp)
+            container = STACK_CONFIG.get_container_name(comp)
+            host = STACK_CONFIG.get_host(comp)
+            
+            # Get primary port
+            port_key = 'port'
+            if comp in ['dragonite', 'golbat']:
+                port_key = 'api_port'
+            elif comp == 'rotom':
+                port_key = 'web_port'
+            port = STACK_CONFIG.get_port(comp, port_key)
+            
+            # Get config file path
+            config_file = STACK_CONFIG.get_path(comp, 'config_file')
+            config_exists = config_file.exists() if config_file else None
+        else:
+            enabled = True
+            local = True
+            container = comp
+            host = 'localhost'
+            port = 0
+            config_file = None
+            config_exists = None
+        
+        components.append({
+            'name': comp,
+            'enabled': enabled,
+            'local': local,
+            'container': container,
+            'host': host,
+            'port': port,
+            'config_file': str(config_file) if config_file else None,
+            'config_exists': config_exists
+        })
+    
+    return jsonify({
+        'components': components,
+        'config_loaded': CONFIG_LOADED
     })
 
 @app.route('/api/health')
