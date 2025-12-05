@@ -863,6 +863,37 @@
                             <div id="configFieldsContainer" class="config-fields-container">
                                 <!-- Config fields loaded dynamically -->
                             </div>
+                            
+                            <!-- Webhooks Section (Golbat only) -->
+                            <div id="webhooksSection" class="webhooks-section" style="display: none;">
+                                <div class="config-section">
+                                    <div class="config-section-header" onclick="toggleConfigSection('webhooks-manager')">
+                                        <h4>🔔 Webhooks</h4>
+                                        <span class="section-desc">Send data to external services like Poracle</span>
+                                        <span class="config-section-toggle">▼</span>
+                                    </div>
+                                    <div class="config-section-fields" id="config-section-webhooks-manager-fields">
+                                        <div class="webhooks-info">
+                                            <p>📡 Webhooks notify other services when Pokemon spawn, raids start, etc.</p>
+                                            <p>Common uses: Poracle (Discord/Telegram alerts), custom bots, analytics</p>
+                                        </div>
+                                        
+                                        <div class="webhooks-toolbar">
+                                            <button class="btn btn-primary btn-sm" onclick="showWebhookModal()">
+                                                ➕ Add Webhook
+                                            </button>
+                                            <button class="btn btn-sm" onclick="loadWebhooks()">
+                                                🔄 Refresh
+                                            </button>
+                                        </div>
+                                        
+                                        <div id="webhooksList" class="webhooks-list">
+                                            <!-- Webhooks loaded dynamically -->
+                                            <div class="loading">Loading webhooks...</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         
                         <!-- Raw Text Editor (hidden by default) -->
@@ -2880,6 +2911,66 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                         <div class="modal-footer">
                             <button class="btn btn-secondary" onclick="closeChownModal()">Cancel</button>
                             <button class="btn btn-primary" onclick="applyChown()">Apply</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Webhook Modal -->
+                <div id="webhookModal" class="modal" style="display: none;">
+                    <div class="modal-content">
+                        <div class="modal-header">
+                            <h3 id="webhookModalTitle">🔔 Add Webhook</h3>
+                            <button class="btn btn-sm" onclick="closeWebhookModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="hidden" id="webhookEditIndex" value="-1">
+                            
+                            <div class="form-group">
+                                <label for="webhookUrl">Webhook URL <span class="required">*</span></label>
+                                <input type="text" id="webhookUrl" class="form-input" 
+                                       placeholder="http://poracle:3030">
+                                <div class="form-hint">The URL of the service to receive webhook data</div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label>Data Types to Send <span class="required">*</span></label>
+                                <div class="webhook-types-grid" id="webhookTypesGrid">
+                                    <!-- Types loaded dynamically -->
+                                </div>
+                                <div class="form-hint">Select which types of data to send to this webhook</div>
+                            </div>
+                            
+                            <div class="form-group">
+                                <label for="webhookAreas">Area Filter (optional)</label>
+                                <input type="text" id="webhookAreas" class="form-input" 
+                                       placeholder="London/*, */Harrow, Harrow">
+                                <div class="form-hint">
+                                    Comma-separated area names. Supports wildcards: <code>London/*</code> (all sub-areas), 
+                                    <code>*/Harrow</code> (Harrow in any parent). Leave empty for all areas.
+                                </div>
+                            </div>
+                            
+                            <div class="webhook-presets">
+                                <label>Quick Presets:</label>
+                                <div class="preset-buttons">
+                                    <button class="btn btn-xs" onclick="applyWebhookPreset('poracle')">
+                                        🔔 Poracle (All Data)
+                                    </button>
+                                    <button class="btn btn-xs" onclick="applyWebhookPreset('pokemon-only')">
+                                        🐾 Pokemon Only
+                                    </button>
+                                    <button class="btn btn-xs" onclick="applyWebhookPreset('raids-only')">
+                                        ⚔️ Raids Only
+                                    </button>
+                                    <button class="btn btn-xs" onclick="applyWebhookPreset('fletchling')">
+                                        🐦 Fletchling (Nests)
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeWebhookModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="saveWebhook()">💾 Save Webhook</button>
                         </div>
                     </div>
                 </div>

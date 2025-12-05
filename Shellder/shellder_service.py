@@ -12545,6 +12545,330 @@ def api_config_schema(config_path):
         'all_shared_definitions': SHARED_FIELDS
     })
 
+
+# =============================================================================
+# GOLBAT WEBHOOK MANAGEMENT
+# =============================================================================
+
+def parse_golbat_webhooks(config_path):
+    """Parse webhooks from golbat_config.toml"""
+    webhooks = []
+    
+    if not os.path.exists(config_path):
+        return webhooks
+    
+    try:
+        with open(config_path, 'r') as f:
+            content = f.read()
+        
+        # Try tomli first
+        try:
+            import tomli
+            data = tomli.loads(content)
+            return data.get('webhooks', [])
+        except ImportError:
+            pass
+        
+        # Manual parsing for [[webhooks]] blocks
+        lines = content.split('\n')
+        current_webhook = None
+        in_webhook = False
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Start of webhook block
+            if stripped == '[[webhooks]]':
+                if current_webhook is not None:
+                    webhooks.append(current_webhook)
+                current_webhook = {}
+                in_webhook = True
+                continue
+            
+            # Check if we've left the webhook section
+            if in_webhook and stripped.startswith('[') and not stripped.startswith('[['):
+                if current_webhook is not None:
+                    webhooks.append(current_webhook)
+                    current_webhook = None
+                in_webhook = False
+                continue
+            
+            # Parse key=value in webhook block
+            if in_webhook and current_webhook is not None and '=' in stripped and not stripped.startswith('#'):
+                key, value = stripped.split('=', 1)
+                key = key.strip()
+                value = value.strip()
+                
+                # Parse value
+                if value.startswith('"') and value.endswith('"'):
+                    current_webhook[key] = value[1:-1]
+                elif value.startswith('[') and value.endswith(']'):
+                    # Parse array
+                    items = value[1:-1].split(',')
+                    current_webhook[key] = [
+                        item.strip().strip('"').strip("'") 
+                        for item in items if item.strip()
+                    ]
+                elif value.lower() == 'true':
+                    current_webhook[key] = True
+                elif value.lower() == 'false':
+                    current_webhook[key] = False
+                else:
+                    try:
+                        current_webhook[key] = int(value)
+                    except:
+                        current_webhook[key] = value
+        
+        # Don't forget the last webhook
+        if current_webhook is not None:
+            webhooks.append(current_webhook)
+        
+        return webhooks
+    except Exception as e:
+        print(f"Error parsing webhooks: {e}")
+        return []
+
+
+def save_golbat_webhooks(config_path, webhooks):
+    """Save webhooks to golbat_config.toml, preserving other content"""
+    if not os.path.exists(config_path):
+        return False, "Config file not found"
+    
+    try:
+        with open(config_path, 'r') as f:
+            lines = f.readlines()
+        
+        # Find and remove existing webhook sections (both active and commented)
+        new_lines = []
+        in_webhook_section = False
+        in_commented_webhook = False
+        
+        for line in lines:
+            stripped = line.strip()
+            
+            # Detect start of webhook block
+            if stripped == '[[webhooks]]':
+                in_webhook_section = True
+                continue
+            
+            # Detect commented webhook examples (skip them too, we'll add fresh)
+            if stripped.startswith('#[[webhooks]]') or stripped == '# Example:':
+                in_commented_webhook = True
+                continue
+            
+            # Detect end of webhook/commented section
+            if in_webhook_section or in_commented_webhook:
+                # New section starts (not array-of-tables)
+                if stripped.startswith('[') and not stripped.startswith('[[') and not stripped.startswith('#'):
+                    in_webhook_section = False
+                    in_commented_webhook = False
+                    new_lines.append(line)
+                # Skip webhook content lines
+                elif in_webhook_section and (stripped.startswith('#') or '=' in stripped or stripped == ''):
+                    continue
+                # Skip commented example lines
+                elif in_commented_webhook and stripped.startswith('#'):
+                    continue
+                elif in_commented_webhook and stripped == '':
+                    continue
+                else:
+                    in_webhook_section = False
+                    in_commented_webhook = False
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        
+        # Remove trailing empty lines
+        while new_lines and new_lines[-1].strip() == '':
+            new_lines.pop()
+        
+        # Add webhooks section
+        new_lines.append('\n')
+        new_lines.append('# -----------------------------------------------------------------------------\n')
+        new_lines.append('# WEBHOOKS - Send data to other services\n')
+        new_lines.append('# -----------------------------------------------------------------------------\n')
+        
+        if not webhooks:
+            new_lines.append('# Webhooks notify other services (like Poracle alert bot) when\n')
+            new_lines.append('# Pokemon spawn, raids start, etc. Uncomment to enable.\n')
+            new_lines.append('#\n')
+            new_lines.append('# You can have multiple webhook destinations by repeating [[webhooks]] blocks.\n')
+            new_lines.append('\n')
+            new_lines.append('# Example: Send data to Poracle for Discord/Telegram alerts\n')
+            new_lines.append('#[[webhooks]]\n')
+            new_lines.append('#url = "http://poracle:3030"\n')
+            new_lines.append('# types: What data to send (uncomment and customize as needed)\n')
+            new_lines.append('# Options: pokemon, pokemon_iv, pokemon_no_iv, gym, invasion, quest,\n')
+            new_lines.append('#          pokestop, raid, weather, fort_update\n')
+            new_lines.append('# "pokemon" = all Pokemon, "pokemon_iv" = only Pokemon with known IVs\n')
+            new_lines.append('#types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather", "fort_update"]\n')
+            new_lines.append('\n')
+            new_lines.append('# Example: Send only Pokemon to a different service\n')
+            new_lines.append('#[[webhooks]]\n')
+            new_lines.append('#url = "http://some-other-service:5000/webhook"\n')
+            new_lines.append('#types = ["pokemon"]\n')
+            new_lines.append('\n')
+            new_lines.append('# Example: Send only raids to a specific service, filtered by area\n')
+            new_lines.append('#[[webhooks]]\n')
+            new_lines.append('#url = "http://localhost:4202"\n')
+            new_lines.append('#types = ["raid"]\n')
+            new_lines.append('#areas = ["London/*", "*/Harrow", "Harrow"]\n')
+        else:
+            for i, webhook in enumerate(webhooks):
+                new_lines.append(f'\n[[webhooks]]\n')
+                
+                # URL is required
+                url = webhook.get('url', '')
+                new_lines.append(f'url = "{url}"\n')
+                
+                # Types
+                types = webhook.get('types', [])
+                if types:
+                    types_str = ', '.join(f'"{t}"' for t in types)
+                    new_lines.append(f'types = [{types_str}]\n')
+                
+                # Areas (optional)
+                areas = webhook.get('areas', [])
+                if areas:
+                    areas_str = ', '.join(f'"{a}"' for a in areas)
+                    new_lines.append(f'areas = [{areas_str}]\n')
+        
+        new_lines.append('\n')
+        
+        # Write back
+        with open(config_path, 'w') as f:
+            f.writelines(new_lines)
+        
+        return True, "Webhooks saved"
+    except Exception as e:
+        return False, str(e)
+
+
+# Available webhook types for Golbat
+GOLBAT_WEBHOOK_TYPES = [
+    {'id': 'pokemon', 'label': 'All Pokemon', 'desc': 'Send all Pokemon (with and without IVs)'},
+    {'id': 'pokemon_iv', 'label': 'Pokemon with IV', 'desc': 'Only Pokemon with known IVs'},
+    {'id': 'pokemon_no_iv', 'label': 'Pokemon without IV', 'desc': 'Pokemon without IV data (wild encounters)'},
+    {'id': 'gym', 'label': 'Gyms', 'desc': 'Gym control and team changes'},
+    {'id': 'raid', 'label': 'Raids', 'desc': 'Raid eggs and bosses'},
+    {'id': 'quest', 'label': 'Quests', 'desc': 'Pokestop research tasks'},
+    {'id': 'pokestop', 'label': 'Pokestops', 'desc': 'New or changed pokestops'},
+    {'id': 'invasion', 'label': 'Invasions', 'desc': 'Team Rocket invasions'},
+    {'id': 'weather', 'label': 'Weather', 'desc': 'Weather changes'},
+    {'id': 'fort_update', 'label': 'Fort Updates', 'desc': 'Gym/pokestop updates'},
+]
+
+
+@app.route('/api/config/golbat/webhooks')
+def api_golbat_webhooks_get():
+    """Get all configured webhooks from golbat_config.toml"""
+    config_path = os.path.join(str(AEGIS_ROOT), 'unown/golbat_config.toml')
+    webhooks = parse_golbat_webhooks(config_path)
+    
+    return jsonify({
+        'webhooks': webhooks,
+        'available_types': GOLBAT_WEBHOOK_TYPES,
+        'count': len(webhooks)
+    })
+
+
+@app.route('/api/config/golbat/webhooks', methods=['POST'])
+def api_golbat_webhooks_add():
+    """Add a new webhook to golbat_config.toml"""
+    data = request.get_json()
+    
+    url = data.get('url', '').strip()
+    types = data.get('types', [])
+    areas = data.get('areas', [])
+    
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'}), 400
+    
+    if not types:
+        return jsonify({'success': False, 'error': 'At least one webhook type is required'}), 400
+    
+    config_path = os.path.join(str(AEGIS_ROOT), 'unown/golbat_config.toml')
+    webhooks = parse_golbat_webhooks(config_path)
+    
+    # Check for duplicate URL
+    for existing in webhooks:
+        if existing.get('url') == url:
+            return jsonify({'success': False, 'error': 'A webhook with this URL already exists'}), 400
+    
+    # Add new webhook
+    new_webhook = {'url': url, 'types': types}
+    if areas:
+        new_webhook['areas'] = areas
+    webhooks.append(new_webhook)
+    
+    success, message = save_golbat_webhooks(config_path, webhooks)
+    
+    return jsonify({
+        'success': success,
+        'message': message,
+        'webhook': new_webhook,
+        'webhooks': webhooks
+    })
+
+
+@app.route('/api/config/golbat/webhooks/<int:index>', methods=['PUT'])
+def api_golbat_webhooks_update(index):
+    """Update a webhook in golbat_config.toml"""
+    data = request.get_json()
+    
+    url = data.get('url', '').strip()
+    types = data.get('types', [])
+    areas = data.get('areas', [])
+    
+    if not url:
+        return jsonify({'success': False, 'error': 'URL is required'}), 400
+    
+    config_path = os.path.join(str(AEGIS_ROOT), 'unown/golbat_config.toml')
+    webhooks = parse_golbat_webhooks(config_path)
+    
+    if index < 0 or index >= len(webhooks):
+        return jsonify({'success': False, 'error': 'Invalid webhook index'}), 404
+    
+    # Check for duplicate URL (excluding self)
+    for i, existing in enumerate(webhooks):
+        if i != index and existing.get('url') == url:
+            return jsonify({'success': False, 'error': 'A webhook with this URL already exists'}), 400
+    
+    # Update webhook
+    webhooks[index] = {'url': url, 'types': types}
+    if areas:
+        webhooks[index]['areas'] = areas
+    
+    success, message = save_golbat_webhooks(config_path, webhooks)
+    
+    return jsonify({
+        'success': success,
+        'message': message,
+        'webhook': webhooks[index],
+        'webhooks': webhooks
+    })
+
+
+@app.route('/api/config/golbat/webhooks/<int:index>', methods=['DELETE'])
+def api_golbat_webhooks_delete(index):
+    """Delete a webhook from golbat_config.toml"""
+    config_path = os.path.join(str(AEGIS_ROOT), 'unown/golbat_config.toml')
+    webhooks = parse_golbat_webhooks(config_path)
+    
+    if index < 0 or index >= len(webhooks):
+        return jsonify({'success': False, 'error': 'Invalid webhook index'}), 404
+    
+    deleted = webhooks.pop(index)
+    success, message = save_golbat_webhooks(config_path, webhooks)
+    
+    return jsonify({
+        'success': success,
+        'message': message,
+        'deleted': deleted,
+        'webhooks': webhooks
+    })
+
+
 def is_default_placeholder(value, default_placeholder=None):
     """Check if a value is still at a default placeholder from setup.sh
     

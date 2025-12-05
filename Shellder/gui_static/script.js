@@ -7472,6 +7472,17 @@ async function editConfigFile(path) {
             statusEl.textContent = fileData.is_template ? '⚠️ From template' : '✅ File exists';
         }
         
+        // Show webhooks section for Golbat config
+        const webhooksSection = document.getElementById('webhooksSection');
+        if (webhooksSection) {
+            if (path === 'unown/golbat_config.toml') {
+                webhooksSection.style.display = 'block';
+                loadWebhooks();
+            } else {
+                webhooksSection.style.display = 'none';
+            }
+        }
+        
         // Scroll to editor
         panel.scrollIntoView({ behavior: 'smooth' });
         
@@ -7859,6 +7870,260 @@ function closeConfigEditor() {
     if (panel) panel.style.display = 'none';
     currentConfigPath = null;
     currentConfigSchema = null;
+    
+    // Hide webhooks section
+    const webhooksSection = document.getElementById('webhooksSection');
+    if (webhooksSection) webhooksSection.style.display = 'none';
+}
+
+
+// =============================================================================
+// GOLBAT WEBHOOK MANAGEMENT
+// =============================================================================
+
+let availableWebhookTypes = [];
+
+async function loadWebhooks() {
+    const list = document.getElementById('webhooksList');
+    if (!list) return;
+    
+    list.innerHTML = '<div class="loading">Loading webhooks...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/config/golbat/webhooks');
+        availableWebhookTypes = data.available_types || [];
+        
+        if (!data.webhooks || data.webhooks.length === 0) {
+            list.innerHTML = `
+                <div class="webhooks-empty">
+                    <div class="empty-icon">📭</div>
+                    <div class="empty-text">No webhooks configured</div>
+                    <div class="empty-hint">Click "Add Webhook" to send data to external services like Poracle</div>
+                </div>
+            `;
+            return;
+        }
+        
+        list.innerHTML = data.webhooks.map((webhook, index) => renderWebhookCard(webhook, index)).join('');
+    } catch (e) {
+        list.innerHTML = `<div class="error-msg">Error loading webhooks: ${e.message}</div>`;
+    }
+}
+
+function renderWebhookCard(webhook, index) {
+    const url = webhook.url || '';
+    const types = webhook.types || [];
+    const areas = webhook.areas || [];
+    
+    // Determine service name from URL
+    let serviceName = 'Webhook';
+    let serviceIcon = '🔔';
+    if (url.includes('poracle')) {
+        serviceName = 'Poracle';
+        serviceIcon = '📢';
+    } else if (url.includes('fletchling')) {
+        serviceName = 'Fletchling';
+        serviceIcon = '🐦';
+    }
+    
+    const typeBadges = types.map(t => {
+        const typeInfo = availableWebhookTypes.find(at => at.id === t) || { label: t };
+        return `<span class="webhook-type-badge">${typeInfo.label}</span>`;
+    }).join('');
+    
+    const areaText = areas.length > 0 
+        ? `<div class="webhook-areas">📍 Areas: ${areas.join(', ')}</div>` 
+        : '';
+    
+    return `
+        <div class="webhook-card">
+            <div class="webhook-card-header">
+                <span class="webhook-service">${serviceIcon} ${serviceName}</span>
+                <div class="webhook-actions">
+                    <button class="btn btn-xs" onclick="editWebhook(${index})" title="Edit">✏️</button>
+                    <button class="btn btn-xs btn-danger" onclick="deleteWebhook(${index})" title="Delete">🗑️</button>
+                </div>
+            </div>
+            <div class="webhook-url">
+                <code>${escapeHtml(url)}</code>
+            </div>
+            <div class="webhook-types">
+                ${typeBadges}
+            </div>
+            ${areaText}
+        </div>
+    `;
+}
+
+function showWebhookModal(editIndex = -1) {
+    const modal = document.getElementById('webhookModal');
+    const title = document.getElementById('webhookModalTitle');
+    const indexInput = document.getElementById('webhookEditIndex');
+    const urlInput = document.getElementById('webhookUrl');
+    const areasInput = document.getElementById('webhookAreas');
+    const typesGrid = document.getElementById('webhookTypesGrid');
+    
+    // Reset
+    indexInput.value = editIndex;
+    urlInput.value = '';
+    areasInput.value = '';
+    
+    // Render type checkboxes
+    typesGrid.innerHTML = availableWebhookTypes.map(type => `
+        <label class="webhook-type-checkbox">
+            <input type="checkbox" name="webhookType" value="${type.id}">
+            <span class="type-label">${type.label}</span>
+            <span class="type-desc">${type.desc}</span>
+        </label>
+    `).join('');
+    
+    if (editIndex >= 0) {
+        title.textContent = '✏️ Edit Webhook';
+        // Load existing webhook data
+        fetchAPI('/api/config/golbat/webhooks').then(data => {
+            const webhook = data.webhooks[editIndex];
+            if (webhook) {
+                urlInput.value = webhook.url || '';
+                areasInput.value = (webhook.areas || []).join(', ');
+                
+                // Check the types
+                (webhook.types || []).forEach(t => {
+                    const checkbox = typesGrid.querySelector(`input[value="${t}"]`);
+                    if (checkbox) checkbox.checked = true;
+                });
+            }
+        });
+    } else {
+        title.textContent = '🔔 Add Webhook';
+    }
+    
+    modal.style.display = 'flex';
+}
+
+function closeWebhookModal() {
+    document.getElementById('webhookModal').style.display = 'none';
+}
+
+function applyWebhookPreset(preset) {
+    const urlInput = document.getElementById('webhookUrl');
+    const typesGrid = document.getElementById('webhookTypesGrid');
+    
+    // Uncheck all first
+    typesGrid.querySelectorAll('input[type="checkbox"]').forEach(cb => cb.checked = false);
+    
+    switch (preset) {
+        case 'poracle':
+            urlInput.value = 'http://poracle:3030';
+            ['pokemon', 'pokemon_iv', 'pokemon_no_iv', 'gym', 'raid', 'quest', 'invasion', 'weather'].forEach(t => {
+                const cb = typesGrid.querySelector(`input[value="${t}"]`);
+                if (cb) cb.checked = true;
+            });
+            break;
+        case 'pokemon-only':
+            ['pokemon', 'pokemon_iv', 'pokemon_no_iv'].forEach(t => {
+                const cb = typesGrid.querySelector(`input[value="${t}"]`);
+                if (cb) cb.checked = true;
+            });
+            break;
+        case 'raids-only':
+            ['raid', 'gym'].forEach(t => {
+                const cb = typesGrid.querySelector(`input[value="${t}"]`);
+                if (cb) cb.checked = true;
+            });
+            break;
+        case 'fletchling':
+            urlInput.value = 'http://fletchling:9042/webhook';
+            const pokemonIv = typesGrid.querySelector('input[value="pokemon_iv"]');
+            if (pokemonIv) pokemonIv.checked = true;
+            break;
+    }
+    
+    showToast(`Applied ${preset} preset`, 'info');
+}
+
+async function saveWebhook() {
+    const indexInput = document.getElementById('webhookEditIndex');
+    const urlInput = document.getElementById('webhookUrl');
+    const areasInput = document.getElementById('webhookAreas');
+    const typesGrid = document.getElementById('webhookTypesGrid');
+    
+    const editIndex = parseInt(indexInput.value);
+    const url = urlInput.value.trim();
+    
+    // Collect selected types
+    const types = [];
+    typesGrid.querySelectorAll('input[type="checkbox"]:checked').forEach(cb => {
+        types.push(cb.value);
+    });
+    
+    // Parse areas
+    const areas = areasInput.value.split(',')
+        .map(a => a.trim())
+        .filter(a => a.length > 0);
+    
+    if (!url) {
+        showToast('Please enter a webhook URL', 'warning');
+        return;
+    }
+    
+    if (types.length === 0) {
+        showToast('Please select at least one data type', 'warning');
+        return;
+    }
+    
+    showToast('Saving webhook...', 'info');
+    
+    try {
+        let result;
+        const payload = { url, types, areas };
+        
+        if (editIndex >= 0) {
+            result = await fetchAPI(`/api/config/golbat/webhooks/${editIndex}`, {
+                method: 'PUT',
+                body: JSON.stringify(payload)
+            });
+        } else {
+            result = await fetchAPI('/api/config/golbat/webhooks', {
+                method: 'POST',
+                body: JSON.stringify(payload)
+            });
+        }
+        
+        if (result.success) {
+            showToast('✅ Webhook saved! Restart Golbat to apply changes.', 'success');
+            closeWebhookModal();
+            loadWebhooks();
+        } else {
+            showToast(`❌ Error: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`❌ Error: ${e.message}`, 'error');
+    }
+}
+
+function editWebhook(index) {
+    showWebhookModal(index);
+}
+
+async function deleteWebhook(index) {
+    if (!confirm('Delete this webhook? This cannot be undone.')) return;
+    
+    showToast('Deleting webhook...', 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/config/golbat/webhooks/${index}`, {
+            method: 'DELETE'
+        });
+        
+        if (result.success) {
+            showToast('✅ Webhook deleted! Restart Golbat to apply changes.', 'success');
+            loadWebhooks();
+        } else {
+            showToast(`❌ Error: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`❌ Error: ${e.message}`, 'error');
+    }
 }
 
 // Config file info lookup (for display names)
