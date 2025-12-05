@@ -49,6 +49,8 @@ sudo bash ./shellder.sh
 
 Visit **http://localhost:6001** for ReactMap when ready!
 
+> 💡 **Auto-Configuration:** Shellder automatically detects your user ID and fixes Docker permissions on startup. No manual PUID/PGID configuration needed!
+
 📚 **[Detailed Installation Guide →](../../wiki/Installation)**
 
 ---
@@ -76,10 +78,14 @@ Visit **http://localhost:6001** for ReactMap when ready!
 | 🌐 **Site Availability** | HTTP health checks for all configured sites |
 | 📡 **Xilriws Dashboard** | Live proxy stats, success rates, error tracking |
 | 📱 **Device Monitor** | Real-time device activity with crash tracking |
-| 📁 **File Browser** | View and edit configuration files |
-| 📋 **Log Viewer** | Aggregated logs with search capability |
+| 📁 **File Browser** | View, edit, upload files with ownership management |
+| 📋 **Log Viewer** | Multi-container logs with timezone conversion |
 | 🔌 **WebSocket** | Instant updates without page refresh |
 | 🤖 **AI Debug Panel** | Live logs, Pull & Restart, version tracking |
+| 🦇 **Fletchling Setup** | Nest detection wizard with OSM import |
+| 📢 **Poracle Setup** | Discord/Telegram alert bot configuration |
+| 🔒 **Security Wizard** | Guided Nginx, SSL, firewall setup |
+| ⚙️ **Config Editor** | Edit TOML/JSON configs with webhook manager |
 
 ### Starting the Dashboard
 

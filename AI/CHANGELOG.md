@@ -91,6 +91,26 @@
 - **File Manager** - Base64 encoding for paths with special characters
 - **Docker Start** - Handles already-running containers and port conflicts gracefully
 - **CRITICAL: GUI Broken After Config Loader Update** - Function wrapper at end of script.js was reassigning `window.navigateTo`, breaking all onclick handlers. Removed wrapper and added page handling directly in navigateTo().
+- **File Ownership** - All file write operations now call `fix_file_ownership()` to prevent root-owned files
+- **Grafana Permissions** - Fixed container startup failure due to wrong PUID/PGID in .env
+- **PUID/PGID Auto-Detection** - Now auto-detects from AEGIS_ROOT owner, works for any user/uid
+- **Docker Volume Permissions** - New API endpoint `/api/files/fix-docker-permissions` fixes all volume dirs
+
+### Auto-Detection System (NEW)
+- `auto_detect_and_fix_puid_pgid()` - Runs on Shellder startup
+  - Detects correct owner from AEGIS_ROOT directory
+  - Auto-updates .env if PUID/PGID don't match
+  - No hardcoded usernames or UIDs
+  - Works for any Linux user (pokemap, ubuntu, etc.)
+- `get_aegis_owner()` - Priority-based owner detection
+  1. SUDO_USER environment variable
+  2. Owner of AEGIS_ROOT directory  
+  3. PUID/PGID from environment
+  4. User lookup by common names
+  5. Fallback to uid 1000, then 1001
+- All Docker volume directories fixed on demand:
+  - grafana/, victoriametrics/, vmagent/, mysql_data/
+  - Shellder/data/, Shellder/logs/, unown/logs/
 
 ---
 

@@ -116,9 +116,26 @@ The Device Monitor parses logs from:
 
 ## Recent Updates (v1.0.x)
 
-### Version 1.0.24
+### Version 1.0.40+ (December 2024)
+- **Auto PUID/PGID Detection** - Automatically detects correct user from directory ownership
+- **File Ownership Fixes** - All file writes now preserve correct ownership (no more root-owned files)
+- **Docker Permissions API** - New `/api/files/fix-docker-permissions` endpoint
+- **Grafana Fix** - Resolved container startup failures due to wrong PUID/PGID
+- **Service Clarifications** - UI now shows which services have web interfaces
+- **Sites Available** - Shows service descriptions and warnings for backend-only services
+
+### Version 1.0.36+
+- **Fletchling Management** - Nest detection setup wizard, OSM import, nest list
+- **Poracle Setup** - Discord/Telegram alert bot configuration wizard
+- **Enhanced Logs** - Multi-container filtering, timezone conversion, saved presets
+- **Sites & Security Wizard** - Guided Nginx, Certbot, Fail2Ban, UFW setup
+- **Golbat Webhook Manager** - Create/edit/delete webhooks in config editor
+
+### Version 1.0.24-1.0.35
 - Fixed chart bar distribution for all time ranges
 - Improved metric history visualization
+- Fixed nested TOML config editing
+- Added config status detection for shared variables
 
 ### Version 1.0.17-1.0.23
 - Added 10-minute quick view for metrics

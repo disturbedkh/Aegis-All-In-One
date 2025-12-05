@@ -265,6 +265,59 @@ When connecting from a different machine (e.g., Cursor on Windows to a Linux ser
 
 ---
 
+## File Permissions & Ownership
+
+### Auto-Detection System
+
+Shellder automatically detects the correct user for file permissions on startup:
+
+```
+Checking PUID/PGID configuration...
+[Shellder] Auto-detected PUID:PGID = 1001:1001 (was 1000:1000)
+[Shellder] Updated .env with correct PUID=1001 PGID=1001
+Aegis owner: pokemap (uid=1001, gid=1001)
+```
+
+**Detection Priority:**
+1. Owner of AEGIS_ROOT directory (whoever owns the project)
+2. SUDO_USER environment variable (if running with sudo)
+3. PUID/PGID from .env file
+4. User lookup by name
+5. Fallback to uid 1000, then 1001
+
+**No Hardcoded Values:** Works for any username and any UID.
+
+### Docker Volume Permissions
+
+If Docker containers can't write to their data directories:
+
+```bash
+# Via API
+POST /api/files/fix-docker-permissions
+
+# Via Shellder
+sudo bash ./shellder.sh
+# Select file operations
+```
+
+Fixes these directories:
+- `grafana/` - Grafana dashboards and data
+- `victoriametrics/` - Metrics database
+- `vmagent/` - Metrics agent data
+- `mysql_data/` - MariaDB database files
+- `Shellder/data/`, `Shellder/logs/` - Shellder data
+- `unown/logs/`, `unown/golbat_cache/` - Scanner caches
+
+### Common Permission Issues
+
+| Issue | Cause | Solution |
+|-------|-------|----------|
+| Grafana won't start | Wrong PUID/PGID in .env | Restart Shellder (auto-fixes) |
+| Files owned by root | GUI operations with sudo | Use "Fix All Ownership" button |
+| Can't edit configs | Wrong file permissions | `sudo chown -R $USER:$USER .` |
+
+---
+
 ## Quick Reference
 
 ### Essential Commands

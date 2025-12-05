@@ -62,6 +62,46 @@
 
 ---
 
+## File Ownership
+
+### Critical Rule
+
+**ALWAYS call `fix_file_ownership()` after writing files in shellder_service.py!**
+
+```python
+# After ANY file write:
+with open(file_path, 'w') as f:
+    f.write(content)
+fix_file_ownership(file_path)  # <-- REQUIRED!
+```
+
+### Why This Matters
+
+When Shellder runs with `sudo`, files get created owned by `root`. This locks users out of their own files and breaks Docker containers that need to write to volumes.
+
+### Auto-Detection System
+
+Shellder automatically detects the correct owner:
+
+```python
+uid, gid, username = get_aegis_owner()
+# Returns the actual project owner, not root
+```
+
+Detection priority:
+1. Owner of AEGIS_ROOT directory
+2. SUDO_USER environment variable
+3. PUID/PGID from .env
+4. Fallback to uid 1000/1001
+
+### PUID/PGID
+
+- **Never hardcode** PUID=1000 or PGID=1000
+- Let `auto_detect_and_fix_puid_pgid()` handle it on startup
+- Different systems have different first-user UIDs (1000, 1001, 500, etc.)
+
+---
+
 ## Docker Operations
 
 ### Commands to Use

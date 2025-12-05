@@ -68,6 +68,8 @@ sudo bash ./shellder.sh
 # 5. Start the stack with option s) Start Stack
 ```
 
+> 💡 **Auto-Configuration:** Shellder automatically detects your user permissions and fixes Docker volume ownership. No manual PUID/PGID setup needed!
+
 Visit http://localhost:6001 for ReactMap when ready!
 
 ---
