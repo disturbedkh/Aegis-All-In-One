@@ -1,13 +1,20 @@
 # Create databases and user for Aegis All-in-One
 # This file runs ONLY on first database container creation.
-# 
-# NOTE: setup.sh replaces 'dbuser' with your chosen username.
+#
+# NOTE: setup.sh replaces 'pokemap' with your chosen username.
 # If you ran setup.sh after the database was already created,
 # run dbsetup.sh to create the user manually.
 
-# Create the database user (setup.sh replaces 'dbuser' and password)
-CREATE USER IF NOT EXISTS 'dbuser'@'%' IDENTIFIED BY 'SuperSecuredbuserPassword';
-GRANT ALL PRIVILEGES ON *.* TO 'dbuser'@'%' WITH GRANT OPTION;
+# Create the database user (setup.sh replaces 'pokemap' and password)
+CREATE USER IF NOT EXISTS 'pokemap'@'%' IDENTIFIED BY 'ValorRules';
+GRANT ALL PRIVILEGES ON *.* TO 'pokemap'@'%' WITH GRANT OPTION;
+
+# Grant specific database privileges for robustness
+GRANT ALL PRIVILEGES ON dragonite.* TO 'pokemap'@'%';
+GRANT ALL PRIVILEGES ON golbat.* TO 'pokemap'@'%';
+GRANT ALL PRIVILEGES ON reactmap.* TO 'pokemap'@'%';
+GRANT ALL PRIVILEGES ON koji.* TO 'pokemap'@'%';
+GRANT ALL PRIVILEGES ON poracle.* TO 'pokemap'@'%';
 
 # Create all required databases
 CREATE DATABASE IF NOT EXISTS `golbat`;
