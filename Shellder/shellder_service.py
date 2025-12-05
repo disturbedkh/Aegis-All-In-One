@@ -17181,6 +17181,87 @@ def api_service_status():
     stats = stats_collector.get_all_stats()
     return jsonify(stats.get('services', {}))
 
+@app.route('/api/logs/stack')
+def api_stack_logs():
+    """Get combined logs from all Docker stack containers"""
+    lines = request.args.get('lines', 100, type=int)
+    
+    try:
+        # Get combined logs from docker compose
+        proc = subprocess.run(
+            ['docker', 'compose', 'logs', '--tail', str(lines), '--no-color'],
+            capture_output=True, text=True, timeout=30,
+            cwd=str(AEGIS_ROOT)
+        )
+        
+        if proc.returncode == 0:
+            return jsonify({
+                'logs': proc.stdout,
+                'lines': len(proc.stdout.split('\n'))
+            })
+        else:
+            return jsonify({
+                'logs': proc.stderr or 'Failed to get stack logs',
+                'error': 'Command failed'
+            })
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'logs': 'Timeout getting logs', 'error': 'timeout'})
+    except Exception as e:
+        return jsonify({'logs': f'Error: {str(e)}', 'error': str(e)})
+
+
+@app.route('/api/logs/docker/<container>')
+def api_docker_container_logs(container):
+    """Get logs from a specific Docker container"""
+    lines = request.args.get('lines', 100, type=int)
+    
+    # Map friendly names to container names
+    container_map = {
+        'dragonite': 'dragonite',
+        'golbat': 'golbat',
+        'rotom': 'rotom',
+        'reactmap': 'reactmap',
+        'koji': 'koji',
+        'xilriws': 'xilriws',
+        'database': 'database',
+        'grafana': 'grafana',
+        'victoriametrics': 'victoriametrics',
+        'phpmyadmin': 'phpmyadmin',
+        'fletchling': 'fletchling',
+        'poracle': 'poracle'
+    }
+    
+    actual_container = container_map.get(container.lower(), container)
+    
+    try:
+        proc = subprocess.run(
+            ['docker', 'logs', '--tail', str(lines), actual_container],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        # Docker logs go to stderr for some containers
+        output = proc.stdout + proc.stderr
+        
+        if output:
+            return jsonify({
+                'logs': output,
+                'lines': len(output.split('\n')),
+                'container': actual_container
+            })
+        else:
+            return jsonify({
+                'logs': f'No logs available for {actual_container}',
+                'lines': 0,
+                'container': actual_container
+            })
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'logs': 'Timeout getting logs', 'error': 'timeout'})
+    except Exception as e:
+        return jsonify({'logs': f'Error: {str(e)}', 'error': str(e)})
+
+
 @app.route('/api/logs/shellder')
 def api_shellder_logs():
     """Get Shellder operation logs"""

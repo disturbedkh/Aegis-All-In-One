@@ -1267,7 +1267,8 @@ function navigateTo(page) {
         loadXilriwsStats();
         loadXilriwsLogs();
     } else if (page === 'logs') {
-        loadShellderLogs();
+        currentLogSource = 'all';  // Reset to all stack logs
+        loadStackLogs();
     } else if (page === 'updates') {
         checkGitStatus();
     } else if (page === 'containers') {
@@ -3307,6 +3308,208 @@ async function loadShellderLogs() {
         logEl.scrollTop = logEl.scrollHeight;
     } catch (error) {
         logEl.textContent = 'Failed to load logs';
+    }
+}
+
+// =============================================================================
+// STACK LOGS VIEWER
+// =============================================================================
+
+let currentLogSource = 'all';
+let logAutoRefreshInterval = null;
+let originalLogContent = '';
+
+const logSourceTitles = {
+    'all': '📊 All Stack Logs',
+    'dragonite': '🐉 Dragonite Logs',
+    'golbat': '🦇 Golbat Logs',
+    'rotom': '📱 Rotom Logs',
+    'reactmap': '🗺️ ReactMap Logs',
+    'koji': '📍 Koji Logs',
+    'xilriws': '🔐 Xilriws Logs',
+    'database': '🗄️ Database Logs',
+    'shellder': '🐚 Shellder Logs'
+};
+
+// Switch log source
+function switchLogSource(source) {
+    currentLogSource = source;
+    
+    // Update tab active state
+    document.querySelectorAll('.log-tab').forEach(tab => {
+        tab.classList.toggle('active', tab.dataset.source === source);
+    });
+    
+    // Update title
+    const titleEl = document.getElementById('logSourceTitle');
+    if (titleEl) {
+        titleEl.textContent = logSourceTitles[source] || `📊 ${source} Logs`;
+    }
+    
+    // Load logs
+    loadStackLogs();
+}
+
+// Load stack logs based on current source
+async function loadStackLogs() {
+    const lines = document.getElementById('logLines')?.value || 100;
+    const logEl = document.getElementById('logContent');
+    
+    if (!logEl) return;
+    
+    logEl.textContent = 'Loading logs...';
+    
+    try {
+        let endpoint;
+        if (currentLogSource === 'all') {
+            endpoint = `/api/logs/stack?lines=${lines}`;
+        } else if (currentLogSource === 'shellder') {
+            endpoint = `/api/logs/shellder?lines=${lines}`;
+        } else {
+            endpoint = `/api/logs/docker/${currentLogSource}?lines=${lines}`;
+        }
+        
+        const result = await fetchAPI(endpoint);
+        
+        if (result.logs) {
+            originalLogContent = result.logs;
+            logEl.textContent = result.logs;
+            
+            // Update line count
+            const lineCount = result.logs.split('\n').length;
+            const countEl = document.getElementById('logLineCount');
+            if (countEl) countEl.textContent = `${lineCount} lines`;
+        } else if (result.error) {
+            logEl.textContent = `Error: ${result.error}`;
+        } else {
+            logEl.textContent = 'No logs available';
+        }
+        
+        // Update last refresh time
+        const lastUpdateEl = document.getElementById('logLastUpdate');
+        if (lastUpdateEl) {
+            lastUpdateEl.textContent = `Updated: ${new Date().toLocaleTimeString()}`;
+        }
+        
+        // Apply filter if set
+        filterLogs();
+        
+        // Scroll to bottom
+        logEl.scrollTop = logEl.scrollHeight;
+        
+    } catch (error) {
+        logEl.textContent = `Failed to load logs: ${error.message}`;
+    }
+}
+
+// Filter logs display
+function filterLogs() {
+    const filterText = document.getElementById('logFilter')?.value?.toLowerCase() || '';
+    const logEl = document.getElementById('logContent');
+    
+    if (!filterText || !originalLogContent) {
+        if (logEl && originalLogContent) logEl.textContent = originalLogContent;
+        return;
+    }
+    
+    const lines = originalLogContent.split('\n');
+    const filtered = lines.filter(line => line.toLowerCase().includes(filterText));
+    
+    if (logEl) {
+        logEl.textContent = filtered.length > 0 ? filtered.join('\n') : 'No matching logs found';
+        
+        const countEl = document.getElementById('logLineCount');
+        if (countEl) countEl.textContent = `${filtered.length} lines (filtered)`;
+    }
+}
+
+// Toggle auto-refresh
+function toggleLogAutoRefresh() {
+    const checkbox = document.getElementById('logAutoRefresh');
+    
+    if (checkbox?.checked) {
+        logAutoRefreshInterval = setInterval(loadStackLogs, 5000);
+        showToast('Auto-refresh enabled (5s)', 'info');
+    } else {
+        if (logAutoRefreshInterval) {
+            clearInterval(logAutoRefreshInterval);
+            logAutoRefreshInterval = null;
+        }
+        showToast('Auto-refresh disabled', 'info');
+    }
+}
+
+// Download logs
+function downloadLogs() {
+    const logEl = document.getElementById('logContent');
+    if (!logEl || !logEl.textContent) {
+        showToast('No logs to download', 'warning');
+        return;
+    }
+    
+    const blob = new Blob([logEl.textContent], { type: 'text/plain' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `${currentLogSource}-logs-${new Date().toISOString().slice(0,10)}.txt`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    
+    showToast('Logs downloaded', 'success');
+}
+
+// Clear log display
+function clearLogDisplay() {
+    const logEl = document.getElementById('logContent');
+    if (logEl) {
+        logEl.textContent = '';
+        originalLogContent = '';
+    }
+    const countEl = document.getElementById('logLineCount');
+    if (countEl) countEl.textContent = '0 lines';
+}
+
+// Toggle log cards visibility
+function toggleLogCards() {
+    const container = document.getElementById('logCardsContainer');
+    const icon = document.getElementById('logCardsToggleIcon');
+    
+    if (container) {
+        const isHidden = container.style.display === 'none';
+        container.style.display = isHidden ? 'grid' : 'none';
+        if (icon) icon.textContent = isHidden ? '▲' : '▼';
+        
+        if (isHidden) {
+            loadContainerLogStatus();
+        }
+    }
+}
+
+// Load container status for log cards
+async function loadContainerLogStatus() {
+    try {
+        const data = await fetchAPI('/api/containers');
+        
+        const containers = ['dragonite', 'golbat', 'rotom', 'reactmap', 'koji', 'xilriws', 'database'];
+        
+        containers.forEach(name => {
+            const statusEl = document.getElementById(`${name}-log-status`);
+            if (!statusEl) return;
+            
+            const container = data.containers?.find(c => c.name?.toLowerCase().includes(name));
+            if (container) {
+                const isRunning = container.state === 'running';
+                statusEl.textContent = isRunning ? '● Running' : '○ Stopped';
+                statusEl.className = `log-card-status ${isRunning ? 'running' : 'stopped'}`;
+            } else {
+                statusEl.textContent = '○ Not found';
+                statusEl.className = 'log-card-status stopped';
+            }
+        });
+    } catch (e) {
+        console.error('Failed to load container status:', e);
     }
 }
 

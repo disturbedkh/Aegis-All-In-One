@@ -60,9 +60,9 @@
                         <span class="nav-icon">🎮</span>
                         <span>Stack Data</span>
                     </a>
-                    <a href="#" class="nav-item" data-page="xilriws" onclick="navigateTo('xilriws'); return false;">
-                        <span class="nav-icon">🔐</span>
-                        <span>Xilriws</span>
+                    <a href="#" class="nav-item" data-page="logs" onclick="navigateTo('logs'); return false;">
+                        <span class="nav-icon">📜</span>
+                        <span>Logs</span>
                     </a>
                     <a href="#" class="nav-item" data-page="stats" onclick="navigateTo('stats'); return false;">
                         <span class="nav-icon">📈</span>
@@ -72,6 +72,10 @@
                 
                 <div class="nav-section">
                     <div class="nav-label">Management</div>
+                    <a href="#" class="nav-item" data-page="xilriws" onclick="navigateTo('xilriws'); return false;">
+                        <span class="nav-icon">🔐</span>
+                        <span>Xilriws</span>
+                    </a>
                     <a href="#" class="nav-item" data-page="files" onclick="navigateTo('files'); return false;">
                         <span class="nav-icon">📁</span>
                         <span>Files</span>
@@ -79,10 +83,6 @@
                     <a href="#" class="nav-item" data-page="scripts" onclick="navigateTo('scripts'); return false;">
                         <span class="nav-icon">⚡</span>
                         <span>Scripts</span>
-                    </a>
-                    <a href="#" class="nav-item" data-page="logs" onclick="navigateTo('logs'); return false;">
-                        <span class="nav-icon">📜</span>
-                        <span>Logs</span>
                     </a>
                     <a href="#" class="nav-item" data-page="fletchling" onclick="navigateTo('fletchling'); return false;">
                         <span class="nav-icon">🪺</span>
@@ -2017,21 +2017,130 @@
             
             <!-- Logs Page -->
             <div id="page-logs" class="page">
+                <!-- Log Source Tabs -->
+                <div class="logs-tabs">
+                    <button class="log-tab active" data-source="all" onclick="switchLogSource('all')">
+                        📊 All Stack
+                    </button>
+                    <button class="log-tab" data-source="dragonite" onclick="switchLogSource('dragonite')">
+                        🐉 Dragonite
+                    </button>
+                    <button class="log-tab" data-source="golbat" onclick="switchLogSource('golbat')">
+                        🦇 Golbat
+                    </button>
+                    <button class="log-tab" data-source="rotom" onclick="switchLogSource('rotom')">
+                        📱 Rotom
+                    </button>
+                    <button class="log-tab" data-source="reactmap" onclick="switchLogSource('reactmap')">
+                        🗺️ ReactMap
+                    </button>
+                    <button class="log-tab" data-source="koji" onclick="switchLogSource('koji')">
+                        📍 Koji
+                    </button>
+                    <button class="log-tab" data-source="xilriws" onclick="switchLogSource('xilriws')">
+                        🔐 Xilriws
+                    </button>
+                    <button class="log-tab" data-source="database" onclick="switchLogSource('database')">
+                        🗄️ Database
+                    </button>
+                    <button class="log-tab" data-source="shellder" onclick="switchLogSource('shellder')">
+                        🐚 Shellder
+                    </button>
+                </div>
+                
+                <!-- Log Controls -->
+                <div class="logs-controls">
+                    <div class="logs-controls-left">
+                        <select id="logLines" onchange="loadStackLogs()">
+                            <option value="50">Last 50 lines</option>
+                            <option value="100" selected>Last 100 lines</option>
+                            <option value="200">Last 200 lines</option>
+                            <option value="500">Last 500 lines</option>
+                            <option value="1000">Last 1000 lines</option>
+                        </select>
+                        <input type="text" id="logFilter" class="form-input form-input-sm" 
+                               placeholder="Filter logs..." onkeyup="filterLogs()">
+                        <label class="checkbox-label">
+                            <input type="checkbox" id="logAutoRefresh" onchange="toggleLogAutoRefresh()">
+                            <span>Auto-refresh (5s)</span>
+                        </label>
+                    </div>
+                    <div class="logs-controls-right">
+                        <button class="btn btn-sm" onclick="loadStackLogs()">🔄 Refresh</button>
+                        <button class="btn btn-sm" onclick="downloadLogs()">⬇️ Download</button>
+                        <button class="btn btn-sm" onclick="clearLogDisplay()">🗑️ Clear</button>
+                    </div>
+                </div>
+                
+                <!-- Log Viewer -->
                 <div class="card full-height">
                     <div class="card-header">
-                        <h2>Shellder Logs</h2>
-                        <div class="card-actions">
-                            <select id="logLines" onchange="loadShellderLogs()">
-                                <option value="50">Last 50 lines</option>
-                                <option value="100" selected>Last 100 lines</option>
-                                <option value="200">Last 200 lines</option>
-                                <option value="500">Last 500 lines</option>
-                            </select>
-                            <button class="btn btn-sm" onclick="loadShellderLogs()">Refresh</button>
+                        <h2 id="logSourceTitle">📊 All Stack Logs</h2>
+                        <div class="log-stats">
+                            <span id="logLineCount">0 lines</span>
+                            <span id="logLastUpdate">-</span>
                         </div>
                     </div>
-                    <div class="card-body">
+                    <div class="card-body log-body">
                         <pre id="logContent" class="log-viewer">Loading logs...</pre>
+                    </div>
+                </div>
+                
+                <!-- Quick Container Log Cards (collapsed by default) -->
+                <div class="log-cards-section" id="logCardsSection">
+                    <button class="btn btn-sm" onclick="toggleLogCards()">
+                        <span id="logCardsToggleIcon">▼</span> Show Container Status
+                    </button>
+                    <div id="logCardsContainer" class="log-cards-container" style="display: none;">
+                        <div class="log-card" onclick="switchLogSource('dragonite')">
+                            <div class="log-card-icon">🐉</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Dragonite</div>
+                                <div class="log-card-status" id="dragonite-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('golbat')">
+                            <div class="log-card-icon">🦇</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Golbat</div>
+                                <div class="log-card-status" id="golbat-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('rotom')">
+                            <div class="log-card-icon">📱</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Rotom</div>
+                                <div class="log-card-status" id="rotom-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('reactmap')">
+                            <div class="log-card-icon">🗺️</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">ReactMap</div>
+                                <div class="log-card-status" id="reactmap-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('koji')">
+                            <div class="log-card-icon">📍</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Koji</div>
+                                <div class="log-card-status" id="koji-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('xilriws')">
+                            <div class="log-card-icon">🔐</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Xilriws</div>
+                                <div class="log-card-status" id="xilriws-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('database')">
+                            <div class="log-card-icon">🗄️</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Database</div>
+                                <div class="log-card-status" id="database-log-status">-</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
             </div>
