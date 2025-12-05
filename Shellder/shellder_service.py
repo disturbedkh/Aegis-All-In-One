@@ -12283,6 +12283,10 @@ def api_fletchling_status():
             'active_nests': 0,
             'last_updated': None
         },
+        'osm_data': {
+            'table_exists': False,
+            'parks_count': 0
+        },
         'golbat_webhook': {
             'configured': False
         }
@@ -12381,6 +12385,32 @@ def api_fletchling_status():
                         pass
         elif 'exist' in result.stderr.lower() or 'exist' in result.stdout.lower():
             status['database']['nests_table_exists'] = False
+    except Exception as e:
+        pass
+    
+    # Check OSM park data (stored in fletchling's park_polygon table or similar)
+    # Fletchling uses OSM data to determine nest locations - parks, nature areas, etc.
+    try:
+        # Try to check for OSM data in the golbat database (fletchling stores it there)
+        result = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e',
+             "SELECT COUNT(*) as count FROM golbat.park_polygon 2>/dev/null;"],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and 'count' in result.stdout:
+            status['osm_data']['table_exists'] = True
+            lines = result.stdout.strip().split('\n')
+            for i, line in enumerate(lines):
+                if 'count' in line.lower() and i + 1 < len(lines):
+                    try:
+                        status['osm_data']['parks_count'] = int(lines[i + 1].strip())
+                    except:
+                        pass
+        # If park_polygon doesn't exist, try nests table which also stores OSM-derived data
+        elif status['database']['nests_table_exists'] and status['database']['nests_count'] > 0:
+            # If there are nests, OSM import was probably done
+            status['osm_data']['table_exists'] = True
+            status['osm_data']['parks_count'] = status['database']['nests_count']
     except Exception as e:
         pass
     
@@ -12597,6 +12627,74 @@ def api_fletchling_stop():
         result['message'] = 'Fletchling containers stopped' if result['success'] else 'Failed to stop containers'
     except Exception as e:
         result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/import-osm', methods=['POST'])
+def api_fletchling_import_osm():
+    """Import OSM park data using docker-osm-importer.sh
+    
+    This runs the fletchling-osm-importer tool inside the fletchling-tools container
+    to import park/nature area data from OpenStreetMap. This data is where nests spawn.
+    """
+    result = {'success': False, 'message': '', 'output': '', 'parks_imported': 0}
+    
+    try:
+        data = request.get_json() or {}
+        area_name = data.get('area_name', '').strip()
+        
+        if not area_name:
+            result['message'] = 'Area name is required (must match a Koji geofence name)'
+            return jsonify(result)
+        
+        # Check if fletchling-tools container is running
+        proc_check = subprocess.run(
+            ['docker', 'compose', 'ps', '-q', 'fletchling-tools'],
+            capture_output=True, text=True, timeout=10,
+            cwd=str(AEGIS_ROOT)
+        )
+        
+        if not proc_check.stdout.strip():
+            result['message'] = 'fletchling-tools container is not running. Start Fletchling containers first.'
+            return jsonify(result)
+        
+        # Run the OSM importer
+        # The docker-osm-importer.sh script runs: docker compose exec fletchling-tools ./fletchling-osm-importer <area>
+        proc = subprocess.run(
+            ['docker', 'compose', 'exec', '-T', 'fletchling-tools', './fletchling-osm-importer', area_name],
+            capture_output=True, text=True, timeout=600,  # 10 minute timeout - OSM import can be slow
+            cwd=str(AEGIS_ROOT)
+        )
+        
+        output = proc.stdout + '\n' + proc.stderr
+        result['output'] = output
+        
+        # Check for success indicators
+        if proc.returncode == 0:
+            result['success'] = True
+            
+            # Try to extract park count from output
+            import re
+            park_match = re.search(r'(\d+)\s*(parks?|areas?|polygons?|features?)', output, re.IGNORECASE)
+            if park_match:
+                result['parks_imported'] = int(park_match.group(1))
+                result['message'] = f'Successfully imported {result["parks_imported"]} park areas from OSM'
+            else:
+                result['message'] = 'OSM park data import completed'
+        else:
+            # Check for specific error messages
+            if 'not found' in output.lower():
+                result['message'] = f'Area "{area_name}" not found. Make sure it matches a Koji geofence exactly.'
+            elif 'no data' in output.lower() or '0 parks' in output.lower():
+                result['message'] = f'No park data found for area "{area_name}". Check OSM coverage for your area.'
+            else:
+                result['message'] = 'OSM import failed. Check the output for details.'
+                
+    except subprocess.TimeoutExpired:
+        result['message'] = 'OSM import timed out after 10 minutes. Try a smaller area or check container logs.'
+    except Exception as e:
+        result['message'] = f'Error running OSM import: {str(e)}'
     
     return jsonify(result)
 

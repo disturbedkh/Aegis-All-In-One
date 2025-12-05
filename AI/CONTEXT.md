@@ -94,9 +94,36 @@ Aegis Phone → Rotom → Dragonite → Golbat → MariaDB → ReactMap
 |-----------|---------|------|
 | **Shellder** | Web dashboard & CLI management | 5000 |
 | **Koji** | Geofence/area management | 6004 |
-| **Poracle** | Discord/Telegram alert bot | 3030 (webhook) |
 | **Grafana** | Performance monitoring | 6006 |
 | **phpMyAdmin** | Database administration | 6005 |
+
+### Optional Features (Commented in docker-compose.yaml)
+
+| Component | Purpose | Port |
+|-----------|---------|------|
+| **Fletchling** | Nest detection (correlates spawns with OSM park data) | 9042 |
+| **Poracle** | Discord/Telegram alert notifications | 3030 (webhook) |
+
+#### Fletchling - Nest Tracking
+
+Detects which Pokemon species are "nesting" in parks/nature areas by:
+1. Importing park boundaries from OpenStreetMap (OSM)
+2. Correlating Pokemon spawns with park locations
+3. Identifying species that spawn disproportionately in specific parks
+
+**Critical Step:** Must run OSM importer after enabling:
+```bash
+docker compose exec fletchling-tools ./fletchling-osm-importer "AreaName"
+```
+Area name must match a Koji geofence exactly.
+
+**Data Flow:** `Golbat → webhook (9042) → Fletchling → golbat.nests table → ReactMap`
+
+#### Poracle - Alert Bot
+
+Sends Discord/Telegram notifications when Pokemon spawn, raids start, etc.
+
+**Data Flow:** `Golbat → webhook (3030) → Poracle → Discord/Telegram`
 
 ---
 
@@ -133,6 +160,7 @@ Aegis Phone → Rotom → Dragonite → Golbat → MariaDB → ReactMap
 | `unown/rotom_config.json` | Rotom | JSON |
 | `unown/proxies.txt` | Xilriws | Text (one per line) |
 | `reactmap/local.json` | ReactMap | JSON |
+| `fletchling.toml` | Fletchling | TOML |
 | `Poracle/config/local.json` | Poracle | JSON |
 
 ---

@@ -1466,6 +1466,13 @@
                                     <div class="status-desc">Nests data in golbat database</div>
                                 </div>
                             </div>
+                            <div class="status-item" id="fletchling-osm-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">OSM Park Data</div>
+                                    <div class="status-desc">OpenStreetMap park polygons imported</div>
+                                </div>
+                            </div>
                             <div class="status-item" id="fletchling-webhook-status">
                                 <div class="status-light checking"></div>
                                 <div class="status-info">
@@ -1507,9 +1514,44 @@
                                 </div>
                             </div>
                             
-                            <!-- Step 3: Add Webhook -->
-                            <div class="setup-step" id="fletchling-step-webhook">
+                            <!-- Step 3: Start Containers (needed for OSM import) -->
+                            <div class="setup-step" id="fletchling-step-start">
                                 <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <div class="step-title">Start Fletchling Containers</div>
+                                    <div class="step-desc">Start containers first (required for OSM import)</div>
+                                    <div class="button-group">
+                                        <button class="btn btn-sm btn-success" onclick="startFletchling()">▶️ Start</button>
+                                        <button class="btn btn-sm btn-danger" onclick="stopFletchling()">⏹️ Stop</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 4: Import OSM Park Data -->
+                            <div class="setup-step" id="fletchling-step-osm">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
+                                    <div class="step-title">Import OSM Park Data</div>
+                                    <div class="step-desc">Import park/nature area data from OpenStreetMap (where nests spawn)</div>
+                                    <div class="step-input-group">
+                                        <input type="text" id="fletchlingOSMArea" class="form-input" 
+                                               placeholder="Area name (must match a Koji geofence)">
+                                        <button class="btn btn-sm btn-primary" onclick="importFletchlingOSM()">🗺️ Import OSM Data</button>
+                                    </div>
+                                    <div class="step-hint">
+                                        <span class="hint-icon">💡</span>
+                                        <span>This imports park boundaries from OpenStreetMap. The area name must exactly match one of your Koji geofence names. This may take several minutes.</span>
+                                    </div>
+                                    <div id="osmImportProgress" class="osm-progress" style="display: none;">
+                                        <div class="progress-bar"><div class="progress-fill"></div></div>
+                                        <div class="progress-text">Importing...</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 5: Add Webhook -->
+                            <div class="setup-step" id="fletchling-step-webhook">
+                                <div class="step-number">5</div>
                                 <div class="step-content">
                                     <div class="step-title">Configure Golbat Webhook</div>
                                     <div class="step-desc">Add webhook to send Pokemon data to Fletchling</div>
@@ -1517,17 +1559,13 @@
                                 </div>
                             </div>
                             
-                            <!-- Step 4: Start Container -->
-                            <div class="setup-step" id="fletchling-step-start">
-                                <div class="step-number">4</div>
+                            <!-- Step 6: Restart Golbat -->
+                            <div class="setup-step" id="fletchling-step-restart">
+                                <div class="step-number">6</div>
                                 <div class="step-content">
-                                    <div class="step-title">Start Fletchling</div>
-                                    <div class="step-desc">Start the Fletchling containers</div>
-                                    <div class="button-group">
-                                        <button class="btn btn-sm btn-success" onclick="startFletchling()">▶️ Start</button>
-                                        <button class="btn btn-sm btn-danger" onclick="stopFletchling()">⏹️ Stop</button>
-                                        <button class="btn btn-sm btn-warning" onclick="restartGolbat()">🔄 Restart Golbat</button>
-                                    </div>
+                                    <div class="step-title">Restart Golbat</div>
+                                    <div class="step-desc">Apply webhook changes by restarting Golbat</div>
+                                    <button class="btn btn-sm btn-warning" onclick="restartGolbat()">🔄 Restart Golbat</button>
                                 </div>
                             </div>
                         </div>

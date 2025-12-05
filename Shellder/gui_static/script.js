@@ -7057,6 +7057,22 @@ async function loadFletchlingStatus() {
             }
         }
         
+        // Update OSM Park Data status
+        const osmStatus = document.querySelector('#fletchling-osm-status .status-light');
+        const osmDesc = document.querySelector('#fletchling-osm-status .status-desc');
+        if (osmStatus) {
+            if (data.osm_data && data.osm_data.parks_count > 0) {
+                osmStatus.className = 'status-light success';
+                osmDesc.textContent = `${data.osm_data.parks_count} park areas imported`;
+            } else if (data.osm_data && data.osm_data.table_exists) {
+                osmStatus.className = 'status-light warning';
+                osmDesc.textContent = 'Table exists but no park data - run OSM import';
+            } else {
+                osmStatus.className = 'status-light error';
+                osmDesc.textContent = 'OSM park data not imported';
+            }
+        }
+        
         // Update Webhook status
         const webhookStatus = document.querySelector('#fletchling-webhook-status .status-light');
         const webhookDesc = document.querySelector('#fletchling-webhook-status .status-desc');
@@ -7173,6 +7189,60 @@ async function startFletchling() {
         }
     } catch (e) {
         showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Import OSM park data for Fletchling nest detection
+async function importFletchlingOSM() {
+    const areaName = document.getElementById('fletchlingOSMArea')?.value?.trim();
+    
+    if (!areaName) {
+        showToast('Please enter an area name that matches a Koji geofence', 'warning');
+        return;
+    }
+    
+    // Show progress indicator
+    const progressEl = document.getElementById('osmImportProgress');
+    if (progressEl) {
+        progressEl.style.display = 'block';
+        progressEl.querySelector('.progress-text').textContent = 'Starting OSM import...';
+        progressEl.querySelector('.progress-fill').style.width = '10%';
+    }
+    
+    showToast(`Importing OSM park data for "${areaName}"... This may take several minutes.`, 'info');
+    
+    try {
+        const result = await fetchAPI('/api/fletchling/import-osm', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ area_name: areaName })
+        });
+        
+        if (progressEl) {
+            progressEl.querySelector('.progress-fill').style.width = '100%';
+        }
+        
+        if (result.success) {
+            showToast(result.message || 'OSM park data imported successfully!', 'success');
+            if (progressEl) {
+                progressEl.querySelector('.progress-text').textContent = result.message || 'Import complete!';
+                setTimeout(() => { progressEl.style.display = 'none'; }, 3000);
+            }
+            setTimeout(loadFletchlingStatus, 1000);
+        } else {
+            showToast(result.message || 'OSM import failed', 'error');
+            if (progressEl) {
+                progressEl.querySelector('.progress-text').textContent = 'Import failed: ' + (result.message || 'Unknown error');
+                progressEl.querySelector('.progress-fill').style.background = '#dc3545';
+            }
+        }
+    } catch (e) {
+        console.error('OSM import error:', e);
+        showToast('Error: ' + e.message, 'error');
+        if (progressEl) {
+            progressEl.querySelector('.progress-text').textContent = 'Error: ' + e.message;
+            progressEl.querySelector('.progress-fill').style.background = '#dc3545';
+        }
     }
 }
 

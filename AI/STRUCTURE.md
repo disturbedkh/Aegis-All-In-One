@@ -131,6 +131,43 @@ reactmap/
 
 ---
 
+## Fletchling Setup (Nest Detection)
+
+Fletchling handles Pokemon nest detection by:
+1. Receiving Pokemon spawn data from Golbat via webhook
+2. Correlating spawns with park/nature areas from OpenStreetMap
+3. Identifying which Pokemon species are "nesting" in each area
+4. Providing nest data to ReactMap for display
+
+**Complete Setup Process:**
+1. Create geofences in Koji Admin (scanning areas)
+2. Enable Fletchling service in docker-compose.yaml
+3. Configure `fletchling.toml` with Koji project name
+4. **Start containers** (fletchling + fletchling-tools)
+5. **Run OSM importer** - This is CRITICAL:
+   ```bash
+   ./docker-osm-importer.sh "AreaName"
+   # OR
+   docker compose exec fletchling-tools ./fletchling-osm-importer "AreaName"
+   ```
+   - Downloads park boundaries from OpenStreetMap
+   - Area name MUST match a Koji geofence name exactly
+   - Can take several minutes for large areas
+6. Add webhook to Golbat config:
+   ```toml
+   [[webhooks]]
+   url = "http://fletchling:9042/webhook"
+   types = ["pokemon_iv"]
+   ```
+7. Restart Golbat to apply webhook
+
+**Data Flow:** `Golbat → webhook → Fletchling → golbat.nests table → ReactMap`
+
+**Key Files:**
+- `fletchling.toml` - Main config with Koji URL
+- `docker-osm-importer.sh` - Wrapper script for OSM import
+- `unown/golbat_config.toml` - Add webhook here
+
 ## Poracle/ Directory (Discord/Telegram Alert Bot)
 
 ```
