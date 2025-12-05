@@ -1685,10 +1685,15 @@
                             <div class="setup-step">
                                 <div class="step-number">1</div>
                                 <div class="step-content">
-                                    <strong>Install MCP Server (on Linux machine)</strong>
-                                    <div class="code-block">
-                                        <code>cd ~/Desktop/Aegis-All-In-One/Shellder/mcp-server && npm install</code>
-                                        <button class="btn btn-xs" onclick="copyMCPCommand('install')">📋</button>
+                                    <strong>Get Your Linux Machine's IP</strong>
+                                    <p style="font-size: 12px; color: var(--text-secondary);">
+                                        Run on Linux: <code>hostname -I | awk '{print $1}'</code>
+                                    </p>
+                                    <div class="form-group" style="margin-top: 8px;">
+                                        <label style="font-size: 12px;">Your Linux IP:</label>
+                                        <input type="text" id="linuxIPInput" class="form-input" placeholder="e.g., 192.168.1.100" 
+                                               style="width: 200px;" onchange="updateMCPConfigWithIP()">
+                                        <button class="btn btn-xs" onclick="detectLinuxIP()">🔍 Detect</button>
                                     </div>
                                 </div>
                             </div>
@@ -1696,35 +1701,73 @@
                             <div class="setup-step">
                                 <div class="step-number">2</div>
                                 <div class="step-content">
-                                    <strong>Add to Cursor MCP Settings</strong>
+                                    <strong>Add Fetch MCP to Cursor Settings</strong>
                                     <p style="font-size: 12px; color: var(--text-secondary);">
-                                        Go to: Cursor Settings → MCP Servers → Edit Config
+                                        Go to: Cursor Settings → Features → MCP Servers → Add new MCP server
                                     </p>
                                     <div class="code-block mcp-config">
                                         <pre id="mcpConfigJson">{
   "mcpServers": {
-    "shellder": {
-      "command": "node",
-      "args": ["/home/pokemap/Desktop/Aegis-All-In-One/Shellder/mcp-server/index.js"],
-      "env": {
-        "SHELLDER_URL": "http://localhost:5050"
-      }
+    "fetch": {
+      "command": "npx",
+      "args": ["-y", "@anthropic-ai/mcp-server-fetch"]
     }
   }
 }</pre>
                                         <button class="btn btn-xs" onclick="copyMCPConfig()">📋 Copy Config</button>
                                     </div>
+                                    <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
+                                        This uses the official Anthropic Fetch MCP server which can make HTTP requests.
+                                    </p>
                                 </div>
                             </div>
                             
                             <div class="setup-step">
                                 <div class="step-number">3</div>
                                 <div class="step-content">
+                                    <strong>Tell AI Your Shellder URL</strong>
+                                    <p style="font-size: 12px; color: var(--text-secondary);">
+                                        After setup, tell your AI assistant:
+                                    </p>
+                                    <div class="code-block">
+                                        <code id="shellderURLCommand">Use Shellder API at http://YOUR_IP:5050 for debugging</code>
+                                        <button class="btn btn-xs" onclick="copyShellderURL()">📋</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="setup-step">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
                                     <strong>Restart Cursor</strong>
                                     <p style="font-size: 12px; color: var(--text-secondary);">
-                                        Restart Cursor to load the MCP server. The AI will then have access to Shellder tools.
+                                        Restart Cursor to load the Fetch MCP server.
                                     </p>
                                 </div>
+                            </div>
+                        </div>
+                        
+                        <!-- API Endpoints Reference -->
+                        <div class="mcp-endpoints-ref" style="margin-top: 20px;">
+                            <h4>🔗 API Endpoints for AI</h4>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+                                Copy this to tell your AI what endpoints are available:
+                            </p>
+                            <div class="code-block mcp-config">
+                                <pre id="apiEndpointsRef">Shellder Debug API at http://YOUR_IP:5050
+
+Available endpoints:
+- GET /api/ai-debug/diagnose - System diagnostics
+- GET /api/ai-debug/file?path=FILE - Read file
+- POST /api/ai-debug/file - Write file {"path":"...", "content":"..."}
+- POST /api/ai-debug/exec - Run command {"cmd":"..."}
+- GET /api/ai-debug/docker?cmd=ps - Docker status
+- GET /api/ai-debug/docker?cmd=logs&container=NAME - Container logs
+- POST /api/ai-debug/sql - Query DB {"database":"golbat", "query":"..."}
+- GET /api/ai-debug/logs?type=shellder - Get logs
+- GET /api/ai-debug/system - System info
+- GET /api/debug/tail - Live log stream</pre>
+                                <button class="btn btn-xs" onclick="copyAPIEndpoints()">📋 Copy for AI</button>
                             </div>
                         </div>
                         

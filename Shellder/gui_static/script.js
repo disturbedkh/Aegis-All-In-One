@@ -860,21 +860,94 @@ async function checkMCPStatus() {
 }
 
 function updateMCPConfig(port) {
-    const config = {
-        mcpServers: {
-            shellder: {
-                command: "node",
-                args: ["/home/pokemap/Desktop/Aegis-All-In-One/Shellder/mcp-server/index.js"],
-                env: {
-                    SHELLDER_URL: `http://localhost:${port}`
-                }
+    // Update the Shellder URL command with current info
+    const ip = document.getElementById('linuxIPInput')?.value || 'YOUR_IP';
+    updateShellderURLDisplay(ip, port);
+}
+
+function updateMCPConfigWithIP() {
+    const ip = document.getElementById('linuxIPInput')?.value || 'YOUR_IP';
+    const port = window.location.port || '5050';
+    updateShellderURLDisplay(ip, port);
+}
+
+function updateShellderURLDisplay(ip, port) {
+    const urlCmd = document.getElementById('shellderURLCommand');
+    const endpointsRef = document.getElementById('apiEndpointsRef');
+    
+    if (urlCmd) {
+        urlCmd.textContent = `Use Shellder API at http://${ip}:${port} for debugging`;
+    }
+    
+    if (endpointsRef) {
+        endpointsRef.textContent = `Shellder Debug API at http://${ip}:${port}
+
+Available endpoints:
+- GET /api/ai-debug/diagnose - System diagnostics
+- GET /api/ai-debug/file?path=FILE - Read file
+- POST /api/ai-debug/file - Write file {"path":"...", "content":"..."}
+- POST /api/ai-debug/exec - Run command {"cmd":"..."}
+- GET /api/ai-debug/docker?cmd=ps - Docker status
+- GET /api/ai-debug/docker?cmd=logs&container=NAME - Container logs
+- POST /api/ai-debug/sql - Query DB {"database":"golbat", "query":"..."}
+- GET /api/ai-debug/logs?type=shellder - Get logs
+- GET /api/ai-debug/system - System info
+- GET /api/debug/tail - Live log stream`;
+    }
+}
+
+async function detectLinuxIP() {
+    try {
+        const response = await fetch('/api/ai-debug/system');
+        const data = await response.json();
+        
+        // Try to get IP from various sources
+        let ip = null;
+        
+        // The server knows its own hostname, we can use the current connection
+        ip = window.location.hostname;
+        
+        if (ip && ip !== 'localhost' && ip !== '127.0.0.1') {
+            document.getElementById('linuxIPInput').value = ip;
+            updateMCPConfigWithIP();
+            showToast(`Detected IP: ${ip}`, 'success');
+        } else {
+            // Try to get from exec
+            const execResult = await fetch('/api/ai-debug/exec', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ cmd: "hostname -I | awk '{print $1}'" })
+            });
+            const execData = await execResult.json();
+            if (execData.stdout) {
+                ip = execData.stdout.trim();
+                document.getElementById('linuxIPInput').value = ip;
+                updateMCPConfigWithIP();
+                showToast(`Detected IP: ${ip}`, 'success');
+            } else {
+                showToast('Could not detect IP. Enter manually.', 'warning');
             }
         }
-    };
-    
-    const configEl = document.getElementById('mcpConfigJson');
-    if (configEl) {
-        configEl.textContent = JSON.stringify(config, null, 2);
+    } catch (e) {
+        showToast('Could not detect IP: ' + e.message, 'error');
+    }
+}
+
+function copyShellderURL() {
+    const urlCmd = document.getElementById('shellderURLCommand');
+    if (urlCmd) {
+        navigator.clipboard.writeText(urlCmd.textContent).then(() => {
+            showToast('Shellder URL copied!', 'success');
+        });
+    }
+}
+
+function copyAPIEndpoints() {
+    const endpoints = document.getElementById('apiEndpointsRef');
+    if (endpoints) {
+        navigator.clipboard.writeText(endpoints.textContent).then(() => {
+            showToast('API endpoints copied! Paste to your AI assistant.', 'success');
+        });
     }
 }
 
