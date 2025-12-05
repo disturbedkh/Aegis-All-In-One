@@ -6045,6 +6045,143 @@ def api_debug_recent():
         'logs': get_recent_logs(count)
     })
 
+@app.route('/api/debug/stream')
+def api_debug_stream():
+    """
+    Live streaming debug log via Server-Sent Events (SSE).
+    
+    Usage: curl -N http://localhost:5050/api/debug/stream
+    
+    This streams all new log entries in real-time for AI debugging.
+    """
+    def generate():
+        import time
+        
+        # Send initial connection message
+        yield f"data: {{\"type\": \"connected\", \"time\": \"{datetime.now().isoformat()}\", \"port\": {SHELLDER_PORT}}}\n\n"
+        
+        # Track last position in log file
+        debug_log = LOG_DIR / 'debuglog.txt'
+        last_size = debug_log.stat().st_size if debug_log.exists() else 0
+        last_lines_sent = 0
+        
+        # Send last 50 lines as context
+        if debug_log.exists():
+            try:
+                with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                    for line in lines[-50:]:
+                        yield f"data: {json.dumps({'type': 'log', 'line': line.rstrip()})}\n\n"
+                    last_lines_sent = len(lines)
+            except:
+                pass
+        
+        yield f"data: {{\"type\": \"ready\", \"message\": \"Streaming live logs...\"}}\n\n"
+        
+        # Stream new entries
+        while True:
+            try:
+                if debug_log.exists():
+                    current_size = debug_log.stat().st_size
+                    
+                    if current_size > last_size:
+                        with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+                            lines = f.readlines()
+                            # Send only new lines
+                            new_lines = lines[last_lines_sent:]
+                            for line in new_lines:
+                                yield f"data: {json.dumps({'type': 'log', 'line': line.rstrip()})}\n\n"
+                            last_lines_sent = len(lines)
+                        last_size = current_size
+                    elif current_size < last_size:
+                        # File was truncated/rotated
+                        last_size = 0
+                        last_lines_sent = 0
+                
+                # Also stream from memory buffer (catches logs before file write)
+                recent = get_recent_logs(5)
+                # Heartbeat every 5 seconds
+                yield f"data: {{\"type\": \"heartbeat\", \"time\": \"{datetime.now().isoformat()}\"}}\n\n"
+                
+                time.sleep(1)  # Check every second
+                
+            except GeneratorExit:
+                break
+            except Exception as e:
+                yield f"data: {{\"type\": \"error\", \"message\": \"{str(e)}\"}}\n\n"
+                time.sleep(5)
+    
+    return Response(
+        generate(),
+        mimetype='text/event-stream',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
+@app.route('/api/debug/tail')
+def api_debug_tail():
+    """
+    Simple plain-text tail of debug log (like tail -f).
+    
+    Usage: curl -N http://localhost:5050/api/debug/tail
+    
+    Streams raw log lines without JSON wrapping.
+    """
+    def generate():
+        import time
+        
+        debug_log = LOG_DIR / 'debuglog.txt'
+        last_lines_sent = 0
+        
+        yield f"=== Shellder Debug Stream @ {datetime.now().isoformat()} ===\n"
+        yield f"=== Port: {SHELLDER_PORT} | Log: {debug_log} ===\n\n"
+        
+        # Send last 100 lines as context
+        if debug_log.exists():
+            try:
+                with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+                    lines = f.readlines()
+                    for line in lines[-100:]:
+                        yield line
+                    last_lines_sent = len(lines)
+            except:
+                pass
+        
+        yield "\n=== LIVE STREAM STARTED ===\n\n"
+        
+        while True:
+            try:
+                if debug_log.exists():
+                    with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
+                        lines = f.readlines()
+                        if len(lines) > last_lines_sent:
+                            for line in lines[last_lines_sent:]:
+                                yield line
+                            last_lines_sent = len(lines)
+                        elif len(lines) < last_lines_sent:
+                            # File rotated
+                            last_lines_sent = 0
+                
+                time.sleep(0.5)
+                
+            except GeneratorExit:
+                break
+            except:
+                time.sleep(2)
+    
+    return Response(
+        generate(),
+        mimetype='text/plain',
+        headers={
+            'Cache-Control': 'no-cache',
+            'Connection': 'keep-alive',
+            'X-Accel-Buffering': 'no'
+        }
+    )
+
 @app.route('/api/debug/clear', methods=['POST'])
 def api_debug_clear():
     """Clear debug logs"""
