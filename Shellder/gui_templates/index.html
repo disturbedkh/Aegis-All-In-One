@@ -2277,8 +2277,18 @@
                                 <button class="btn btn-sm btn-primary" onclick="showCreateFolderModal()" title="Create new folder">
                                     📁 New Folder
                                 </button>
+                                <button class="btn btn-sm btn-primary" onclick="triggerFileUpload()" title="Upload file">
+                                    ⬆️ Upload
+                                </button>
+                                <input type="file" id="fileUploadInput" style="display: none;" onchange="uploadFile()" multiple>
+                                <span class="toolbar-separator">|</span>
+                                <button class="btn btn-sm btn-warning" onclick="fixAllOwnership()" title="Change all files to current user ownership">
+                                    👤 Fix All Ownership
+                                </button>
                             </div>
                             <div class="toolbar-right">
+                                <span class="current-user" id="currentUserDisplay">-</span>
+                                <span class="toolbar-separator">|</span>
                                 <span class="file-count" id="fileCount">0 items</span>
                             </div>
                         </div>

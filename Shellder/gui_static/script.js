@@ -685,6 +685,7 @@ function navigateTo(page) {
         loadFletchlingStatus();
     } else if (page === 'files') {
         navigateToPath(''); // Start at Aegis root
+        loadCurrentUser(); // Show current user in toolbar
     }
 }
 
@@ -3613,6 +3614,88 @@ async function applyChmod() {
 // Download file
 function downloadFile(path) {
     window.open(`/api/files/download?path=${encodeURIComponent(path)}`, '_blank');
+}
+
+// Upload file
+function triggerFileUpload() {
+    document.getElementById('fileUploadInput').click();
+}
+
+async function uploadFile() {
+    const input = document.getElementById('fileUploadInput');
+    const files = input.files;
+    
+    if (!files || files.length === 0) return;
+    
+    for (const file of files) {
+        try {
+            showToast(`Uploading ${file.name}...`, 'info');
+            
+            const formData = new FormData();
+            formData.append('file', file);
+            formData.append('path', currentFilePath);
+            
+            const response = await fetch('/api/files/upload', {
+                method: 'POST',
+                body: formData
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                showToast(result.message, 'success');
+            } else {
+                showToast(result.error || 'Upload failed', 'error');
+            }
+        } catch (e) {
+            showToast(`Failed to upload ${file.name}: ${e.message}`, 'error');
+        }
+    }
+    
+    // Clear input and refresh
+    input.value = '';
+    refreshFiles();
+}
+
+// Fix all ownership to current user
+async function fixAllOwnership() {
+    const pathDesc = currentFilePath ? `"${currentFilePath}"` : 'entire Aegis directory';
+    
+    if (!confirm(`Change ownership of ALL files in ${pathDesc} to your current user?\n\nThis will run: sudo chown -R user:user ${pathDesc}`)) {
+        return;
+    }
+    
+    try {
+        showToast('Fixing ownership... This may take a moment.', 'info');
+        
+        const result = await fetchAPI('/api/files/chown-all', {
+            method: 'POST',
+            body: JSON.stringify({ path: currentFilePath })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            refreshFiles();
+        } else {
+            showToast(result.error || 'Failed to fix ownership', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Load current user info
+async function loadCurrentUser() {
+    try {
+        const data = await fetchAPI('/api/files/current-user');
+        const display = document.getElementById('currentUserDisplay');
+        if (display && data.username) {
+            display.textContent = `👤 ${data.username}`;
+            display.title = `UID: ${data.uid}, GID: ${data.gid}`;
+        }
+    } catch (e) {
+        console.error('Failed to load current user:', e);
+    }
 }
 
 function getFileIcon(filename) {

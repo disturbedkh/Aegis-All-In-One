@@ -7140,8 +7140,24 @@ select:focus {
 }
 
 .toolbar-right {
+    display: flex;
+    align-items: center;
+    gap: 8px;
     color: var(--text-secondary);
     font-size: 13px;
+}
+
+.toolbar-separator {
+    color: var(--border-color);
+    margin: 0 4px;
+}
+
+.current-user {
+    background: var(--bg-tertiary);
+    padding: 4px 8px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
 }
 
 .file-path-bar {

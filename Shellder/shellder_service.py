@@ -14773,6 +14773,123 @@ def api_file_download():
         return jsonify({'error': str(e)}), 500
 
 
+@app.route('/api/files/upload', methods=['POST'])
+def api_file_upload():
+    """Upload a file (can replace existing)"""
+    if 'file' not in request.files:
+        return jsonify({'success': False, 'error': 'No file provided'})
+    
+    file = request.files['file']
+    path = request.form.get('path', '')
+    
+    if file.filename == '':
+        return jsonify({'success': False, 'error': 'No file selected'})
+    
+    # Determine destination path
+    if path:
+        dest_path = AEGIS_ROOT / path / file.filename
+    else:
+        dest_path = AEGIS_ROOT / file.filename
+    
+    # Security check
+    try:
+        dest_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    # Check if replacing
+    replacing = dest_path.exists()
+    
+    try:
+        # Ensure parent directory exists
+        dest_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Save file
+        file.save(str(dest_path))
+        
+        # Fix ownership to current user
+        try:
+            import pwd
+            current_user = pwd.getpwuid(os.getuid()).pw_name
+            subprocess.run(['sudo', 'chown', f'{current_user}:{current_user}', str(dest_path)],
+                          capture_output=True, timeout=5)
+        except:
+            pass
+        
+        action = 'replaced' if replacing else 'uploaded'
+        return jsonify({'success': True, 'message': f'File {action}: {file.filename}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/chown-all', methods=['POST'])
+def api_file_chown_all():
+    """Change ownership of all files in Aegis directory to current user"""
+    data = request.json or {}
+    path = data.get('path', '')  # Optional: specific subdirectory
+    
+    try:
+        import pwd
+        current_user = pwd.getpwuid(os.getuid()).pw_name
+        current_group = pwd.getpwuid(os.getuid()).pw_name
+    except:
+        return jsonify({'success': False, 'error': 'Could not determine current user'})
+    
+    target_path = AEGIS_ROOT / path if path else AEGIS_ROOT
+    
+    # Security check
+    try:
+        target_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not target_path.exists():
+        return jsonify({'success': False, 'error': 'Path not found'})
+    
+    try:
+        # Run chown recursively
+        result = subprocess.run(
+            ['sudo', 'chown', '-R', f'{current_user}:{current_group}', str(target_path)],
+            capture_output=True, text=True, timeout=120
+        )
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True, 
+                'message': f'Changed ownership to {current_user}:{current_group}',
+                'path': str(target_path)
+            })
+        else:
+            return jsonify({'success': False, 'error': result.stderr or 'Failed to change ownership'})
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Operation timed out (directory may be very large)'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/current-user')
+def api_files_current_user():
+    """Get current user info for ownership operations"""
+    try:
+        import pwd
+        import grp
+        
+        uid = os.getuid()
+        gid = os.getgid()
+        user_info = pwd.getpwuid(uid)
+        group_info = grp.getgrgid(gid)
+        
+        return jsonify({
+            'username': user_info.pw_name,
+            'uid': uid,
+            'group': group_info.gr_name,
+            'gid': gid,
+            'home': user_info.pw_dir
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
 @app.route('/api/stats/live')
 def api_stats_live():
     """Get all live statistics"""
