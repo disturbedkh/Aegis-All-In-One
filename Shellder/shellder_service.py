@@ -11174,7 +11174,21 @@ def api_mariadb_status():
         except:
             pass
     
-    # Check container status
+    # Check localhost:3306 first (host-installed MariaDB)
+    import socket
+    try:
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        localhost_available = sock.connect_ex(('127.0.0.1', 3306)) == 0
+        sock.close()
+        status['localhost'] = {
+            'port_open': localhost_available,
+            'preferred': localhost_available  # Prefer localhost if available
+        }
+    except:
+        status['localhost'] = {'port_open': False, 'preferred': False}
+    
+    # Check container status (fallback)
     try:
         result = subprocess.run(
             ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}|{{.Status}}'],
@@ -11396,27 +11410,61 @@ def api_mariadb_setup():
         'errors': []
     }
     
-    # Check container is running
+    # Find mysql CLI
+    mysql_cmd = shutil.which('mariadb') or shutil.which('mysql')
+    
+    # Determine connection method: try localhost:3306 first, then docker exec
+    import socket
+    use_localhost = False
+    use_docker = False
+    
+    # Check if port 3306 is accessible on localhost
     try:
-        result = subprocess.run(
-            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
-            capture_output=True, text=True, timeout=5
-        )
-        if 'database' not in result.stdout:
-            results['errors'].append('Database container is not running. Please start the stack first.')
-            results['success'] = False
-            return jsonify(results)
-    except Exception as e:
-        results['errors'].append(f'Failed to check container status: {e}')
+        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        sock.settimeout(3)
+        if sock.connect_ex(('127.0.0.1', 3306)) == 0:
+            use_localhost = True
+            results['steps'].append('✓ MariaDB accessible on localhost:3306')
+        sock.close()
+    except:
+        pass
+    
+    # If localhost not available, check container
+    if not use_localhost:
+        try:
+            result = subprocess.run(
+                ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+                capture_output=True, text=True, timeout=5
+            )
+            if 'database' in result.stdout:
+                use_docker = True
+                results['steps'].append('✓ Using database container')
+        except:
+            pass
+    
+    if not use_localhost and not use_docker:
+        results['errors'].append('No database connection available. Either start MariaDB on localhost:3306 or start the database container.')
         results['success'] = False
         return jsonify(results)
     
+    # Helper function to run mysql commands
+    def run_mysql(user, password, query, check_db=None):
+        if use_localhost and mysql_cmd:
+            cmd = [mysql_cmd, '-u', user, f'-p{password}', '-h', '127.0.0.1', '-P', '3306']
+            if check_db:
+                cmd.extend(['-D', check_db])
+            cmd.extend(['-e', query])
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        else:
+            cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
+            if check_db:
+                cmd.extend(['-D', check_db])
+            cmd.extend(['-e', query])
+            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    
     # Test root connection
     try:
-        test_result = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
-            capture_output=True, text=True, timeout=10
-        )
+        test_result = run_mysql('root', root_password, 'SELECT 1')
         if test_result.returncode != 0:
             results['errors'].append(f'Root connection failed: {test_result.stderr}')
             results['success'] = False
@@ -11430,11 +11478,7 @@ def api_mariadb_setup():
     # Create databases
     for db in databases:
         try:
-            result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
-                 f'CREATE DATABASE IF NOT EXISTS `{db}`'],
-                capture_output=True, text=True, timeout=10
-            )
+            result = run_mysql('root', root_password, f'CREATE DATABASE IF NOT EXISTS `{db}`')
             if result.returncode == 0:
                 results['steps'].append(f'✓ Database "{db}" created/verified')
             else:
@@ -11447,22 +11491,16 @@ def api_mariadb_setup():
         try:
             # Create user (with proper escape for special chars in password)
             escaped_pass = db_password.replace("'", "\\'")
-            result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
-                 f"CREATE USER IF NOT EXISTS '{db_user}'@'%' IDENTIFIED BY '{escaped_pass}'"],
-                capture_output=True, text=True, timeout=10
-            )
+            result = run_mysql('root', root_password, 
+                f"CREATE USER IF NOT EXISTS '{db_user}'@'%' IDENTIFIED BY '{escaped_pass}'")
             if result.returncode == 0:
                 results['steps'].append(f'✓ User "{db_user}" created/verified')
             else:
                 results['errors'].append(f'Failed to create user: {result.stderr}')
             
             # Grant all privileges on aegis databases
-            result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e',
-                 f"GRANT ALL PRIVILEGES ON *.* TO '{db_user}'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;"],
-                capture_output=True, text=True, timeout=10
-            )
+            result = run_mysql('root', root_password,
+                f"GRANT ALL PRIVILEGES ON *.* TO '{db_user}'@'%' WITH GRANT OPTION; FLUSH PRIVILEGES;")
             if result.returncode == 0:
                 results['steps'].append(f'✓ Granted privileges to "{db_user}"')
             else:
@@ -11473,10 +11511,7 @@ def api_mariadb_setup():
     # Test user connection
     if db_user and db_password:
         try:
-            result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-u', db_user, f'-p{db_password}', '-e', 'SELECT 1'],
-                capture_output=True, text=True, timeout=10
-            )
+            result = run_mysql(db_user, db_password, 'SELECT 1')
             if result.returncode == 0:
                 results['steps'].append(f'✓ User "{db_user}" connection verified')
             else:
