@@ -1696,6 +1696,28 @@ async function loadMetricHistory(metric, hours) {
         const min = Math.min(...values);
         const current = values[values.length - 1];
         
+        // For chart scaling - use dynamic scale based on data range
+        // This makes small variations visible while keeping perspective
+        // Scale max is the larger of: actual max rounded up, or 100% for percentage metrics
+        const isPercentMetric = metricName.includes('percent');
+        let scaleMax, scaleMin;
+        
+        if (isPercentMetric) {
+            // For percentages, use 0-100 scale but auto-zoom if all values are low
+            if (max < 30) {
+                // Zoom in for low utilization - makes variations visible
+                scaleMax = Math.ceil(max * 1.5 / 10) * 10; // Round up to nearest 10
+                scaleMax = Math.max(scaleMax, 10); // At least 10%
+            } else {
+                scaleMax = 100;
+            }
+            scaleMin = 0;
+        } else {
+            // For other metrics, auto-scale to data range with padding
+            scaleMax = max * 1.1;
+            scaleMin = Math.max(0, min * 0.9);
+        }
+        
         // Generate time labels for X-axis (show ~5 labels evenly spaced)
         const dataLen = data.data.length;
         const timeLabels = [];
@@ -1712,11 +1734,23 @@ async function loadMetricHistory(metric, hours) {
         
         // Render chart bars - use flex:1 so bars fill available space evenly
         const chartBars = data.data.map((d, i) => {
-            const height = Math.max(2, (d.value / 100) * 100);
-            let colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
+            // Calculate height based on dynamic scale, not fixed 0-100%
+            const normalizedValue = (d.value - scaleMin) / (scaleMax - scaleMin);
+            const height = Math.max(2, normalizedValue * 100);
+            
+            // Color based on percentage of scale max, not absolute value
+            let colorClass;
+            if (isPercentMetric) {
+                colorClass = d.value < 50 ? 'low' : d.value < 80 ? 'medium' : 'high';
+            } else {
+                const pctOfMax = d.value / max;
+                colorClass = pctOfMax < 0.5 ? 'low' : pctOfMax < 0.8 ? 'medium' : 'high';
+            }
+            
             const time = new Date(d.time).toLocaleTimeString();
+            const valueStr = isPercentMetric ? `${d.value.toFixed(1)}%` : d.value.toFixed(1);
             return `<div class="chart-bar ${colorClass}" style="height: ${height}%;" 
-                        title="${d.value.toFixed(1)}% at ${time}"></div>`;
+                        title="${valueStr} at ${time}"></div>`;
         }).join('');
         
         // Format time period for display
@@ -1724,14 +1758,25 @@ async function loadMetricHistory(metric, hours) {
                           hours < 24 ? `${hours} hour(s)` : 
                           `${Math.round(hours / 24)} day(s)`;
         
+        // Generate Y-axis labels based on scale
+        const yAxisLabels = isPercentMetric ? [
+            `${scaleMax.toFixed(0)}%`,
+            `${(scaleMax * 0.75).toFixed(0)}%`,
+            `${(scaleMax * 0.5).toFixed(0)}%`,
+            `${(scaleMax * 0.25).toFixed(0)}%`,
+            `${scaleMin.toFixed(0)}%`
+        ] : [
+            scaleMax.toFixed(1),
+            (scaleMax * 0.75 + scaleMin * 0.25).toFixed(1),
+            ((scaleMax + scaleMin) / 2).toFixed(1),
+            (scaleMax * 0.25 + scaleMin * 0.75).toFixed(1),
+            scaleMin.toFixed(1)
+        ];
+        
         chartEl.innerHTML = `
             <div class="chart-wrapper">
                 <div class="chart-y-axis">
-                    <span>100%</span>
-                    <span>75%</span>
-                    <span>50%</span>
-                    <span>25%</span>
-                    <span>0%</span>
+                    ${yAxisLabels.map(l => `<span>${l}</span>`).join('')}
                 </div>
                 <div class="chart-main">
                     <div class="chart-bars">${chartBars}</div>

@@ -3420,8 +3420,7 @@ class ShellderDB:
             # to get evenly distributed data points across the entire time range
             if total_count > limit:
                 # Calculate step to get ~limit evenly distributed records
-                # We use NTILE to partition data and take one sample per partition
-                step = max(1, total_count // limit)
+                step = max(1, (total_count + limit - 1) // limit)  # Ceiling division
                 cursor.execute("""
                     SELECT metric_value, recorded_at 
                     FROM (
@@ -3431,10 +3430,9 @@ class ShellderDB:
                         WHERE metric_name = ?
                           AND recorded_at >= datetime('now', ?)
                     )
-                    WHERE rn % ? = 0 OR rn = 1
+                    WHERE (rn - 1) % ? = 0
                     ORDER BY recorded_at ASC
-                    LIMIT ?
-                """, (metric_name, f'-{minutes} minutes', step, limit))
+                """, (metric_name, f'-{minutes} minutes', step))
             else:
                 # Return all records if under the limit
                 cursor.execute("""
