@@ -8160,28 +8160,91 @@ def api_container_action(name, action):
 
 @app.route('/api/docker/<action>', methods=['POST'])
 def api_docker_action(action):
-    """Docker compose actions"""
-    cmd_map = {
-        'up': ['docker', 'compose', 'up', '-d'],
-        'down': ['docker', 'compose', 'down'],
-        'restart': ['docker', 'compose', 'restart'],
-        'pull': ['docker', 'compose', 'pull']
-    }
+    """Docker compose actions - handles running containers gracefully"""
     
-    if action not in cmd_map:
+    if action not in ['up', 'down', 'restart', 'pull']:
         return jsonify({'success': False, 'error': 'Invalid action'})
     
     try:
+        aegis_root = str(AEGIS_ROOT)
+        
+        # Special handling for 'up' action - skip already running containers
+        if action == 'up':
+            # Check which services are already running
+            ps_result = subprocess.run(
+                ['docker', 'compose', 'ps', '--format', 'json'],
+                capture_output=True, text=True, timeout=30, cwd=aegis_root
+            )
+            
+            running_services = set()
+            if ps_result.returncode == 0 and ps_result.stdout.strip():
+                for line in ps_result.stdout.strip().split('\n'):
+                    try:
+                        container = json.loads(line)
+                        if container.get('State') == 'running':
+                            running_services.add(container.get('Service', ''))
+                    except:
+                        pass
+            
+            # Get all services
+            config_result = subprocess.run(
+                ['docker', 'compose', 'config', '--services'],
+                capture_output=True, text=True, timeout=30, cwd=aegis_root
+            )
+            all_services = set(config_result.stdout.strip().split('\n')) if config_result.returncode == 0 else set()
+            
+            # Find services to start
+            services_to_start = all_services - running_services
+            
+            # Skip shellder if host shellder is running on port 5000
+            try:
+                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                sock.settimeout(1)
+                if sock.connect_ex(('127.0.0.1', 5000)) == 0:
+                    services_to_start.discard('shellder')
+                sock.close()
+            except:
+                pass
+            
+            if not services_to_start:
+                return jsonify({
+                    'success': True,
+                    'output': 'All containers already running',
+                    'already_running': list(running_services)
+                })
+            
+            # Start only stopped services
+            cmd = ['docker', 'compose', 'up', '-d', '--no-recreate'] + list(services_to_start)
+        else:
+            cmd_map = {
+                'down': ['docker', 'compose', 'down'],
+                'restart': ['docker', 'compose', 'restart'],
+                'pull': ['docker', 'compose', 'pull']
+            }
+            cmd = cmd_map[action]
+        
         result = subprocess.run(
-            cmd_map[action],
+            cmd,
             capture_output=True, text=True, timeout=300,
-            cwd=str(AEGIS_ROOT)
+            cwd=aegis_root
         )
+        
+        output = result.stdout + result.stderr
+        
+        # For 'up', consider partial success as success
+        if action == 'up':
+            return jsonify({
+                'success': True,
+                'output': output,
+                'services_started': list(services_to_start) if 'services_to_start' in dir() else []
+            })
+        
         return jsonify({
             'success': result.returncode == 0,
-            'output': result.stdout + result.stderr
+            'output': output
         })
     except Exception as e:
+        error('DOCKER', f'Docker action {action} failed: {e}')
         return jsonify({'success': False, 'error': str(e)})
 
 @app.route('/api/docker/update-all', methods=['POST'])
@@ -11038,28 +11101,104 @@ def api_wizard_copy_configs():
 
 @app.route('/api/wizard/start-stack', methods=['POST'])
 def api_wizard_start_stack():
-    """Start the Docker stack"""
+    """Start the Docker stack - handles already running containers gracefully"""
     aegis_root = str(AEGIS_ROOT)
     
     try:
-        # Run docker compose up -d
+        # First, get list of services that are NOT running
+        ps_result = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', 'json'],
+            capture_output=True, text=True, timeout=30, cwd=aegis_root
+        )
+        
+        running_services = set()
+        if ps_result.returncode == 0 and ps_result.stdout.strip():
+            import json as json_mod
+            for line in ps_result.stdout.strip().split('\n'):
+                try:
+                    container = json_mod.loads(line)
+                    if container.get('State') == 'running':
+                        running_services.add(container.get('Service', ''))
+                except:
+                    pass
+        
+        # Get all services from compose file
+        config_result = subprocess.run(
+            ['docker', 'compose', 'config', '--services'],
+            capture_output=True, text=True, timeout=30, cwd=aegis_root
+        )
+        all_services = set(config_result.stdout.strip().split('\n')) if config_result.returncode == 0 else set()
+        
+        # Find services that need to be started (not already running)
+        services_to_start = all_services - running_services
+        
+        # Also exclude shellder if host shellder is running on port 5000
+        try:
+            import socket
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result_check = sock.connect_ex(('127.0.0.1', 5000))
+            sock.close()
+            if result_check == 0:
+                # Port 5000 is in use (host shellder running)
+                services_to_start.discard('shellder')
+                info('DOCKER', 'Skipping shellder container - host shellder already running on port 5000')
+        except:
+            pass
+        
+        if not services_to_start:
+            return jsonify({
+                'success': True,
+                'message': 'All containers already running',
+                'stdout': '',
+                'stderr': '',
+                'started': [],
+                'already_running': list(running_services)
+            })
+        
+        # Start only the services that aren't running
         result = subprocess.run(
-            ['docker', 'compose', 'up', '-d'],
+            ['docker', 'compose', 'up', '-d', '--no-recreate'] + list(services_to_start),
             capture_output=True,
             text=True,
             timeout=300,
             cwd=aegis_root
         )
         
+        # Check final status
+        final_ps = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', 'json'],
+            capture_output=True, text=True, timeout=30, cwd=aegis_root
+        )
+        
+        final_running = []
+        final_failed = []
+        if final_ps.returncode == 0 and final_ps.stdout.strip():
+            for line in final_ps.stdout.strip().split('\n'):
+                try:
+                    container = json_mod.loads(line)
+                    if container.get('State') == 'running':
+                        final_running.append(container.get('Service', ''))
+                    else:
+                        final_failed.append(container.get('Service', ''))
+                except:
+                    pass
+        
         return jsonify({
-            'success': result.returncode == 0,
+            'success': True,  # Mark as success if we attempted to start
             'stdout': result.stdout,
-            'stderr': result.stderr
+            'stderr': result.stderr,
+            'started': list(services_to_start),
+            'already_running': list(running_services),
+            'final_running': final_running,
+            'final_failed': final_failed,
+            'message': f'Started {len(services_to_start)} services'
         })
         
     except subprocess.TimeoutExpired:
         return jsonify({'error': 'Stack startup timed out'}), 504
     except Exception as e:
+        error('DOCKER', f'Start stack error: {e}')
         return jsonify({'error': str(e)}), 500
 
 @app.route('/api/wizard/check-ports')
