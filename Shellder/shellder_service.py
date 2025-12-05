@@ -383,25 +383,150 @@ def parse_simple_toml(file_path):
         return {}
 
 # =============================================================================
-# FILE WRITE HELPER (preserves ownership when using sudo)
+# FILE OWNERSHIP HELPERS (prevents root-owned files from GUI operations)
 # =============================================================================
+
+def get_aegis_owner():
+    """
+    Get the correct owner for Aegis files.
+    Priority: SUDO_USER env var > owner of AEGIS_ROOT > uid 1000
+    Returns (uid, gid, username)
+    """
+    import pwd
+    import grp
+    
+    # Try SUDO_USER first (if running with sudo)
+    sudo_user = os.environ.get('SUDO_USER')
+    if sudo_user:
+        try:
+            user_info = pwd.getpwnam(sudo_user)
+            return user_info.pw_uid, user_info.pw_gid, sudo_user
+        except:
+            pass
+    
+    # Try owner of AEGIS_ROOT
+    try:
+        stat_info = os.stat(AEGIS_ROOT)
+        # Don't use root even if AEGIS_ROOT is owned by root
+        if stat_info.st_uid != 0:
+            try:
+                user_info = pwd.getpwuid(stat_info.st_uid)
+                return stat_info.st_uid, stat_info.st_gid, user_info.pw_name
+            except:
+                return stat_info.st_uid, stat_info.st_gid, str(stat_info.st_uid)
+    except:
+        pass
+    
+    # Default to common user uid/gid 1000 (usually first non-root user)
+    try:
+        user_info = pwd.getpwuid(1000)
+        return 1000, 1000, user_info.pw_name
+    except:
+        return 1000, 1000, 'pokemap'
+
+
+def fix_file_ownership(file_path, use_sudo=True):
+    """
+    Fix ownership of a file to the correct Aegis user.
+    Call this after any file write operation.
+    """
+    try:
+        uid, gid, username = get_aegis_owner()
+        
+        # Check if file is already correctly owned
+        try:
+            stat_info = os.stat(file_path)
+            if stat_info.st_uid == uid and stat_info.st_gid == gid:
+                return True  # Already correct
+        except:
+            pass
+        
+        # Try chown without sudo first
+        try:
+            os.chown(file_path, uid, gid)
+            return True
+        except PermissionError:
+            pass
+        
+        # Use sudo if needed and allowed
+        if use_sudo:
+            result = subprocess.run(
+                ['sudo', 'chown', f'{uid}:{gid}', file_path],
+                capture_output=True,
+                timeout=5
+            )
+            return result.returncode == 0
+        
+        return False
+    except Exception as e:
+        print(f"Warning: Could not fix ownership of {file_path}: {e}")
+        return False
+
+
+def fix_directory_ownership(dir_path, recursive=True, use_sudo=True):
+    """
+    Fix ownership of a directory (and optionally its contents) to the correct Aegis user.
+    """
+    try:
+        uid, gid, username = get_aegis_owner()
+        
+        if recursive:
+            # Use sudo chown -R for recursive
+            if use_sudo:
+                result = subprocess.run(
+                    ['sudo', 'chown', '-R', f'{uid}:{gid}', str(dir_path)],
+                    capture_output=True,
+                    timeout=30
+                )
+                return result.returncode == 0
+            else:
+                # Manual recursive without sudo
+                for root, dirs, files in os.walk(dir_path):
+                    try:
+                        os.chown(root, uid, gid)
+                    except:
+                        pass
+                    for f in files:
+                        try:
+                            os.chown(os.path.join(root, f), uid, gid)
+                        except:
+                            pass
+                return True
+        else:
+            return fix_file_ownership(dir_path, use_sudo)
+    except Exception as e:
+        print(f"Warning: Could not fix ownership of {dir_path}: {e}")
+        return False
+
 
 def safe_write_file(file_path, content, preserve_ownership=True):
     """
-    Write a file using sudo tee while preserving original ownership.
+    Write a file while ensuring correct ownership (not root).
     Returns (success, error_message)
     """
     try:
-        original_uid = 1000
-        original_gid = 1000
+        # Get the correct owner BEFORE writing
+        target_uid, target_gid, _ = get_aegis_owner()
         
+        # If file exists, preserve its ownership unless it's root
         if preserve_ownership and os.path.exists(file_path):
             try:
                 stat_info = os.stat(file_path)
-                original_uid = stat_info.st_uid
-                original_gid = stat_info.st_gid
+                if stat_info.st_uid != 0:  # Don't preserve root ownership
+                    target_uid = stat_info.st_uid
+                    target_gid = stat_info.st_gid
             except:
                 pass
+        
+        # Try direct write first (faster, no sudo needed)
+        try:
+            with open(file_path, 'w', encoding='utf-8') as f:
+                f.write(content)
+            # Fix ownership immediately
+            fix_file_ownership(file_path)
+            return True, None
+        except PermissionError:
+            pass  # Fall back to sudo tee
         
         # Write using sudo tee
         result = subprocess.run(
@@ -415,16 +540,12 @@ def safe_write_file(file_path, content, preserve_ownership=True):
         if result.returncode != 0:
             return False, result.stderr[:200]
         
-        # Restore ownership
-        if preserve_ownership:
-            try:
-                subprocess.run(
-                    ['sudo', 'chown', f'{original_uid}:{original_gid}', file_path],
-                    capture_output=True,
-                    timeout=5
-                )
-            except:
-                pass  # Best effort
+        # Fix ownership after sudo write
+        subprocess.run(
+            ['sudo', 'chown', f'{target_uid}:{target_gid}', file_path],
+            capture_output=True,
+            timeout=5
+        )
         
         return True, None
     except Exception as e:
@@ -6387,15 +6508,8 @@ def api_debug_clear():
         try:
             with open(debug_log, 'w') as f:
                 f.write(f"=== Log cleared at {datetime.now().isoformat()} ===\n")
-            # Fix ownership
-            try:
-                import pwd
-                real_user = os.environ.get('SUDO_USER')
-                if real_user:
-                    user_info = pwd.getpwnam(real_user)
-                    os.chown(debug_log, user_info.pw_uid, user_info.pw_gid)
-            except:
-                pass
+            # Fix ownership to prevent root-owned files
+            fix_file_ownership(str(debug_log))
         except Exception as e:
             return jsonify({'success': False, 'error': f'Failed to clear log: {e}'}), 500
     
@@ -6554,15 +6668,8 @@ def api_ai_debug_file_write():
         with open(full_path, mode, encoding='utf-8') as f:
             f.write(content)
         
-        # Fix ownership
-        try:
-            import pwd
-            real_user = os.environ.get('SUDO_USER')
-            if real_user:
-                user_info = pwd.getpwnam(real_user)
-                os.chown(full_path, user_info.pw_uid, user_info.pw_gid)
-        except:
-            pass
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(str(full_path))
         
         return jsonify({'success': True, 'path': path, 'bytes_written': len(content)})
     except Exception as e:
@@ -9618,6 +9725,9 @@ def api_xilriws_proxies_save():
         with open(proxy_file, 'w') as f:
             f.write(content)
         
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(str(proxy_file))
+        
         lines = [l.strip() for l in content.split('\n') if l.strip() and not l.startswith('#')]
         return jsonify({
             'success': True,
@@ -11416,6 +11526,9 @@ def api_wizard_apply_passwords():
             for key, value in env_content.items():
                 f.write(f'{key}={value}\n')
         
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(env_file)
+        
         return jsonify({'success': True, 'message': 'Passwords applied to .env'})
         
     except Exception as e:
@@ -11473,6 +11586,9 @@ innodb_flush_method = O_DIRECT
         # Write config
         with open(mariadb_cnf, 'w') as f:
             f.write(content)
+        
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(mariadb_cnf)
         
         return jsonify({'success': True, 'message': 'MariaDB configuration updated'})
         
@@ -13293,6 +13409,9 @@ def api_poracle_configure_database():
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(config_file)
+        
         result['success'] = True
         result['message'] = 'Database settings configured from .env'
         
@@ -13340,6 +13459,9 @@ def api_poracle_configure_discord():
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
         
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(config_file)
+        
         result['success'] = True
         result['message'] = 'Discord bot configured successfully'
         
@@ -13386,6 +13508,9 @@ def api_poracle_configure_telegram():
         # Write back
         with open(config_file, 'w') as f:
             json.dump(config, f, indent=2)
+        
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(config_file)
         
         result['success'] = True
         result['message'] = 'Telegram bot configured successfully'
@@ -13487,6 +13612,9 @@ def api_poracle_import_geofences():
                     output_file = os.path.join(geofence_dir, 'koji_import.json')
                     with open(output_file, 'w') as f:
                         json.dump(poracle_geofences, f, indent=2)
+                    
+                    # Fix ownership to prevent root-owned files
+                    fix_file_ownership(output_file)
                     
                     result['success'] = True
                     result['imported'] = len(poracle_geofences)
@@ -14099,6 +14227,9 @@ def save_golbat_webhooks(config_path, webhooks):
         # Write back
         with open(config_path, 'w') as f:
             f.writelines(new_lines)
+        
+        # Fix ownership to prevent root-owned files
+        fix_file_ownership(config_path)
         
         return True, "Webhooks saved"
     except Exception as e:
@@ -18188,6 +18319,8 @@ if SOCKETIO_AVAILABLE:
                 content = data.get('content', '')
                 with open(full_path, 'w', encoding='utf-8') as f:
                     f.write(content)
+                # Fix ownership to prevent root-owned files
+                fix_file_ownership(str(full_path))
                 emit('ai_debug_result', {'type': 'file', 'action': 'write', 'path': path, 'success': True})
         except Exception as e:
             emit('ai_debug_result', {'type': 'file', 'error': str(e)})
