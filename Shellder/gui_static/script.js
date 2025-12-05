@@ -401,6 +401,9 @@ async function loadDebugPage() {
     
     // Load server logs
     loadDebugServerLog();
+    
+    // Update stream commands with correct host/port
+    updateStreamCommands();
 }
 
 function loadDebugClientLogs() {
@@ -450,6 +453,107 @@ async function loadDebugServerLog() {
     } catch (e) {
         container.innerHTML = `<pre style="color: var(--danger);">Failed to load: ${e.message}</pre>`;
     }
+}
+
+// Live stream controls
+let livePreviewInterval = null;
+
+function copyStreamCommand(type) {
+    let cmd = '';
+    const port = window.location.port || '5050';
+    const host = window.location.hostname;
+    
+    switch(type) {
+        case 'tail':
+            cmd = `curl -N http://${host}:${port}/api/debug/tail`;
+            break;
+        case 'stream':
+            cmd = `curl -N http://${host}:${port}/api/debug/stream`;
+            break;
+        case 'file':
+            cmd = `tail -f ~/Desktop/Aegis-All-In-One/Shellder/logs/debuglog.txt`;
+            break;
+    }
+    
+    navigator.clipboard.writeText(cmd).then(() => {
+        showToast('Command copied to clipboard!', 'success');
+    }).catch(() => {
+        // Fallback
+        prompt('Copy this command:', cmd);
+    });
+}
+
+function openStreamInNewTab(type) {
+    const port = window.location.port || '5050';
+    const host = window.location.hostname;
+    const url = `http://${host}:${port}/api/debug/${type}`;
+    window.open(url, '_blank');
+}
+
+function toggleLivePreview() {
+    const enabled = document.getElementById('livePreviewToggle').checked;
+    const container = document.getElementById('livePreviewContainer');
+    
+    if (enabled) {
+        container.style.display = 'block';
+        startLivePreview();
+    } else {
+        container.style.display = 'none';
+        stopLivePreview();
+    }
+}
+
+function startLivePreview() {
+    const viewer = document.getElementById('livePreviewLogs');
+    if (!viewer) return;
+    
+    // Initial load
+    updateLivePreview();
+    
+    // Update every 2 seconds
+    livePreviewInterval = setInterval(updateLivePreview, 2000);
+}
+
+function stopLivePreview() {
+    if (livePreviewInterval) {
+        clearInterval(livePreviewInterval);
+        livePreviewInterval = null;
+    }
+}
+
+async function updateLivePreview() {
+    const viewer = document.getElementById('livePreviewLogs');
+    if (!viewer) return;
+    
+    try {
+        const response = await fetch('/api/debug/debuglog?lines=50&format=json');
+        const data = await response.json();
+        
+        if (data.error) {
+            viewer.innerHTML = `<pre style="color: var(--warning);">${data.error}</pre>`;
+            return;
+        }
+        
+        const lines = data.lines || [];
+        viewer.innerHTML = `<pre>${escapeHtml(lines.join('\n'))}</pre>`;
+        
+        // Auto-scroll to bottom
+        viewer.scrollTop = viewer.scrollHeight;
+    } catch (e) {
+        viewer.innerHTML = `<pre style="color: var(--danger);">Connection error: ${e.message}</pre>`;
+    }
+}
+
+// Update stream commands with correct host/port on page load
+function updateStreamCommands() {
+    const port = window.location.port || '5050';
+    const host = window.location.hostname;
+    
+    const tailCmd = document.getElementById('streamTailCmd');
+    const sseCmd = document.getElementById('streamSSECmd');
+    
+    if (tailCmd) tailCmd.textContent = `curl -N http://${host}:${port}/api/debug/tail`;
+    if (sseCmd) sseCmd.textContent = `curl -N http://${host}:${port}/api/debug/stream`;
 }
 
 // View the server debug log (legacy, opens debug page)
