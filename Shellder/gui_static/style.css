@@ -1398,6 +1398,51 @@ html, body {
     background: var(--bg-hover);
 }
 
+/* Timezone Display */
+.timezone-badge {
+    display: inline-block;
+    padding: 2px 8px;
+    background: var(--accent-primary);
+    color: white;
+    border-radius: var(--radius-sm);
+    font-size: 11px;
+    font-weight: 600;
+    margin-left: 8px;
+}
+
+.current-time-display {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.current-time-display strong {
+    color: var(--text-primary);
+    font-family: var(--font-mono);
+    font-size: 14px;
+}
+
+.timezone-info {
+    font-size: 11px;
+    color: var(--text-tertiary);
+}
+
+.server-time-note {
+    margin-top: 10px;
+    padding: 8px 12px;
+    background: rgba(var(--info-rgb), 0.1);
+    border-left: 3px solid var(--info);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
 /* Time Range Inputs */
 .time-range-inputs {
     display: flex;
@@ -1422,6 +1467,7 @@ html, body {
 .time-presets {
     display: flex;
     gap: 6px;
+    flex-wrap: wrap;
 }
 
 /* Search Filters */

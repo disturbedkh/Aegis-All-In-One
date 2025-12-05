@@ -2043,6 +2043,9 @@
                     <button class="log-tab" data-source="database" onclick="switchLogSource('database')">
                         🗄️ Database
                     </button>
+                    <button class="log-tab" data-source="grafana" onclick="switchLogSource('grafana')">
+                        📊 Grafana
+                    </button>
                     <button class="log-tab" data-source="shellder" onclick="switchLogSource('shellder')">
                         🐚 Shellder
                     </button>
@@ -2063,18 +2066,27 @@
                             <label class="checkbox-label"><input type="checkbox" value="koji"> 📍 Koji</label>
                             <label class="checkbox-label"><input type="checkbox" value="xilriws"> 🔐 Xilriws</label>
                             <label class="checkbox-label"><input type="checkbox" value="database"> 🗄️ Database</label>
+                            <label class="checkbox-label"><input type="checkbox" value="grafana"> 📊 Grafana</label>
+                            <label class="checkbox-label"><input type="checkbox" value="victoriametrics"> 📈 VictoriaMetrics</label>
+                            <label class="checkbox-label"><input type="checkbox" value="fletchling"> 🪺 Fletchling</label>
+                            <label class="checkbox-label"><input type="checkbox" value="poracle"> 🔔 Poracle</label>
                         </div>
                     </div>
                     
                     <div class="custom-log-section">
-                        <h4>🕐 Time Range</h4>
+                        <h4>🕐 Time Range <span class="timezone-badge" id="userTimezone">UTC</span></h4>
+                        <div class="current-time-display">
+                            <span>Your current time: </span>
+                            <strong id="currentLocalTime">--:--:--</strong>
+                            <span class="timezone-info" id="timezoneInfo"></span>
+                        </div>
                         <div class="time-range-inputs">
                             <div class="form-group">
-                                <label>From:</label>
+                                <label>From (your local time):</label>
                                 <input type="datetime-local" id="logTimeFrom" class="form-input">
                             </div>
                             <div class="form-group">
-                                <label>To:</label>
+                                <label>To (your local time):</label>
                                 <input type="datetime-local" id="logTimeTo" class="form-input">
                             </div>
                             <div class="time-presets">
@@ -2083,7 +2095,11 @@
                                 <button class="btn btn-xs" onclick="setTimePreset('6h')">6h</button>
                                 <button class="btn btn-xs" onclick="setTimePreset('24h')">24h</button>
                                 <button class="btn btn-xs" onclick="setTimePreset('7d')">7d</button>
+                                <button class="btn btn-xs" onclick="setTimePreset('now')">Now</button>
                             </div>
+                        </div>
+                        <div class="server-time-note">
+                            <small>📌 Docker logs use UTC. Times you enter are automatically converted.</small>
                         </div>
                     </div>
                     
@@ -2234,6 +2250,13 @@
                             <div class="log-card-info">
                                 <div class="log-card-name">Database</div>
                                 <div class="log-card-status" id="database-log-status">-</div>
+                            </div>
+                        </div>
+                        <div class="log-card" onclick="switchLogSource('grafana')">
+                            <div class="log-card-icon">📊</div>
+                            <div class="log-card-info">
+                                <div class="log-card-name">Grafana</div>
+                                <div class="log-card-status" id="grafana-log-status">-</div>
                             </div>
                         </div>
                     </div>

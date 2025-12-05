@@ -3328,6 +3328,10 @@ const logSourceTitles = {
     'koji': '📍 Koji Logs',
     'xilriws': '🔐 Xilriws Logs',
     'database': '🗄️ Database Logs',
+    'grafana': '📊 Grafana Logs',
+    'victoriametrics': '📈 VictoriaMetrics Logs',
+    'fletchling': '🪺 Fletchling Logs',
+    'poracle': '🔔 Poracle Logs',
     'shellder': '🐚 Shellder Logs',
     'custom': '⚙️ Custom Search'
 };
@@ -3359,6 +3363,9 @@ function switchLogSource(source) {
     } else {
         // Update preset dropdown when switching to custom
         updatePresetDropdown();
+        
+        // Start the current time display
+        startCurrentTimeDisplay();
         
         // Set default time range to last hour
         setTimePreset('1h');
@@ -3512,7 +3519,7 @@ async function loadContainerLogStatus() {
     try {
         const data = await fetchAPI('/api/containers');
         
-        const containers = ['dragonite', 'golbat', 'rotom', 'reactmap', 'koji', 'xilriws', 'database'];
+        const containers = ['dragonite', 'golbat', 'rotom', 'reactmap', 'koji', 'xilriws', 'database', 'grafana'];
         
         containers.forEach(name => {
             const statusEl = document.getElementById(`${name}-log-status`);
@@ -3545,7 +3552,84 @@ function updateCustomPanel() {
     }
 }
 
-// Set time preset
+// Get user's timezone offset in hours
+function getUserTimezoneOffset() {
+    return -new Date().getTimezoneOffset() / 60;
+}
+
+// Get user's timezone name
+function getUserTimezoneName() {
+    try {
+        return Intl.DateTimeFormat().resolvedOptions().timeZone;
+    } catch (e) {
+        const offset = getUserTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '';
+        return `UTC${sign}${offset}`;
+    }
+}
+
+// Get timezone abbreviation (EST, PST, etc.)
+function getTimezoneAbbr() {
+    const date = new Date();
+    const match = date.toLocaleTimeString('en-US', { timeZoneName: 'short' }).match(/[A-Z]{2,5}$/);
+    return match ? match[0] : `UTC${getUserTimezoneOffset() >= 0 ? '+' : ''}${getUserTimezoneOffset()}`;
+}
+
+// Update the current time display
+function updateCurrentTimeDisplay() {
+    const now = new Date();
+    const timeEl = document.getElementById('currentLocalTime');
+    const tzEl = document.getElementById('userTimezone');
+    const tzInfoEl = document.getElementById('timezoneInfo');
+    
+    if (timeEl) {
+        timeEl.textContent = now.toLocaleTimeString();
+    }
+    
+    if (tzEl) {
+        tzEl.textContent = getTimezoneAbbr();
+    }
+    
+    if (tzInfoEl) {
+        const offset = getUserTimezoneOffset();
+        const sign = offset >= 0 ? '+' : '';
+        tzInfoEl.textContent = `(${getUserTimezoneName()}, UTC${sign}${offset})`;
+    }
+}
+
+// Start updating the current time display
+let currentTimeInterval = null;
+function startCurrentTimeDisplay() {
+    updateCurrentTimeDisplay();
+    if (currentTimeInterval) clearInterval(currentTimeInterval);
+    currentTimeInterval = setInterval(updateCurrentTimeDisplay, 1000);
+}
+
+// Format date for datetime-local input in LOCAL time (not UTC!)
+function formatDateTimeLocal(date) {
+    const year = date.getFullYear();
+    const month = String(date.getMonth() + 1).padStart(2, '0');
+    const day = String(date.getDate()).padStart(2, '0');
+    const hours = String(date.getHours()).padStart(2, '0');
+    const minutes = String(date.getMinutes()).padStart(2, '0');
+    return `${year}-${month}-${day}T${hours}:${minutes}`;
+}
+
+// Convert local datetime-local input value to UTC for log comparison
+function localInputToUTC(localDateTimeStr) {
+    if (!localDateTimeStr) return null;
+    // datetime-local gives us local time, convert to Date object
+    const localDate = new Date(localDateTimeStr);
+    return localDate;
+}
+
+// Convert UTC timestamp from logs to local time for display
+function utcToLocal(utcDateStr) {
+    const utcDate = new Date(utcDateStr);
+    return utcDate.toLocaleString();
+}
+
+// Set time preset - uses LOCAL time
 function setTimePreset(preset) {
     const now = new Date();
     let from = new Date();
@@ -3556,15 +3640,14 @@ function setTimePreset(preset) {
         case '6h': from.setHours(now.getHours() - 6); break;
         case '24h': from.setDate(now.getDate() - 1); break;
         case '7d': from.setDate(now.getDate() - 7); break;
+        case 'now': 
+            from = new Date(now.getTime() - 60000); // 1 minute ago
+            break;
     }
     
-    // Format for datetime-local input (YYYY-MM-DDTHH:MM)
-    const formatDateTime = (d) => {
-        return d.toISOString().slice(0, 16);
-    };
-    
-    document.getElementById('logTimeFrom').value = formatDateTime(from);
-    document.getElementById('logTimeTo').value = formatDateTime(now);
+    // Format in LOCAL time for the input
+    document.getElementById('logTimeFrom').value = formatDateTimeLocal(from);
+    document.getElementById('logTimeTo').value = formatDateTimeLocal(now);
 }
 
 // Load custom filtered logs
@@ -3585,9 +3668,14 @@ async function loadCustomLogs() {
         return;
     }
     
-    // Get time range
-    const timeFrom = document.getElementById('logTimeFrom')?.value;
-    const timeTo = document.getElementById('logTimeTo')?.value;
+    // Get time range (user inputs in LOCAL time)
+    const timeFromInput = document.getElementById('logTimeFrom')?.value;
+    const timeToInput = document.getElementById('logTimeTo')?.value;
+    
+    // Convert local input times to Date objects for comparison
+    // datetime-local values are interpreted as local time by the browser
+    const timeFromLocal = timeFromInput ? new Date(timeFromInput) : null;
+    const timeToLocal = timeToInput ? new Date(timeToInput) : null;
     
     // Get search filters
     const searchText = document.getElementById('logSearchText')?.value?.trim() || '';
@@ -3621,7 +3709,10 @@ async function loadCustomLogs() {
                 // Parse log lines and add container prefix
                 const containerLogs = result.logs.split('\n').map(line => {
                     if (line.trim()) {
-                        return { container, line, timestamp: extractTimestamp(line) };
+                        const timestamp = extractTimestamp(line);
+                        // Parse UTC timestamp from log and convert to Date object
+                        const timestampDate = timestamp ? parseLogTimestamp(timestamp) : null;
+                        return { container, line, timestamp, timestampDate };
                     }
                     return null;
                 }).filter(Boolean);
@@ -3632,22 +3723,20 @@ async function loadCustomLogs() {
         
         // Sort by timestamp
         combinedLogs.sort((a, b) => {
-            if (a.timestamp && b.timestamp) {
-                return new Date(a.timestamp) - new Date(b.timestamp);
+            if (a.timestampDate && b.timestampDate) {
+                return a.timestampDate - b.timestampDate;
             }
             return 0;
         });
         
-        // Apply time filter
-        if (timeFrom || timeTo) {
-            const fromDate = timeFrom ? new Date(timeFrom) : null;
-            const toDate = timeTo ? new Date(timeTo) : null;
-            
+        // Apply time filter - compare UTC log times with user's local input times
+        // The comparison works because both are Date objects (JavaScript handles timezone internally)
+        if (timeFromLocal || timeToLocal) {
             combinedLogs = combinedLogs.filter(log => {
-                if (!log.timestamp) return true; // Keep logs without timestamps
-                const logDate = new Date(log.timestamp);
-                if (fromDate && logDate < fromDate) return false;
-                if (toDate && logDate > toDate) return false;
+                if (!log.timestampDate) return true; // Keep logs without timestamps
+                // Date objects are compared in absolute time (UTC internally)
+                if (timeFromLocal && log.timestampDate < timeFromLocal) return false;
+                if (timeToLocal && log.timestampDate > timeToLocal) return false;
                 return true;
             });
         }
@@ -3745,14 +3834,12 @@ async function loadCustomLogs() {
 function extractTimestamp(line) {
     // Try various timestamp formats
     const patterns = [
-        // ISO format: 2025-12-05T15:08:06.863506872Z
-        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})/,
+        // ISO format with Z: 2025-12-05T15:08:06.863506872Z
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)/,
         // Docker format: 2025-12-05 15:08:06
         /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/,
-        // Time only: 15:08:06
-        /(\d{2}:\d{2}:\d{2}\.\d+)/,
-        // Golbat/Dragonite format: 15:08:06.86
-        /^\[?(\d{2}:\d{2}:\d{2}\.\d+)/
+        // Time only with date context: 15:08:06.86
+        /^\[?(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/
     ];
     
     for (const pattern of patterns) {
@@ -3765,29 +3852,77 @@ function extractTimestamp(line) {
     return null;
 }
 
-// Convert log timestamp to browser local time
+// Parse log timestamp string to Date object
+// Docker logs typically use UTC timestamps
+function parseLogTimestamp(timestampStr) {
+    if (!timestampStr) return null;
+    
+    try {
+        // Check if it's a full ISO timestamp
+        if (timestampStr.includes('T') || timestampStr.includes(' ')) {
+            // Full datetime - Docker uses UTC
+            let dateStr = timestampStr;
+            
+            // Add Z if not present to indicate UTC
+            if (!dateStr.endsWith('Z') && dateStr.includes('T')) {
+                // Remove fractional seconds beyond 3 digits for parsing
+                dateStr = dateStr.replace(/(\.\d{3})\d*/, '$1');
+                if (!dateStr.endsWith('Z')) dateStr += 'Z';
+            }
+            
+            return new Date(dateStr);
+        } else {
+            // Time only - assume today in UTC
+            const today = new Date();
+            const [hours, minutes, seconds] = timestampStr.split(':').map(s => parseFloat(s));
+            const date = new Date(Date.UTC(
+                today.getUTCFullYear(),
+                today.getUTCMonth(),
+                today.getUTCDate(),
+                Math.floor(hours),
+                Math.floor(minutes),
+                Math.floor(seconds || 0)
+            ));
+            return date;
+        }
+    } catch (e) {
+        console.error('Failed to parse timestamp:', timestampStr, e);
+        return null;
+    }
+}
+
+// Convert log timestamp to browser local time for display
 function convertLogTimestamp(line) {
     // Find timestamp in various formats and convert to local time
     const patterns = [
         // ISO format with Z (UTC): 2025-12-05T15:08:06.863506872Z
         { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?Z/, isUTC: true },
-        // ISO format without Z
-        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(?!Z)/, isUTC: false }
+        // ISO format without Z (assume UTC from Docker)
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(?!Z)/, isUTC: true }
     ];
     
     for (const pattern of patterns) {
         const match = line.match(pattern.regex);
         if (match) {
             try {
-                let date;
-                if (pattern.isUTC) {
-                    date = new Date(match[0]);
-                } else {
-                    // Assume server time
-                    date = new Date(match[1]);
+                // Always treat Docker timestamps as UTC
+                let dateStr = match[0];
+                if (!dateStr.endsWith('Z')) {
+                    dateStr = dateStr.replace(/(\.\d{3})\d*/, '$1') + 'Z';
                 }
+                const date = new Date(dateStr);
                 
-                const localTime = date.toLocaleString();
+                // Format as local time with timezone abbreviation
+                const localTime = date.toLocaleString(undefined, {
+                    year: 'numeric',
+                    month: '2-digit',
+                    day: '2-digit',
+                    hour: '2-digit',
+                    minute: '2-digit',
+                    second: '2-digit',
+                    hour12: true
+                });
+                
                 return line.replace(match[0], `[${localTime}]`);
             } catch (e) {
                 // Keep original if conversion fails
