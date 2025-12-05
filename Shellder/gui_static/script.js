@@ -3627,8 +3627,8 @@ async function navigateToPath(path) {
             const fullPath = path ? `${path}/${f.name}` : f.name;
             const modifiedDate = f.modified ? new Date(f.modified).toLocaleString() : '-';
             // Escape for use in data attributes and onclick - use base64 to avoid all escaping issues
-            const pathB64 = btoa(unescape(encodeURIComponent(fullPath)));
-            const nameB64 = btoa(unescape(encodeURIComponent(f.name)));
+            const pathB64 = encodePathToB64(fullPath);
+            const nameB64 = encodePathToB64(f.name);
             
             return `
                 <div class="file-item ${f.type}" data-path="${escapeHtml(fullPath)}" data-type="${f.type}">
@@ -3684,19 +3684,46 @@ function refreshFiles() {
     navigateToPath(currentFilePath);
 }
 
-// Base64 decode helper for file paths
+// Base64 encode/decode helpers for file paths (handles Unicode properly)
+function encodePathToB64(str) {
+    try {
+        // Use TextEncoder for proper Unicode support
+        const encoder = new TextEncoder();
+        const bytes = encoder.encode(str);
+        let binary = '';
+        for (let i = 0; i < bytes.length; i++) {
+            binary += String.fromCharCode(bytes[i]);
+        }
+        return btoa(binary);
+    } catch (e) {
+        console.error('Failed to encode path:', str, e);
+        return '';
+    }
+}
+
 function decodeFilePath(b64) {
     try {
-        return decodeURIComponent(escape(atob(b64)));
+        // Decode base64 to binary string, then to UTF-8
+        const binary = atob(b64);
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+            bytes[i] = binary.charCodeAt(i);
+        }
+        const decoder = new TextDecoder();
+        return decoder.decode(bytes);
     } catch (e) {
-        console.error('Failed to decode path:', e);
+        console.error('Failed to decode path:', b64, e);
+        showToast('Failed to decode file path', 'error');
         return '';
     }
 }
 
 // Handler functions that decode base64 paths
 function handleFileClick(pathB64, type) {
+    console.log('handleFileClick:', pathB64, type);
     const path = decodeFilePath(pathB64);
+    if (!path) return;
+    
     if (type === 'directory') {
         navigateToPath(path);
     } else {
@@ -3705,44 +3732,80 @@ function handleFileClick(pathB64, type) {
 }
 
 function handleFileEdit(pathB64) {
-    editFile(decodeFilePath(pathB64));
+    console.log('handleFileEdit:', pathB64);
+    const path = decodeFilePath(pathB64);
+    if (!path) return;
+    editFile(path);
 }
 
 function handleFileDownload(pathB64) {
-    downloadFile(decodeFilePath(pathB64));
+    console.log('handleFileDownload:', pathB64);
+    const path = decodeFilePath(pathB64);
+    if (!path) return;
+    downloadFile(path);
 }
 
 function handleFileInfo(pathB64) {
-    showFileInfo(decodeFilePath(pathB64));
+    console.log('handleFileInfo:', pathB64);
+    const path = decodeFilePath(pathB64);
+    if (!path) return;
+    showFileInfo(path);
 }
 
 function handleFileRename(pathB64, nameB64) {
+    console.log('handleFileRename:', pathB64, nameB64);
     const path = decodeFilePath(pathB64);
     const name = decodeFilePath(nameB64);
+    if (!path || !name) return;
     showRenameModal(path, name);
 }
 
 function handleFileDelete(pathB64, type) {
-    deleteFile(decodeFilePath(pathB64), type);
+    console.log('handleFileDelete:', pathB64, type);
+    const path = decodeFilePath(pathB64);
+    if (!path) return;
+    deleteFile(path, type);
 }
 
 // Edit file in text editor
 async function editFile(path) {
+    console.log('editFile called with path:', path);
+    
+    if (!path) {
+        showToast('No file path provided', 'error');
+        return;
+    }
+    
     selectedFilePath = path;
     
     try {
+        console.log('Fetching file content...');
         const data = await fetchAPI(`/api/file?path=${encodeURIComponent(path)}`);
+        console.log('API response:', data);
         
         if (data.error) {
             showToast(data.error, 'error');
             return;
         }
         
-        document.getElementById('editorFileName').textContent = `📝 ${path.split('/').pop()}`;
-        document.getElementById('fileEditorContent').value = data.content || '';
-        document.getElementById('editorFileInfo').textContent = `Path: ${path}`;
-        document.getElementById('fileEditorModal').style.display = 'flex';
+        const modal = document.getElementById('fileEditorModal');
+        const fileNameEl = document.getElementById('editorFileName');
+        const contentEl = document.getElementById('fileEditorContent');
+        const infoEl = document.getElementById('editorFileInfo');
+        
+        if (!modal || !fileNameEl || !contentEl || !infoEl) {
+            console.error('Missing modal elements:', { modal, fileNameEl, contentEl, infoEl });
+            showToast('Editor modal elements not found', 'error');
+            return;
+        }
+        
+        fileNameEl.textContent = `📝 ${path.split('/').pop()}`;
+        contentEl.value = data.content || '';
+        infoEl.textContent = `Path: ${path}`;
+        modal.style.display = 'flex';
+        console.log('Editor modal opened');
     } catch (e) {
+        console.error('editFile error:', e);
         showToast('Failed to load file: ' + e.message, 'error');
     }
 }
@@ -3877,11 +3940,29 @@ async function deleteFile(path, type) {
 
 // Rename file/folder
 function showRenameModal(path, currentName) {
+    console.log('showRenameModal called:', path, currentName);
+    
+    if (!path || !currentName) {
+        showToast('Missing path or name for rename', 'error');
+        return;
+    }
+    
     selectedFilePath = path;
-    document.getElementById('renameInput').value = currentName;
-    document.getElementById('renameModal').style.display = 'flex';
-    document.getElementById('renameInput').focus();
-    document.getElementById('renameInput').select();
+    
+    const modal = document.getElementById('renameModal');
+    const input = document.getElementById('renameInput');
+    
+    if (!modal || !input) {
+        console.error('Rename modal elements not found:', { modal, input });
+        showToast('Rename modal not found', 'error');
+        return;
+    }
+    
+    input.value = currentName;
+    modal.style.display = 'flex';
+    input.focus();
+    input.select();
+    console.log('Rename modal opened');
 }
 
 function closeRenameModal() {
