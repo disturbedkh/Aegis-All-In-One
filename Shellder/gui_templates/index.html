@@ -1658,6 +1658,136 @@
                     </div>
                 </div>
                 
+                <!-- MCP Server Configuration -->
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h2>🔗 MCP Server (Cursor/AI Integration)</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="checkMCPStatus()">🔄 Check Status</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="section-desc">
+                            Connect Cursor or other AI assistants directly to Shellder using MCP (Model Context Protocol).
+                            This gives AI tools direct access to diagnose, read files, run commands, and more.
+                        </p>
+                        
+                        <!-- MCP Status -->
+                        <div class="mcp-status-bar" id="mcpStatusBar">
+                            <span class="status-dot" id="mcpStatusDot"></span>
+                            <span id="mcpStatusText">Checking...</span>
+                        </div>
+                        
+                        <!-- Setup Steps -->
+                        <div class="mcp-setup-steps">
+                            <h4>📋 Setup Instructions</h4>
+                            
+                            <div class="setup-step">
+                                <div class="step-number">1</div>
+                                <div class="step-content">
+                                    <strong>Install MCP Server (on Linux machine)</strong>
+                                    <div class="code-block">
+                                        <code>cd ~/Desktop/Aegis-All-In-One/Shellder/mcp-server && npm install</code>
+                                        <button class="btn btn-xs" onclick="copyMCPCommand('install')">📋</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="setup-step">
+                                <div class="step-number">2</div>
+                                <div class="step-content">
+                                    <strong>Add to Cursor MCP Settings</strong>
+                                    <p style="font-size: 12px; color: var(--text-secondary);">
+                                        Go to: Cursor Settings → MCP Servers → Edit Config
+                                    </p>
+                                    <div class="code-block mcp-config">
+                                        <pre id="mcpConfigJson">{
+  "mcpServers": {
+    "shellder": {
+      "command": "node",
+      "args": ["/home/pokemap/Desktop/Aegis-All-In-One/Shellder/mcp-server/index.js"],
+      "env": {
+        "SHELLDER_URL": "http://localhost:5050"
+      }
+    }
+  }
+}</pre>
+                                        <button class="btn btn-xs" onclick="copyMCPConfig()">📋 Copy Config</button>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="setup-step">
+                                <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <strong>Restart Cursor</strong>
+                                    <p style="font-size: 12px; color: var(--text-secondary);">
+                                        Restart Cursor to load the MCP server. The AI will then have access to Shellder tools.
+                                    </p>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Available MCP Tools -->
+                        <div class="mcp-tools-section" style="margin-top: 20px;">
+                            <h4>🛠️ Available MCP Tools</h4>
+                            <div class="mcp-tools-grid">
+                                <div class="mcp-tool">
+                                    <strong>shellder_diagnose</strong>
+                                    <small>Full system diagnostics</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_read_file</strong>
+                                    <small>Read any file in Aegis</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_write_file</strong>
+                                    <small>Write/modify files</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_exec</strong>
+                                    <small>Run shell commands</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_docker</strong>
+                                    <small>Docker operations</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_sql</strong>
+                                    <small>Database queries</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_logs</strong>
+                                    <small>System/container logs</small>
+                                </div>
+                                <div class="mcp-tool">
+                                    <strong>shellder_system</strong>
+                                    <small>System information</small>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Test MCP Connection -->
+                        <div class="mcp-test-section" style="margin-top: 20px;">
+                            <h4>🧪 Test API Connection</h4>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
+                                Test the API that MCP connects to:
+                            </p>
+                            <div class="mcp-test-buttons">
+                                <button class="btn btn-sm" onclick="testMCPEndpoint('diagnose')">Test Diagnose</button>
+                                <button class="btn btn-sm" onclick="testMCPEndpoint('system')">Test System</button>
+                                <button class="btn btn-sm" onclick="testMCPEndpoint('docker')">Test Docker</button>
+                                <button class="btn btn-sm" onclick="testMCPEndpoint('help')">Get Help</button>
+                            </div>
+                            <div id="mcpTestResult" style="display: none; margin-top: 12px;">
+                                <div class="debug-log-viewer" style="max-height: 200px;">
+                                    <pre id="mcpTestOutput"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- AI Debug Tips -->
                 <div class="card" style="margin-top: 20px;">
                     <div class="card-header">

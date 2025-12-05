@@ -407,6 +407,9 @@ async function loadDebugPage() {
     
     // Load AI debug configuration
     loadAIDebugConfig();
+    
+    // Check MCP status
+    checkMCPStatus();
 }
 
 function loadDebugClientLogs() {
@@ -822,6 +825,111 @@ async function runTestCommand(type) {
         result.textContent = JSON.stringify(data, null, 2);
     } catch (e) {
         result.textContent = 'Error: ' + e.message;
+    }
+}
+
+// =============================================================================
+// MCP SERVER CONTROLS
+// =============================================================================
+
+async function checkMCPStatus() {
+    const dot = document.getElementById('mcpStatusDot');
+    const text = document.getElementById('mcpStatusText');
+    
+    dot.className = 'status-dot checking';
+    text.textContent = 'Checking API availability...';
+    
+    try {
+        const response = await fetch('/api/ai-debug/config');
+        const data = await response.json();
+        
+        if (data.config && data.config.api_enabled) {
+            dot.className = 'status-dot running';
+            text.textContent = `API Ready on port ${data.port} - MCP can connect`;
+            
+            // Update config with correct port
+            updateMCPConfig(data.port);
+        } else {
+            dot.className = 'status-dot warning';
+            text.textContent = 'API disabled - enable in settings above';
+        }
+    } catch (e) {
+        dot.className = 'status-dot stopped';
+        text.textContent = 'Cannot connect to Shellder API';
+    }
+}
+
+function updateMCPConfig(port) {
+    const config = {
+        mcpServers: {
+            shellder: {
+                command: "node",
+                args: ["/home/pokemap/Desktop/Aegis-All-In-One/Shellder/mcp-server/index.js"],
+                env: {
+                    SHELLDER_URL: `http://localhost:${port}`
+                }
+            }
+        }
+    };
+    
+    const configEl = document.getElementById('mcpConfigJson');
+    if (configEl) {
+        configEl.textContent = JSON.stringify(config, null, 2);
+    }
+}
+
+function copyMCPCommand(type) {
+    let cmd = '';
+    switch (type) {
+        case 'install':
+            cmd = 'cd ~/Desktop/Aegis-All-In-One/Shellder/mcp-server && npm install';
+            break;
+    }
+    
+    navigator.clipboard.writeText(cmd).then(() => {
+        showToast('Command copied!', 'success');
+    });
+}
+
+function copyMCPConfig() {
+    const configEl = document.getElementById('mcpConfigJson');
+    const config = configEl ? configEl.textContent : '';
+    
+    navigator.clipboard.writeText(config).then(() => {
+        showToast('MCP configuration copied! Paste into Cursor MCP settings.', 'success');
+    }).catch(() => {
+        // Fallback
+        const textarea = document.createElement('textarea');
+        textarea.value = config;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast('MCP configuration copied!', 'success');
+    });
+}
+
+async function testMCPEndpoint(endpoint) {
+    const container = document.getElementById('mcpTestResult');
+    const output = document.getElementById('mcpTestOutput');
+    
+    container.style.display = 'block';
+    output.textContent = `Testing /api/ai-debug/${endpoint}...`;
+    
+    try {
+        let url = `/api/ai-debug/${endpoint}`;
+        if (endpoint === 'docker') {
+            url += '?cmd=ps';
+        }
+        
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        output.textContent = JSON.stringify(data, null, 2);
+        showToast(`${endpoint} endpoint working!`, 'success');
+    } catch (e) {
+        output.textContent = `Error: ${e.message}\n\nMake sure Shellder is running and AI Debug is enabled.`;
+        showToast('Endpoint test failed', 'error');
     }
 }
 
