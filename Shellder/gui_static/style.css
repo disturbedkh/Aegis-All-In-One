@@ -6875,3 +6875,244 @@ select:focus {
     justify-content: center;
 }
 
+/* =============================================================================
+   FLETCHLING MANAGEMENT TAB
+   ============================================================================= */
+
+.fletchling-status-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+    gap: 16px;
+    margin: 20px 0;
+}
+
+.fletchling-status-grid .status-item {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-status-grid .status-light {
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    flex-shrink: 0;
+    transition: all 0.3s ease;
+}
+
+.fletchling-status-grid .status-light.checking {
+    background: #666;
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.fletchling-status-grid .status-light.success {
+    background: var(--success);
+    box-shadow: 0 0 10px var(--success-glow);
+}
+
+.fletchling-status-grid .status-light.warning {
+    background: var(--warning);
+    box-shadow: 0 0 10px var(--warning-glow);
+}
+
+.fletchling-status-grid .status-light.error {
+    background: var(--danger);
+    box-shadow: 0 0 10px var(--danger-glow);
+}
+
+.fletchling-status-grid .status-info {
+    flex: 1;
+}
+
+.fletchling-status-grid .status-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.fletchling-status-grid .status-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.fletchling-setup-section {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-setup-section h3 {
+    margin: 0 0 20px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.setup-step {
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    border: 1px solid var(--border-color);
+}
+
+.setup-step .step-number {
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: 700;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.setup-step .step-content {
+    flex: 1;
+}
+
+.setup-step .step-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 4px;
+}
+
+.setup-step .step-desc {
+    font-size: 13px;
+    color: var(--text-secondary);
+    margin-bottom: 12px;
+}
+
+.setup-step .step-input-group {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 8px;
+}
+
+.setup-step .step-input-group input {
+    flex: 1;
+    max-width: 300px;
+}
+
+.setup-step .step-hint {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--text-muted);
+}
+
+.setup-step .step-hint .hint-icon {
+    font-size: 14px;
+}
+
+.setup-step .button-group {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+}
+
+.setup-step.completed .step-number {
+    background: var(--success);
+}
+
+.setup-step.completed .step-number::after {
+    content: '✓';
+}
+
+.fletchling-stats {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-stats h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.fletchling-stats .stats-grid {
+    display: flex;
+    gap: 20px;
+}
+
+.fletchling-stats .stat-box {
+    background: var(--bg-secondary);
+    padding: 16px 24px;
+    border-radius: var(--radius-sm);
+    text-align: center;
+    min-width: 120px;
+}
+
+.fletchling-stats .stat-box .stat-value {
+    font-size: 28px;
+    font-weight: 700;
+    color: var(--accent-primary);
+}
+
+.fletchling-stats .stat-box .stat-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+.fletchling-docs {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-docs h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.fletchling-docs .docs-links {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 12px;
+}
+
+.fletchling-docs .doc-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 10px 16px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    text-decoration: none;
+    font-size: 13px;
+    transition: all var(--transition-fast);
+}
+
+.fletchling-docs .doc-link:hover {
+    background: var(--bg-hover);
+    border-color: var(--accent-primary);
+}
+
+.section-desc {
+    color: var(--text-secondary);
+    font-size: 14px;
+    margin-bottom: 16px;
+    line-height: 1.6;
+}
+

@@ -10853,6 +10853,357 @@ def api_mariadb_install():
     return jsonify(result)
 
 # =============================================================================
+# FLETCHLING - Nest Detection Setup & Management
+# =============================================================================
+
+@app.route('/api/fletchling/status')
+def api_fletchling_status():
+    """Get comprehensive Fletchling status for management tab"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    status = {
+        'docker_compose': {
+            'enabled': False,
+            'comment_status': 'unknown'
+        },
+        'config': {
+            'file_exists': False,
+            'project_configured': False,
+            'project_name': None,
+            'has_placeholder': False,
+            'db_configured': False
+        },
+        'container': {
+            'running': False,
+            'tools_running': False,
+            'health': 'unknown',
+            'image': None
+        },
+        'database': {
+            'nests_table_exists': False,
+            'nests_count': 0,
+            'active_nests': 0,
+            'last_updated': None
+        },
+        'golbat_webhook': {
+            'configured': False
+        }
+    }
+    
+    # Check docker-compose.yaml for fletchling service
+    compose_file = os.path.join(aegis_root, 'docker-compose.yaml')
+    if os.path.exists(compose_file):
+        try:
+            with open(compose_file, 'r') as f:
+                compose_content = f.read()
+            
+            # Check if fletchling is commented out
+            if '# fletchling:' in compose_content:
+                status['docker_compose']['enabled'] = False
+                status['docker_compose']['comment_status'] = 'commented'
+            elif 'fletchling:' in compose_content:
+                status['docker_compose']['enabled'] = True
+                status['docker_compose']['comment_status'] = 'enabled'
+            else:
+                status['docker_compose']['comment_status'] = 'not_found'
+        except Exception as e:
+            status['docker_compose']['comment_status'] = f'error: {str(e)[:30]}'
+    
+    # Check fletchling.toml config
+    config_file = os.path.join(aegis_root, 'fletchling.toml')
+    if os.path.exists(config_file):
+        status['config']['file_exists'] = True
+        try:
+            with open(config_file, 'r') as f:
+                config_content = f.read()
+            
+            # Check for placeholder
+            if 'YOUR-PROJECT-IN-KOJI-ADMIN-HERE' in config_content:
+                status['config']['has_placeholder'] = True
+                status['config']['project_configured'] = False
+            else:
+                status['config']['has_placeholder'] = False
+                # Extract project name from koji_url
+                import re
+                match = re.search(r'koji_url\s*=\s*"[^"]*feature-collection/([^"]+)"', config_content)
+                if match:
+                    status['config']['project_name'] = match.group(1)
+                    status['config']['project_configured'] = True
+            
+            # Check if database is configured
+            if '${MYSQL_ROOT_PASSWORD}' in config_content or 'password = "' in config_content:
+                status['config']['db_configured'] = True
+        except Exception as e:
+            pass
+    
+    # Check container status
+    try:
+        result = subprocess.run(
+            ['docker', 'ps', '--format', '{{.Names}}:{{.Status}}:{{.Image}}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if not line:
+                    continue
+                parts = line.split(':')
+                name = parts[0] if len(parts) > 0 else ''
+                container_status = parts[1] if len(parts) > 1 else ''
+                image = parts[2] if len(parts) > 2 else ''
+                
+                if name == 'fletchling':
+                    status['container']['running'] = 'Up' in container_status
+                    status['container']['health'] = 'healthy' if 'healthy' in container_status else 'running' if 'Up' in container_status else 'unhealthy'
+                    status['container']['image'] = image
+                elif name == 'fletchling-tools':
+                    status['container']['tools_running'] = 'Up' in container_status
+    except Exception as e:
+        pass
+    
+    # Check nests table in golbat database
+    try:
+        result = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e',
+             'SELECT COUNT(*) as count FROM golbat.nests 2>/dev/null; SELECT COUNT(*) as active FROM golbat.nests WHERE pokemon_id > 0 2>/dev/null;'],
+            capture_output=True, text=True, timeout=10
+        )
+        if result.returncode == 0 and 'count' in result.stdout:
+            status['database']['nests_table_exists'] = True
+            lines = result.stdout.strip().split('\n')
+            for i, line in enumerate(lines):
+                if 'count' in line.lower() and i + 1 < len(lines):
+                    try:
+                        status['database']['nests_count'] = int(lines[i + 1].strip())
+                    except:
+                        pass
+                if 'active' in line.lower() and i + 1 < len(lines):
+                    try:
+                        status['database']['active_nests'] = int(lines[i + 1].strip())
+                    except:
+                        pass
+        elif 'exist' in result.stderr.lower() or 'exist' in result.stdout.lower():
+            status['database']['nests_table_exists'] = False
+    except Exception as e:
+        pass
+    
+    # Check golbat webhook configuration
+    golbat_config = os.path.join(aegis_root, 'unown', 'golbat_config.toml')
+    if os.path.exists(golbat_config):
+        try:
+            with open(golbat_config, 'r') as f:
+                golbat_content = f.read()
+            if 'fletchling' in golbat_content.lower() and 'webhook' in golbat_content.lower():
+                status['golbat_webhook']['configured'] = True
+        except:
+            pass
+    
+    return jsonify(status)
+
+
+@app.route('/api/fletchling/enable', methods=['POST'])
+def api_fletchling_enable():
+    """Enable Fletchling in docker-compose.yaml by uncommenting the service"""
+    aegis_root = str(AEGIS_ROOT)
+    compose_file = os.path.join(aegis_root, 'docker-compose.yaml')
+    
+    result = {'success': False, 'message': '', 'changes': []}
+    
+    if not os.path.exists(compose_file):
+        result['message'] = 'docker-compose.yaml not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(compose_file, 'r') as f:
+            content = f.read()
+        
+        if '# fletchling:' not in content:
+            if 'fletchling:' in content:
+                result['success'] = True
+                result['message'] = 'Fletchling is already enabled'
+            else:
+                result['message'] = 'Fletchling service not found in docker-compose.yaml'
+            return jsonify(result)
+        
+        # Uncomment fletchling and fletchling-tools sections
+        lines = content.split('\n')
+        new_lines = []
+        in_fletchling_section = False
+        section_depth = 0
+        
+        for line in lines:
+            # Detect start of fletchling or fletchling-tools section
+            if line.strip() == '# fletchling:' or line.strip() == '# fletchling-tools:':
+                in_fletchling_section = True
+                section_depth = 0
+                new_lines.append(line.lstrip('# ').rstrip())
+                result['changes'].append(f'Enabled: {line.strip().replace("# ", "")}')
+                continue
+            
+            if in_fletchling_section:
+                # Check if we're still in the section (by indentation or next service)
+                if line.strip() and not line.startswith('#') and not line.startswith(' ') and not line.startswith('\t'):
+                    in_fletchling_section = False
+                elif line.strip().startswith('# ') and line.strip()[2:3] not in [' ', '\t', '']:
+                    # This is a commented line in the section
+                    new_lines.append(line.replace('# ', '  ', 1))
+                    continue
+                elif line.strip().startswith('#') and not line.strip().startswith('# '):
+                    # Empty comment or other
+                    new_lines.append(line)
+                    continue
+            
+            new_lines.append(line)
+        
+        new_content = '\n'.join(new_lines)
+        
+        # Write back
+        success, error = safe_write_file(compose_file, new_content)
+        if success:
+            result['success'] = True
+            result['message'] = 'Fletchling enabled in docker-compose.yaml'
+        else:
+            result['message'] = f'Failed to write: {error}'
+    
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/configure', methods=['POST'])
+def api_fletchling_configure():
+    """Configure fletchling.toml with project name"""
+    aegis_root = str(AEGIS_ROOT)
+    config_file = os.path.join(aegis_root, 'fletchling.toml')
+    
+    data = request.json or {}
+    project_name = data.get('project_name', '').strip()
+    
+    result = {'success': False, 'message': ''}
+    
+    if not project_name:
+        result['message'] = 'Project name is required'
+        return jsonify(result), 400
+    
+    if not os.path.exists(config_file):
+        result['message'] = 'fletchling.toml not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(config_file, 'r') as f:
+            content = f.read()
+        
+        # Replace placeholder with project name
+        if 'YOUR-PROJECT-IN-KOJI-ADMIN-HERE' in content:
+            content = content.replace('YOUR-PROJECT-IN-KOJI-ADMIN-HERE', project_name)
+        else:
+            # Update existing project name
+            import re
+            content = re.sub(
+                r'(koji_url\s*=\s*"[^"]*feature-collection/)[^"]+"',
+                f'\\1{project_name}"',
+                content
+            )
+        
+        success, error = safe_write_file(config_file, content)
+        if success:
+            result['success'] = True
+            result['message'] = f'Configured Fletchling with project: {project_name}'
+        else:
+            result['message'] = f'Failed to write: {error}'
+    
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/add-webhook', methods=['POST'])
+def api_fletchling_add_webhook():
+    """Add Fletchling webhook to golbat_config.toml"""
+    aegis_root = str(AEGIS_ROOT)
+    golbat_config = os.path.join(aegis_root, 'unown', 'golbat_config.toml')
+    
+    result = {'success': False, 'message': ''}
+    
+    if not os.path.exists(golbat_config):
+        result['message'] = 'golbat_config.toml not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(golbat_config, 'r') as f:
+            content = f.read()
+        
+        # Check if already configured
+        if 'fletchling' in content.lower():
+            result['success'] = True
+            result['message'] = 'Fletchling webhook already configured in Golbat'
+            return jsonify(result)
+        
+        # Add webhook section
+        webhook_config = '''
+# Fletchling nest detection webhook
+[[webhooks]]
+url = "http://fletchling:9042/webhook"
+types = ["pokemon_iv"]
+'''
+        content += webhook_config
+        
+        success, error = safe_write_file(golbat_config, content)
+        if success:
+            result['success'] = True
+            result['message'] = 'Added Fletchling webhook to Golbat config. Restart Golbat to apply.'
+        else:
+            result['message'] = f'Failed to write: {error}'
+    
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/start', methods=['POST'])
+def api_fletchling_start():
+    """Start Fletchling containers"""
+    result = {'success': False, 'message': '', 'output': ''}
+    
+    try:
+        # Start containers
+        proc = subprocess.run(
+            ['docker', 'compose', 'up', '-d', 'fletchling', 'fletchling-tools'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        result['output'] = proc.stdout + '\n' + proc.stderr
+        result['success'] = proc.returncode == 0
+        result['message'] = 'Fletchling containers started' if result['success'] else 'Failed to start containers'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/stop', methods=['POST'])
+def api_fletchling_stop():
+    """Stop Fletchling containers"""
+    result = {'success': False, 'message': '', 'output': ''}
+    
+    try:
+        proc = subprocess.run(
+            ['docker', 'compose', 'stop', 'fletchling', 'fletchling-tools'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        result['output'] = proc.stdout + '\n' + proc.stderr
+        result['success'] = proc.returncode == 0
+        result['message'] = 'Fletchling containers stopped' if result['success'] else 'Failed to stop containers'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+# =============================================================================
 # INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)
 # =============================================================================
 

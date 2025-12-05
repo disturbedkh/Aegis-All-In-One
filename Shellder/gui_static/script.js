@@ -5443,6 +5443,9 @@ function showSetupTab(tabName) {
         case 'env':
             loadConfigVariablesStatus();  // New comprehensive config variables status
             break;
+        case 'fletchling':
+            loadFletchlingStatus();
+            break;
     }
 }
 
@@ -5672,6 +5675,240 @@ function goToConfigStatus(event) {
     setTimeout(() => {
         showSetupTab('env');
     }, 100);
+}
+
+// =============================================================================
+// FLETCHLING MANAGEMENT
+// =============================================================================
+
+async function loadFletchlingStatus() {
+    try {
+        const data = await fetchAPI('/api/fletchling/status');
+        
+        // Update Docker Compose status
+        const composeStatus = document.querySelector('#fletchling-compose-status .status-light');
+        const composeDesc = document.querySelector('#fletchling-compose-status .status-desc');
+        if (composeStatus) {
+            composeStatus.className = 'status-light ' + (data.docker_compose.enabled ? 'success' : 'error');
+            composeDesc.textContent = data.docker_compose.enabled 
+                ? 'Service enabled in docker-compose.yaml'
+                : 'Service commented out (disabled)';
+        }
+        
+        // Update Config status
+        const configStatus = document.querySelector('#fletchling-config-status .status-light');
+        const configDesc = document.querySelector('#fletchling-config-status .status-desc');
+        if (configStatus) {
+            if (!data.config.file_exists) {
+                configStatus.className = 'status-light error';
+                configDesc.textContent = 'fletchling.toml not found';
+            } else if (data.config.has_placeholder) {
+                configStatus.className = 'status-light warning';
+                configDesc.textContent = 'Project not configured (has placeholder)';
+            } else if (data.config.project_configured) {
+                configStatus.className = 'status-light success';
+                configDesc.textContent = `Project: ${data.config.project_name}`;
+                // Pre-fill the project name input
+                const input = document.getElementById('fletchlingProjectName');
+                if (input && !input.value) {
+                    input.value = data.config.project_name || '';
+                }
+            } else {
+                configStatus.className = 'status-light warning';
+                configDesc.textContent = 'Configuration incomplete';
+            }
+        }
+        
+        // Update Container status
+        const containerStatus = document.querySelector('#fletchling-container-status .status-light');
+        const containerDesc = document.querySelector('#fletchling-container-status .status-desc');
+        if (containerStatus) {
+            if (data.container.running) {
+                containerStatus.className = 'status-light success';
+                containerDesc.textContent = `Running (${data.container.health})`;
+            } else if (data.docker_compose.enabled) {
+                containerStatus.className = 'status-light warning';
+                containerDesc.textContent = 'Enabled but not running';
+            } else {
+                containerStatus.className = 'status-light error';
+                containerDesc.textContent = 'Not running';
+            }
+        }
+        
+        // Update Nests Table status
+        const nestsStatus = document.querySelector('#fletchling-nests-status .status-light');
+        const nestsDesc = document.querySelector('#fletchling-nests-status .status-desc');
+        if (nestsStatus) {
+            if (data.database.nests_table_exists) {
+                if (data.database.nests_count > 0) {
+                    nestsStatus.className = 'status-light success';
+                    nestsDesc.textContent = `${data.database.nests_count} nests (${data.database.active_nests} active)`;
+                    
+                    // Show stats section
+                    const statsEl = document.getElementById('fletchlingStats');
+                    if (statsEl) {
+                        statsEl.style.display = 'block';
+                        document.getElementById('totalNests').textContent = data.database.nests_count;
+                        document.getElementById('activeNests').textContent = data.database.active_nests;
+                    }
+                } else {
+                    nestsStatus.className = 'status-light warning';
+                    nestsDesc.textContent = 'Table exists but empty - run OSM import';
+                }
+            } else {
+                nestsStatus.className = 'status-light error';
+                nestsDesc.textContent = 'Nests table not found in golbat DB';
+            }
+        }
+        
+        // Update Webhook status
+        const webhookStatus = document.querySelector('#fletchling-webhook-status .status-light');
+        const webhookDesc = document.querySelector('#fletchling-webhook-status .status-desc');
+        if (webhookStatus) {
+            webhookStatus.className = 'status-light ' + (data.golbat_webhook.configured ? 'success' : 'warning');
+            webhookDesc.textContent = data.golbat_webhook.configured 
+                ? 'Golbat configured to send data'
+                : 'Webhook not configured in Golbat';
+        }
+        
+        // Update step states based on status
+        updateFletchlingSteps(data);
+        
+    } catch (e) {
+        console.error('Failed to load Fletchling status:', e);
+        showToast('Failed to load Fletchling status', 'error');
+    }
+}
+
+function updateFletchlingSteps(data) {
+    // Step 1: Enable
+    const step1 = document.getElementById('fletchling-step-enable');
+    if (step1 && data.docker_compose.enabled) {
+        step1.classList.add('completed');
+    }
+    
+    // Step 2: Config
+    const step2 = document.getElementById('fletchling-step-config');
+    if (step2 && data.config.project_configured) {
+        step2.classList.add('completed');
+    }
+    
+    // Step 3: Webhook
+    const step3 = document.getElementById('fletchling-step-webhook');
+    if (step3 && data.golbat_webhook.configured) {
+        step3.classList.add('completed');
+    }
+    
+    // Step 4: Running
+    const step4 = document.getElementById('fletchling-step-start');
+    if (step4 && data.container.running) {
+        step4.classList.add('completed');
+    }
+}
+
+async function enableFletchling() {
+    try {
+        showToast('Enabling Fletchling in docker-compose.yaml...', 'info');
+        const result = await fetchAPI('/api/fletchling/enable', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadFletchlingStatus();
+        } else {
+            showToast(result.message || 'Failed to enable Fletchling', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function configureFletchling() {
+    const projectName = document.getElementById('fletchlingProjectName').value.trim();
+    
+    if (!projectName) {
+        showToast('Please enter your Koji project name', 'warning');
+        return;
+    }
+    
+    try {
+        showToast('Configuring Fletchling...', 'info');
+        const result = await fetchAPI('/api/fletchling/configure', {
+            method: 'POST',
+            body: JSON.stringify({ project_name: projectName })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadFletchlingStatus();
+        } else {
+            showToast(result.message || 'Failed to configure Fletchling', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function addFletchlingWebhook() {
+    try {
+        showToast('Adding Fletchling webhook to Golbat...', 'info');
+        const result = await fetchAPI('/api/fletchling/add-webhook', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadFletchlingStatus();
+        } else {
+            showToast(result.message || 'Failed to add webhook', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function startFletchling() {
+    try {
+        showToast('Starting Fletchling containers...', 'info');
+        const result = await fetchAPI('/api/fletchling/start', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            setTimeout(loadFletchlingStatus, 3000); // Wait for container to start
+        } else {
+            showToast(result.message || 'Failed to start Fletchling', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function stopFletchling() {
+    try {
+        showToast('Stopping Fletchling containers...', 'info');
+        const result = await fetchAPI('/api/fletchling/stop', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadFletchlingStatus();
+        } else {
+            showToast(result.message || 'Failed to stop Fletchling', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function restartGolbat() {
+    try {
+        showToast('Restarting Golbat to apply webhook changes...', 'info');
+        const result = await fetchAPI('/api/containers/golbat/restart', { method: 'POST' });
+        
+        if (result.success) {
+            showToast('Golbat restarted successfully', 'success');
+        } else {
+            showToast('Failed to restart Golbat', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
 }
 
 // =============================================================================
