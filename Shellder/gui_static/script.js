@@ -7516,7 +7516,11 @@ function renderConfigForm(schemaData) {
     
     let html = legendHtml;
     for (const [sectionKey, section] of Object.entries(schemaData.sections)) {
-        const sectionValues = values[sectionKey] || {};
+        // Navigate nested path for section keys like 'db.dragonite'
+        let sectionValues = values;
+        for (const part of sectionKey.split('.')) {
+            sectionValues = sectionValues?.[part] || {};
+        }
         
         html += `
             <div class="config-section" id="config-section-${sectionKey}">
@@ -7740,16 +7744,30 @@ function collectFormValues() {
     
     const values = {};
     for (const [sectionKey, section] of Object.entries(currentConfigSchema.sections)) {
-        values[sectionKey] = {};
+        // Create nested structure for section keys like 'db.dragonite'
+        const parts = sectionKey.split('.');
+        let current = values;
+        for (let i = 0; i < parts.length; i++) {
+            if (i === parts.length - 1) {
+                // Last part - create the section object
+                current[parts[i]] = current[parts[i]] || {};
+                current = current[parts[i]];
+            } else {
+                // Intermediate part - navigate or create
+                current[parts[i]] = current[parts[i]] || {};
+                current = current[parts[i]];
+            }
+        }
+        
         for (const [fieldKey, field] of Object.entries(section.fields)) {
             const input = document.getElementById(`config-${sectionKey}-${fieldKey}`);
             if (input) {
                 if (field.type === 'checkbox') {
-                    values[sectionKey][fieldKey] = input.checked;
+                    current[fieldKey] = input.checked;
                 } else if (field.type === 'number') {
-                    values[sectionKey][fieldKey] = parseFloat(input.value) || 0;
+                    current[fieldKey] = parseFloat(input.value) || 0;
                 } else {
-                    values[sectionKey][fieldKey] = input.value;
+                    current[fieldKey] = input.value;
                 }
             }
         }
