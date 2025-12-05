@@ -14807,10 +14807,14 @@ def api_file_upload():
         # Save file
         file.save(str(dest_path))
         
-        # Fix ownership to current user
+        # Fix ownership to actual user (not root)
         try:
             import pwd
-            current_user = pwd.getpwuid(os.getuid()).pw_name
+            # Try SUDO_USER first, then Aegis dir owner
+            current_user = os.environ.get('SUDO_USER')
+            if not current_user:
+                aegis_stat = os.stat(AEGIS_ROOT)
+                current_user = pwd.getpwuid(aegis_stat.st_uid).pw_name
             subprocess.run(['sudo', 'chown', f'{current_user}:{current_user}', str(dest_path)],
                           capture_output=True, timeout=5)
         except:
@@ -14828,12 +14832,37 @@ def api_file_chown_all():
     data = request.json or {}
     path = data.get('path', '')  # Optional: specific subdirectory
     
+    # Get the real user (not root if running with sudo)
+    current_user = None
+    current_group = None
+    
     try:
-        import pwd
-        current_user = pwd.getpwuid(os.getuid()).pw_name
-        current_group = pwd.getpwuid(os.getuid()).pw_name
-    except:
-        return jsonify({'success': False, 'error': 'Could not determine current user'})
+        # First try SUDO_USER (set when running via sudo)
+        current_user = os.environ.get('SUDO_USER')
+        if current_user:
+            import pwd
+            user_info = pwd.getpwnam(current_user)
+            current_group = pwd.getpwgid(user_info.pw_gid).pw_name
+        
+        # If no SUDO_USER, try to get owner of the Aegis directory
+        if not current_user:
+            import pwd
+            aegis_stat = os.stat(AEGIS_ROOT)
+            user_info = pwd.getpwuid(aegis_stat.st_uid)
+            current_user = user_info.pw_name
+            current_group = pwd.getpwgid(user_info.pw_gid).pw_name
+        
+        # Last resort: use os.getlogin() or getuid
+        if not current_user:
+            try:
+                current_user = os.getlogin()
+            except:
+                import pwd
+                current_user = pwd.getpwuid(os.getuid()).pw_name
+            current_group = current_user
+            
+    except Exception as e:
+        return jsonify({'success': False, 'error': f'Could not determine current user: {e}'})
     
     target_path = AEGIS_ROOT / path if path else AEGIS_ROOT
     
@@ -14874,16 +14903,37 @@ def api_files_current_user():
         import pwd
         import grp
         
-        uid = os.getuid()
-        gid = os.getgid()
-        user_info = pwd.getpwuid(uid)
-        group_info = grp.getgrgid(gid)
+        # Get the real user (not root if running with sudo)
+        username = None
+        
+        # First try SUDO_USER
+        username = os.environ.get('SUDO_USER')
+        
+        # If no SUDO_USER, try owner of Aegis directory
+        if not username:
+            try:
+                aegis_stat = os.stat(AEGIS_ROOT)
+                user_info = pwd.getpwuid(aegis_stat.st_uid)
+                username = user_info.pw_name
+            except:
+                pass
+        
+        # Last resort
+        if not username:
+            try:
+                username = os.getlogin()
+            except:
+                username = pwd.getpwuid(os.getuid()).pw_name
+        
+        # Get user info
+        user_info = pwd.getpwnam(username)
+        group_info = grp.getgrgid(user_info.pw_gid)
         
         return jsonify({
             'username': user_info.pw_name,
-            'uid': uid,
+            'uid': user_info.pw_uid,
             'group': group_info.gr_name,
-            'gid': gid,
+            'gid': user_info.pw_gid,
             'home': user_info.pw_dir
         })
     except Exception as e:
