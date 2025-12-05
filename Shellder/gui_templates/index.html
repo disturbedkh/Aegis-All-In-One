@@ -1687,34 +1687,34 @@
                             <div class="code-block mcp-config" style="position: relative;">
                                 <pre id="aiInstructionsBlock">## Shellder Debug API Access
 
-Shellder API URL: http://77.237.241.111:5050
+Shellder API URL: http://77.237.241.111:5000
 
 Use the fetch MCP tool to access these endpoints:
 
 ### System Diagnostics
-GET http://77.237.241.111:5050/api/ai-debug/diagnose
+GET http://77.237.241.111:5000/api/ai-debug/diagnose
 
 ### Read Files  
-GET http://77.237.241.111:5050/api/ai-debug/file?path=.env
-GET http://77.237.241.111:5050/api/ai-debug/file?path=docker-compose.yaml
+GET http://77.237.241.111:5000/api/ai-debug/file?path=.env
+GET http://77.237.241.111:5000/api/ai-debug/file?path=docker-compose.yaml
 
 ### Execute Commands
-POST http://77.237.241.111:5050/api/ai-debug/exec
+POST http://77.237.241.111:5000/api/ai-debug/exec
 Body: {"cmd": "docker ps"}
 
 ### Docker Operations
-GET http://77.237.241.111:5050/api/ai-debug/docker?cmd=ps
-GET http://77.237.241.111:5050/api/ai-debug/docker?cmd=logs&container=dragonite&lines=50
+GET http://77.237.241.111:5000/api/ai-debug/docker?cmd=ps
+GET http://77.237.241.111:5000/api/ai-debug/docker?cmd=logs&container=dragonite&lines=50
 
 ### Database Queries
-POST http://77.237.241.111:5050/api/ai-debug/sql
+POST http://77.237.241.111:5000/api/ai-debug/sql
 Body: {"database": "golbat", "query": "SHOW TABLES"}
 
 ### Get Logs
-GET http://77.237.241.111:5050/api/ai-debug/logs?type=shellder&lines=100
+GET http://77.237.241.111:5000/api/ai-debug/logs?type=shellder&lines=100
 
 ### System Info
-GET http://77.237.241.111:5050/api/ai-debug/system</pre>
+GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                                 <button class="btn btn-primary" onclick="copyAIInstructionsBlock()" style="position: absolute; top: 10px; right: 10px;">
                                     📋 Copy All
                                 </button>
@@ -1728,7 +1728,7 @@ GET http://77.237.241.111:5050/api/ai-debug/system</pre>
                                 If Cursor is on Windows and Shellder is on Linux, use SSH port forwarding:
                             </p>
                             <div class="code-block">
-                                <code id="sshTunnelCmd">ssh -L 5050:localhost:5050 pokemap@77.237.241.111</code>
+                                <code id="sshTunnelCmd">ssh -L 5000:localhost:5000 pokemap@77.237.241.111</code>
                                 <button class="btn btn-xs" onclick="copySSHTunnel()">📋</button>
                             </div>
                             <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
