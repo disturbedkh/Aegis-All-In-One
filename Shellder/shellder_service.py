@@ -386,6 +386,104 @@ def parse_simple_toml(file_path):
 # FILE OWNERSHIP HELPERS (prevents root-owned files from GUI operations)
 # =============================================================================
 
+def auto_detect_and_fix_puid_pgid():
+    """
+    Auto-detect the correct PUID/PGID and update .env if needed.
+    Called on startup to ensure Docker containers use correct permissions.
+    """
+    import pwd
+    
+    # Detect the actual owner of AEGIS_ROOT (the user who owns the project)
+    try:
+        stat_info = os.stat(AEGIS_ROOT)
+        detected_uid = stat_info.st_uid
+        detected_gid = stat_info.st_gid
+        
+        # Skip if owned by root (shouldn't be, but just in case)
+        if detected_uid == 0:
+            # Try SUDO_USER
+            sudo_user = os.environ.get('SUDO_USER')
+            if sudo_user:
+                try:
+                    user_info = pwd.getpwnam(sudo_user)
+                    detected_uid = user_info.pw_uid
+                    detected_gid = user_info.pw_gid
+                except:
+                    return  # Can't determine, skip
+            else:
+                return  # Owned by root and no SUDO_USER, skip
+        
+        # Read current .env values
+        env_file = AEGIS_ROOT / '.env'
+        if not env_file.exists():
+            return  # No .env file yet
+        
+        current_puid = None
+        current_pgid = None
+        env_lines = []
+        
+        with open(env_file, 'r') as f:
+            for line in f:
+                if line.startswith('PUID='):
+                    try:
+                        current_puid = int(line.strip().split('=')[1])
+                    except:
+                        pass
+                elif line.startswith('PGID='):
+                    try:
+                        current_pgid = int(line.strip().split('=')[1])
+                    except:
+                        pass
+                env_lines.append(line)
+        
+        # Check if update needed
+        needs_update = False
+        if current_puid != detected_uid or current_pgid != detected_gid:
+            needs_update = True
+            print(f"[Shellder] Auto-detected PUID:PGID = {detected_uid}:{detected_gid} (was {current_puid}:{current_pgid})")
+        
+        if needs_update:
+            # Update the lines
+            new_lines = []
+            puid_updated = False
+            pgid_updated = False
+            
+            for line in env_lines:
+                if line.startswith('PUID='):
+                    new_lines.append(f'PUID={detected_uid}\n')
+                    puid_updated = True
+                elif line.startswith('PGID='):
+                    new_lines.append(f'PGID={detected_gid}\n')
+                    pgid_updated = True
+                else:
+                    new_lines.append(line)
+            
+            # Add if not present
+            if not puid_updated:
+                new_lines.insert(0, f'PUID={detected_uid}\n')
+            if not pgid_updated:
+                new_lines.insert(1 if puid_updated else 0, f'PGID={detected_gid}\n')
+            
+            # Write back
+            with open(env_file, 'w') as f:
+                f.writelines(new_lines)
+            
+            # Fix ownership of .env itself
+            try:
+                os.chown(env_file, detected_uid, detected_gid)
+            except:
+                pass
+            
+            print(f"[Shellder] Updated .env with correct PUID={detected_uid} PGID={detected_gid}")
+            
+            # Also set environment variables for current process
+            os.environ['PUID'] = str(detected_uid)
+            os.environ['PGID'] = str(detected_gid)
+    
+    except Exception as e:
+        print(f"[Shellder] Warning: Could not auto-detect PUID/PGID: {e}")
+
+
 def get_aegis_owner():
     """
     Get the correct owner for Aegis files.
@@ -18173,6 +18271,86 @@ def api_file_chown_all():
         return jsonify({'success': False, 'error': str(e)})
 
 
+@app.route('/api/files/fix-docker-permissions', methods=['POST'])
+def api_fix_docker_permissions():
+    """
+    Fix permissions for all Docker volume directories and update .env with correct PUID/PGID.
+    This auto-detects the correct user from the Aegis directory owner.
+    """
+    data = request.json or {}
+    sudo_password = data.get('sudo_password', '')
+    
+    # Auto-detect the correct owner
+    uid, gid, username = get_aegis_owner()
+    
+    # Update .env with correct PUID/PGID
+    auto_detect_and_fix_puid_pgid()
+    
+    # List of Docker volume directories that need correct permissions
+    docker_dirs = [
+        'grafana',
+        'victoriametrics',
+        'victoriametrics/data',
+        'vmagent',
+        'vmagent/data',
+        'mysql_data',
+        'Shellder/data',
+        'Shellder/logs',
+        'unown/logs',
+        'unown/golbat_cache',
+        'reactmap',
+        'Poracle/logs',
+        'Poracle/backups',
+    ]
+    
+    fixed = []
+    errors = []
+    
+    for dir_name in docker_dirs:
+        dir_path = AEGIS_ROOT / dir_name
+        if not dir_path.exists():
+            continue
+        
+        try:
+            if sudo_password:
+                result = subprocess.run(
+                    ['sudo', '-S', 'chown', '-R', f'{uid}:{gid}', str(dir_path)],
+                    input=sudo_password + '\n',
+                    capture_output=True, text=True, timeout=60
+                )
+            else:
+                result = subprocess.run(
+                    ['sudo', '-n', 'chown', '-R', f'{uid}:{gid}', str(dir_path)],
+                    capture_output=True, text=True, timeout=60
+                )
+            
+            if result.returncode == 0:
+                fixed.append(dir_name)
+            else:
+                if 'password' in result.stderr.lower():
+                    return jsonify({
+                        'success': False,
+                        'error': 'Password required',
+                        'needs_password': True,
+                        'target_user': username,
+                        'target_uid': uid,
+                        'target_gid': gid
+                    })
+                errors.append(f"{dir_name}: {result.stderr}")
+        except Exception as e:
+            errors.append(f"{dir_name}: {str(e)}")
+    
+    return jsonify({
+        'success': len(errors) == 0,
+        'message': f'Fixed {len(fixed)} directories for user {username} (uid={uid}, gid={gid})',
+        'fixed': fixed,
+        'errors': errors,
+        'puid': uid,
+        'pgid': gid,
+        'username': username
+    })
+
+
 @app.route('/api/files/current-user')
 def api_files_current_user():
     """Get current user info for ownership operations"""
@@ -18469,6 +18647,13 @@ def main():
     print(f"WebSocket: {SOCKETIO_AVAILABLE} (mode: {ASYNC_MODE})")
     print(f"psutil: {PSUTIL_AVAILABLE}")
     print(f"Debug Log: {get_log_path()}")
+    print()
+    
+    # Auto-detect and fix PUID/PGID in .env (prevents Docker permission issues)
+    print("Checking PUID/PGID configuration...")
+    auto_detect_and_fix_puid_pgid()
+    uid, gid, username = get_aegis_owner()
+    print(f"Aegis owner: {username} (uid={uid}, gid={gid})")
     print()
     
     # Start stats collector
