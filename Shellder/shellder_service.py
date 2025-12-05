@@ -9986,8 +9986,8 @@ SHARED_VARIABLE_PATHS = {
         'unown/golbat_config.toml': 'raw_bearer'
     },
     'ROTOM_AUTH_BEARER': {
-        '.env': None,  # Not in .env
-        'unown/rotom_config.json': 'auth_bearer'
+        '.env': 'ROTOM_AUTH_BEARER',
+        'unown/rotom_config.json': 'deviceListener.secret'
     }
 }
 
@@ -12527,12 +12527,38 @@ def api_config_schema(config_path):
         'all_shared_definitions': SHARED_FIELDS
     })
 
-def is_default_placeholder(value):
-    """Check if a value is still at a default placeholder from setup.sh"""
+def is_default_placeholder(value, default_placeholder=None):
+    """Check if a value is still at a default placeholder from setup.sh
+    
+    Args:
+        value: The current value to check
+        default_placeholder: The specific default for this field (optional)
+        
+    Returns:
+        True if value appears to be an unconfigured default
+    """
+    # Empty/None is only "default" if the placeholder itself is not empty
+    # (some secrets like ROTOM_AUTH_BEARER have empty defaults, meaning any value is valid)
     if not value:
+        # If default_placeholder is also empty/None, empty value is "configured as empty"
+        # Otherwise, empty value means "not yet configured"
+        if default_placeholder is not None and not default_placeholder:
+            return False  # Empty is a valid configured value for this field
         return True
+    
     str_value = str(value).strip()
-    return str_value in DEFAULT_PLACEHOLDERS or str_value.startswith('SuperSecure')
+    
+    # Check if it's a known placeholder pattern
+    if str_value in DEFAULT_PLACEHOLDERS:
+        return True
+    if str_value.startswith('SuperSecure'):
+        return True
+    
+    # Check if it matches the specific default for this field
+    if default_placeholder and str_value == str(default_placeholder).strip():
+        return True
+    
+    return False
 
 
 def parse_config_value(aegis_root, config_file, field_path):
@@ -12604,6 +12630,11 @@ def api_config_variables_status():
         config_values = {}
         all_values = []
         
+        # Get the default placeholder for this variable from AEGIS_SECRETS
+        default_placeholder = None
+        if var_name in AEGIS_SECRETS:
+            default_placeholder = AEGIS_SECRETS[var_name].get('default_placeholder', '')
+        
         # Get value from each config file
         for config_file, field_path in paths.items():
             if field_path is None:
@@ -12613,7 +12644,7 @@ def api_config_variables_status():
                 value = env_values.get(var_name, '')
                 config_values['.env'] = {
                     'value': value,
-                    'is_default': is_default_placeholder(value),
+                    'is_default': is_default_placeholder(value, default_placeholder),
                     'status': 'ok'
                 }
                 if value:
@@ -12622,15 +12653,15 @@ def api_config_variables_status():
                 value, status = parse_config_value(aegis_root, config_file, field_path)
                 config_values[config_file] = {
                     'value': value if value else '',
-                    'is_default': is_default_placeholder(value),
+                    'is_default': is_default_placeholder(value, default_placeholder),
                     'status': status
                 }
                 if value and status == 'ok':
                     all_values.append(str(value))
         
         # Determine sync status
-        unique_non_default = set(v for v in all_values if not is_default_placeholder(v))
-        all_still_default = all(is_default_placeholder(v) for v in all_values) if all_values else True
+        unique_non_default = set(v for v in all_values if not is_default_placeholder(v, default_placeholder))
+        all_still_default = all(is_default_placeholder(v, default_placeholder) for v in all_values) if all_values else True
         all_match = len(unique_non_default) <= 1
         is_configured = len(unique_non_default) > 0
         
