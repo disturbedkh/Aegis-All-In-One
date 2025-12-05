@@ -53,6 +53,7 @@
 - **Config Status** - Fixed detection of configured vs default values
 - **File Manager** - Base64 encoding for paths with special characters
 - **Docker Start** - Handles already-running containers and port conflicts gracefully
+- **CRITICAL: GUI Broken After Config Loader Update** - Function wrapper at end of script.js was reassigning `window.navigateTo`, breaking all onclick handlers. Removed wrapper and added page handling directly in navigateTo().
 
 ---
 

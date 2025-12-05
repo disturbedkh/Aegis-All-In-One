@@ -225,10 +225,17 @@ bash Shellder/dbsetup.sh      # Database maintenance
 ### JavaScript (script.js)
 
 - **Search for existing functions before adding new ones** - duplicates silently override!
+- **NEVER reassign global functions with wrappers** - this breaks onclick handlers!
+  ```javascript
+  // BAD - breaks the GUI completely:
+  window.navigateTo = function(page) { originalNavigateTo(page); };
+  // GOOD - modify the original function directly instead
+  ```
 - Use `async/await` with `fetchAPI()` for API calls
 - Implement AbortController for cancellable requests
 - Use `TextEncoder`/`TextDecoder` for base64 encoding (not deprecated escape/unescape)
 - Check DevTools Network tab to verify actual API response field names
+- When adding new pages: add to `titles` object AND add handler in `navigateTo()`
 
 ### CSS (style.css)
 

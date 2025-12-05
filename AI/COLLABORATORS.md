@@ -59,6 +59,12 @@ When starting work on a new machine:
   - `Shellder/shellder_config.toml` - Centralized component configuration
   - `Shellder/config_loader.py` - Python config loader with defaults
   - Support for local Docker OR remote service per component
+- **CRITICAL FIX: GUI Completely Broken**
+  - **Symptom**: Clicking ANY menu item did nothing, metrics showed flat lines
+  - **Root Cause**: Function wrapper at end of script.js reassigned `window.navigateTo`
+  - **Diagnosis**: Debug logs showed "Expected endpoints not called" - no API requests
+  - **Fix**: Removed wrapper, added page handling directly in `navigateTo()`
+  - **Lesson**: NEVER reassign global functions with wrappers - modify original instead
 
 ---
 
@@ -160,6 +166,16 @@ Types:
 - **Duplicate functions silently override** - search entire file for function name before adding
 - The later-defined function wins, can cause silent failures
 - Example: Two `updateXilriwsPage()` functions caused stats to show 0
+- **NEVER reassign global functions with wrappers** - breaks onclick handlers
+  ```javascript
+  // BAD - This broke the entire GUI:
+  const originalFn = typeof myFunc === 'function' ? myFunc : null;
+  window.myFunc = function() { originalFn(); /* extra code */ };
+  
+  // GOOD - Modify the original function directly:
+  // Add handling inside the existing function
+  ```
+- **Diagnosing "clicks do nothing"**: Check debug logs for "Expected endpoints not called"
 
 ### SQLite Database Issues
 - **Always set busy_timeout** - default 0 causes instant lock failures
