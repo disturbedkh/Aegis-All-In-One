@@ -417,12 +417,30 @@ def get_aegis_owner():
     except:
         pass
     
-    # Default to common user uid/gid 1000 (usually first non-root user)
+    # Default to uid/gid from PUID/PGID env vars, or try to find pokemap user
     try:
-        user_info = pwd.getpwuid(1000)
-        return 1000, 1000, user_info.pw_name
+        # Check if PUID/PGID are set in environment
+        puid = int(os.environ.get('PUID', 0))
+        pgid = int(os.environ.get('PGID', 0))
+        if puid > 0 and pgid > 0:
+            try:
+                user_info = pwd.getpwuid(puid)
+                return puid, pgid, user_info.pw_name
+            except:
+                return puid, pgid, str(puid)
+        
+        # Try to find pokemap user
+        user_info = pwd.getpwnam('pokemap')
+        return user_info.pw_uid, user_info.pw_gid, 'pokemap'
     except:
-        return 1000, 1000, 'pokemap'
+        # Last resort - try uid 1000, then 1001
+        for uid in [1000, 1001]:
+            try:
+                user_info = pwd.getpwuid(uid)
+                return uid, uid, user_info.pw_name
+            except:
+                continue
+        return 1000, 1000, 'unknown'
 
 
 def fix_file_ownership(file_path, use_sudo=True):
