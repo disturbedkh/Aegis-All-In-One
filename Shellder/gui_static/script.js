@@ -1242,10 +1242,13 @@ function navigateTo(page) {
     const titles = {
         'dashboard': 'Dashboard',
         'containers': 'Containers',
+        'shellder-config': 'Shellder Configuration',
+        'setup': 'Setup & Config',
         'devices': 'Devices',
         'stack': 'Stack Data',
         'xilriws': 'Xilriws Auth Proxy',
         'stats': 'Statistics',
+        'nginx': 'Nginx & Security',
         'files': 'File Manager',
         'scripts': 'Scripts',
         'logs': 'Logs',
@@ -1275,6 +1278,10 @@ function navigateTo(page) {
         loadCurrentUser(); // Show current user in toolbar
     } else if (page === 'debug') {
         loadDebugPage();
+    } else if (page === 'shellder-config') {
+        // Load shellder config when navigating to the page
+        if (typeof loadShellderConfig === 'function') loadShellderConfig();
+        if (typeof loadRawShellderConfig === 'function') loadRawShellderConfig();
     }
 }
 
@@ -11286,14 +11293,4 @@ async function saveRawShellderConfig() {
     }
 }
 
-// Load Shellder config when navigating to the page
-const originalNavigateTo = typeof navigateTo === 'function' ? navigateTo : null;
-if (originalNavigateTo) {
-    window.navigateTo = function(page) {
-        originalNavigateTo(page);
-        if (page === 'shellder-config') {
-            loadShellderConfig();
-            loadRawShellderConfig();
-        }
-    };
-}
+// Note: Shellder config page loading is now handled directly in navigateTo()
