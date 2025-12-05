@@ -14875,12 +14875,22 @@ def api_file_chown_all():
     if not target_path.exists():
         return jsonify({'success': False, 'error': 'Path not found'})
     
+    sudo_password = data.get('sudo_password', '')
+    
     try:
-        # Run chown recursively
-        result = subprocess.run(
-            ['sudo', 'chown', '-R', f'{current_user}:{current_group}', str(target_path)],
-            capture_output=True, text=True, timeout=120
-        )
+        if sudo_password:
+            # Run with password via stdin
+            result = subprocess.run(
+                ['sudo', '-S', 'chown', '-R', f'{current_user}:{current_group}', str(target_path)],
+                input=sudo_password + '\n',
+                capture_output=True, text=True, timeout=120
+            )
+        else:
+            # Try without password first (in case NOPASSWD is set)
+            result = subprocess.run(
+                ['sudo', '-n', 'chown', '-R', f'{current_user}:{current_group}', str(target_path)],
+                capture_output=True, text=True, timeout=120
+            )
         
         if result.returncode == 0:
             return jsonify({
@@ -14889,6 +14899,14 @@ def api_file_chown_all():
                 'path': str(target_path)
             })
         else:
+            # Check if password is required
+            if 'password' in result.stderr.lower() or 'sudo' in result.stderr.lower():
+                return jsonify({
+                    'success': False, 
+                    'error': 'Password required',
+                    'needs_password': True,
+                    'target_user': current_user
+                })
             return jsonify({'success': False, 'error': result.stderr or 'Failed to change ownership'})
     except subprocess.TimeoutExpired:
         return jsonify({'success': False, 'error': 'Operation timed out (directory may be very large)'})

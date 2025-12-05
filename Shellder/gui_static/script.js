@@ -3658,30 +3658,75 @@ async function uploadFile() {
 }
 
 // Fix all ownership to current user
-async function fixAllOwnership() {
+let pendingSudoAction = null;
+
+async function fixAllOwnership(sudoPassword = null) {
     const pathDesc = currentFilePath ? `"${currentFilePath}"` : 'entire Aegis directory';
     
-    if (!confirm(`Change ownership of ALL files in ${pathDesc} to your current user?\n\nThis will run: sudo chown -R user:user ${pathDesc}`)) {
-        return;
+    // Only show confirm on first attempt (not when retrying with password)
+    if (!sudoPassword) {
+        if (!confirm(`Change ownership of ALL files in ${pathDesc} to your current user?\n\nThis will run: sudo chown -R user:user ${pathDesc}`)) {
+            return;
+        }
     }
     
     try {
         showToast('Fixing ownership... This may take a moment.', 'info');
         
+        const payload = { path: currentFilePath };
+        if (sudoPassword) {
+            payload.sudo_password = sudoPassword;
+        }
+        
         const result = await fetchAPI('/api/files/chown-all', {
             method: 'POST',
-            body: JSON.stringify({ path: currentFilePath })
+            body: JSON.stringify(payload)
         });
         
         if (result.success) {
             showToast(result.message, 'success');
             refreshFiles();
+        } else if (result.needs_password) {
+            // Show password modal
+            showSudoPasswordModal(result.target_user, currentFilePath || 'Aegis-All-In-One', 'fixAllOwnership');
         } else {
             showToast(result.error || 'Failed to fix ownership', 'error');
         }
     } catch (e) {
         showToast('Error: ' + e.message, 'error');
     }
+}
+
+// Sudo password modal functions
+function showSudoPasswordModal(targetUser, targetPath, action) {
+    document.getElementById('sudoTargetUser').textContent = targetUser || 'current user';
+    document.getElementById('sudoTargetPath').textContent = targetPath || '/';
+    document.getElementById('sudoPasswordInput').value = '';
+    document.getElementById('sudoPasswordModal').style.display = 'flex';
+    document.getElementById('sudoPasswordInput').focus();
+    pendingSudoAction = action;
+}
+
+function closeSudoPasswordModal() {
+    document.getElementById('sudoPasswordModal').style.display = 'none';
+    document.getElementById('sudoPasswordInput').value = '';
+    pendingSudoAction = null;
+}
+
+async function submitSudoPassword() {
+    const password = document.getElementById('sudoPasswordInput').value;
+    if (!password) {
+        showToast('Please enter your password', 'error');
+        return;
+    }
+    
+    closeSudoPasswordModal();
+    
+    // Execute the pending action with password
+    if (pendingSudoAction === 'fixAllOwnership') {
+        await fixAllOwnership(password);
+    }
+    // Add more actions here as needed
 }
 
 // Load current user info

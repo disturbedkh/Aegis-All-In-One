@@ -2460,6 +2460,33 @@
                         </div>
                     </div>
                 </div>
+                
+                <!-- Sudo Password Modal -->
+                <div id="sudoPasswordModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>🔐 Sudo Password Required</h3>
+                            <button class="btn btn-sm" onclick="closeSudoPasswordModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <p style="margin-bottom: 10px;">This operation requires sudo privileges.</p>
+                            <div class="sudo-target-info" style="background: var(--bg-tertiary); padding: 10px; border-radius: 6px; margin-bottom: 15px;">
+                                <div>Target user: <strong id="sudoTargetUser">-</strong></div>
+                                <div>Target path: <code id="sudoTargetPath" style="font-size: 12px;">-</code></div>
+                            </div>
+                            <p style="color: var(--text-secondary); font-size: 12px; margin-bottom: 10px;">
+                                ⚠️ Your password is used once and not stored.
+                            </p>
+                            <input type="password" id="sudoPasswordInput" class="form-input" 
+                                   placeholder="Enter your sudo password" 
+                                   onkeypress="if(event.key==='Enter') submitSudoPassword()">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeSudoPasswordModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="submitSudoPassword()">Submit</button>
+                        </div>
+                    </div>
+                </div>
             </div>
         </main>
     </div>
