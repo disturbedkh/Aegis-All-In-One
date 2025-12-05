@@ -1274,6 +1274,8 @@ function navigateTo(page) {
         loadContainerDetails();
     } else if (page === 'fletchling') {
         loadFletchlingStatus();
+        loadNestStats();
+        loadNestList();
     } else if (page === 'files') {
         navigateToPath(''); // Start at Aegis root
         loadCurrentUser(); // Show current user in toolbar
@@ -7261,6 +7263,408 @@ async function stopFletchling() {
         showToast('Error: ' + e.message, 'error');
     }
 }
+
+// =============================================================================
+// FLETCHLING NEST MANAGEMENT
+// =============================================================================
+
+let nestCurrentPage = 1;
+let nestTotalPages = 1;
+let nestPageSize = 25;
+
+// Load nest statistics and populate area filter
+async function loadNestStats() {
+    try {
+        const data = await fetchAPI('/api/fletchling/nests/stats');
+        
+        if (data.success) {
+            // Update stat cards
+            document.getElementById('totalAreasCount').textContent = data.stats.total_areas || 0;
+            document.getElementById('totalNestsCount').textContent = data.stats.total_nests || 0;
+            document.getElementById('activeNestsCount').textContent = data.stats.active_nests || 0;
+            document.getElementById('unknownNestsCount').textContent = data.stats.unknown_nests || 0;
+            
+            // Populate area filter dropdown
+            const areaFilter = document.getElementById('nestAreaFilter');
+            if (areaFilter && data.stats.areas) {
+                areaFilter.innerHTML = '<option value="">All Areas</option>';
+                data.stats.areas.forEach(area => {
+                    const opt = document.createElement('option');
+                    opt.value = area.name;
+                    opt.textContent = `${area.name} (${area.nest_count} nests)`;
+                    areaFilter.appendChild(opt);
+                });
+            }
+            
+            // Populate areas list
+            renderAreasList(data.stats.areas || []);
+        }
+    } catch (e) {
+        console.error('Failed to load nest stats:', e);
+    }
+}
+
+// Render the monitored areas list
+function renderAreasList(areas) {
+    const container = document.getElementById('areasListContainer');
+    if (!container) return;
+    
+    if (!areas || areas.length === 0) {
+        container.innerHTML = `
+            <div class="empty-state">
+                <p>No monitored areas found.</p>
+                <p>Run the OSM importer to import park data for your areas.</p>
+            </div>
+        `;
+        return;
+    }
+    
+    container.innerHTML = areas.map(area => `
+        <div class="area-card">
+            <div class="area-header">
+                <h4>${escapeHtml(area.name)}</h4>
+                <div class="area-actions">
+                    <button class="btn btn-xs" onclick="reimportArea('${escapeHtml(area.name)}')" title="Re-import OSM data">
+                        🔄 Re-import
+                    </button>
+                    <button class="btn btn-xs btn-danger" onclick="deleteArea('${escapeHtml(area.name)}')" title="Delete all nests in this area">
+                        🗑️
+                    </button>
+                </div>
+            </div>
+            <div class="area-stats">
+                <span class="area-stat">
+                    <span class="stat-icon">🪹</span>
+                    ${area.nest_count} nests
+                </span>
+                <span class="area-stat">
+                    <span class="stat-icon">✅</span>
+                    ${area.active_count || 0} active
+                </span>
+                <span class="area-stat">
+                    <span class="stat-icon">❓</span>
+                    ${area.unknown_count || 0} unknown
+                </span>
+            </div>
+        </div>
+    `).join('');
+}
+
+// Load nest list with filters and pagination
+async function loadNestList(page = 1) {
+    nestCurrentPage = page;
+    const areaFilter = document.getElementById('nestAreaFilter')?.value || '';
+    const showUnknownOnly = document.getElementById('showUnknownOnly')?.checked || false;
+    const showActiveOnly = document.getElementById('showActiveOnly')?.checked || false;
+    
+    const tbody = document.getElementById('nestTableBody');
+    if (tbody) {
+        tbody.innerHTML = '<tr><td colspan="6" class="loading-row">Loading nests...</td></tr>';
+    }
+    
+    try {
+        const params = new URLSearchParams({
+            page: page,
+            limit: nestPageSize,
+            area: areaFilter,
+            unknown_only: showUnknownOnly,
+            active_only: showActiveOnly
+        });
+        
+        const data = await fetchAPI(`/api/fletchling/nests?${params}`);
+        
+        if (data.success) {
+            renderNestTable(data.nests);
+            nestTotalPages = data.total_pages || 1;
+            updateNestPagination();
+        } else {
+            if (tbody) {
+                tbody.innerHTML = `<tr><td colspan="6" class="error-row">${data.message || 'Failed to load nests'}</td></tr>`;
+            }
+        }
+    } catch (e) {
+        console.error('Failed to load nest list:', e);
+        if (tbody) {
+            tbody.innerHTML = '<tr><td colspan="6" class="error-row">Error loading nests</td></tr>';
+        }
+    }
+}
+
+// Render nest table rows
+function renderNestTable(nests) {
+    const tbody = document.getElementById('nestTableBody');
+    if (!tbody) return;
+    
+    if (!nests || nests.length === 0) {
+        tbody.innerHTML = '<tr><td colspan="6" class="empty-row">No nests found</td></tr>';
+        return;
+    }
+    
+    tbody.innerHTML = nests.map(nest => {
+        const pokemonName = nest.pokemon_id > 0 ? getPokemonName(nest.pokemon_id) : '-';
+        const pokemonClass = nest.pokemon_id > 0 ? 'active' : 'inactive';
+        const isUnknown = nest.name === 'Unknown Nest' || !nest.name;
+        const nameClass = isUnknown ? 'unknown-nest' : '';
+        const lastUpdated = nest.updated ? formatRelativeTime(nest.updated) : 'Never';
+        
+        return `
+            <tr class="${pokemonClass}">
+                <td class="${nameClass}">${escapeHtml(nest.name || 'Unknown Nest')}</td>
+                <td>${escapeHtml(nest.area_name || '-')}</td>
+                <td>
+                    ${nest.pokemon_id > 0 ? `
+                        <span class="pokemon-badge">
+                            <img src="https://raw.githubusercontent.com/PokeMiners/pogo_assets/master/Images/Pokemon/Addressable%20Assets/pm${nest.pokemon_id}.icon.png" 
+                                 alt="${pokemonName}" width="24" height="24" onerror="this.style.display='none'">
+                            #${nest.pokemon_id} ${pokemonName}
+                        </span>
+                    ` : '<span class="no-pokemon">No nest detected</span>'}
+                </td>
+                <td>${nest.pokemon_count || 0}</td>
+                <td>${lastUpdated}</td>
+                <td>
+                    <button class="btn btn-xs" onclick="editNest(${nest.nest_id})" title="Edit">✏️</button>
+                    <button class="btn btn-xs btn-danger" onclick="confirmDeleteNest(${nest.nest_id}, '${escapeHtml(nest.name || 'Unknown')}')" title="Delete">🗑️</button>
+                </td>
+            </tr>
+        `;
+    }).join('');
+}
+
+// Get Pokemon name from ID (basic lookup)
+function getPokemonName(id) {
+    const commonPokemon = {
+        1: 'Bulbasaur', 4: 'Charmander', 7: 'Squirtle', 10: 'Caterpie', 13: 'Weedle',
+        16: 'Pidgey', 19: 'Rattata', 21: 'Spearow', 23: 'Ekans', 25: 'Pikachu',
+        27: 'Sandshrew', 29: 'Nidoran♀', 32: 'Nidoran♂', 35: 'Clefairy', 37: 'Vulpix',
+        39: 'Jigglypuff', 41: 'Zubat', 43: 'Oddish', 46: 'Paras', 48: 'Venonat',
+        50: 'Diglett', 52: 'Meowth', 54: 'Psyduck', 56: 'Mankey', 58: 'Growlithe',
+        60: 'Poliwag', 63: 'Abra', 66: 'Machop', 69: 'Bellsprout', 72: 'Tentacool',
+        74: 'Geodude', 77: 'Ponyta', 79: 'Slowpoke', 81: 'Magnemite', 84: 'Doduo',
+        86: 'Seel', 88: 'Grimer', 90: 'Shellder', 92: 'Gastly', 95: 'Onix',
+        96: 'Drowzee', 98: 'Krabby', 100: 'Voltorb', 102: 'Exeggcute', 104: 'Cubone',
+        108: 'Lickitung', 109: 'Koffing', 111: 'Rhyhorn', 114: 'Tangela', 116: 'Horsea',
+        118: 'Goldeen', 120: 'Staryu', 123: 'Scyther', 125: 'Electabuzz', 126: 'Magmar',
+        127: 'Pinsir', 129: 'Magikarp', 133: 'Eevee', 138: 'Omanyte', 140: 'Kabuto',
+        147: 'Dratini', 152: 'Chikorita', 155: 'Cyndaquil', 158: 'Totodile',
+        161: 'Sentret', 163: 'Hoothoot', 165: 'Ledyba', 167: 'Spinarak', 170: 'Chinchou',
+        177: 'Natu', 179: 'Mareep', 183: 'Marill', 187: 'Hoppip', 190: 'Aipom',
+        191: 'Sunkern', 193: 'Yanma', 194: 'Wooper', 198: 'Murkrow', 200: 'Misdreavus',
+        202: 'Wobbuffet', 203: 'Girafarig', 204: 'Pineco', 206: 'Dunsparce', 207: 'Gligar',
+        209: 'Snubbull', 211: 'Qwilfish', 213: 'Shuckle', 214: 'Heracross', 215: 'Sneasel',
+        216: 'Teddiursa', 218: 'Slugma', 220: 'Swinub', 222: 'Corsola', 223: 'Remoraid',
+        225: 'Delibird', 226: 'Mantine', 227: 'Skarmory', 228: 'Houndour', 231: 'Phanpy',
+        234: 'Stantler', 238: 'Smoochum', 239: 'Elekid', 240: 'Magby', 246: 'Larvitar'
+    };
+    return commonPokemon[id] || `Pokemon #${id}`;
+}
+
+// Update pagination controls
+function updateNestPagination() {
+    document.getElementById('nestPageInfo').textContent = `Page ${nestCurrentPage} of ${nestTotalPages}`;
+    document.getElementById('nestPrevBtn').disabled = nestCurrentPage <= 1;
+    document.getElementById('nestNextBtn').disabled = nestCurrentPage >= nestTotalPages;
+    document.getElementById('nestLastBtn').disabled = nestCurrentPage >= nestTotalPages;
+}
+
+function nestPrevPage() {
+    if (nestCurrentPage > 1) loadNestList(nestCurrentPage - 1);
+}
+
+function nestNextPage() {
+    if (nestCurrentPage < nestTotalPages) loadNestList(nestCurrentPage + 1);
+}
+
+function nestLastPage() {
+    loadNestList(nestTotalPages);
+}
+
+// Edit nest modal
+async function editNest(nestId) {
+    try {
+        const data = await fetchAPI(`/api/fletchling/nests/${nestId}`);
+        
+        if (data.success && data.nest) {
+            document.getElementById('editNestId').value = data.nest.nest_id;
+            document.getElementById('editNestName').value = data.nest.name || '';
+            document.getElementById('editNestPokemonId').value = data.nest.pokemon_id || 0;
+            document.getElementById('editNestArea').value = data.nest.area_name || '';
+            document.getElementById('editNestLat').value = data.nest.lat || '';
+            document.getElementById('editNestLon').value = data.nest.lon || '';
+            
+            // Update pokemon preview
+            updatePokemonPreview();
+            
+            openModal('editNestModal');
+        } else {
+            showToast(data.message || 'Failed to load nest details', 'error');
+        }
+    } catch (e) {
+        showToast('Error loading nest: ' + e.message, 'error');
+    }
+}
+
+// Update Pokemon preview when ID changes
+function updatePokemonPreview() {
+    const pokemonId = parseInt(document.getElementById('editNestPokemonId').value) || 0;
+    const preview = document.getElementById('editNestPokemonPreview');
+    
+    if (pokemonId > 0) {
+        preview.innerHTML = `
+            <img src="https://raw.githubusercontent.com/PokeMiners/pogo_assets/master/Images/Pokemon/Addressable%20Assets/pm${pokemonId}.icon.png" 
+                 alt="Pokemon #${pokemonId}" width="32" height="32" onerror="this.parentElement.textContent='#${pokemonId}'">
+            <span>${getPokemonName(pokemonId)}</span>
+        `;
+    } else {
+        preview.innerHTML = '<span class="no-pokemon">No nest</span>';
+    }
+}
+
+// Save nest changes
+async function saveNest() {
+    const nestId = document.getElementById('editNestId').value;
+    const name = document.getElementById('editNestName').value.trim();
+    const pokemonId = parseInt(document.getElementById('editNestPokemonId').value) || 0;
+    
+    try {
+        const result = await fetchAPI(`/api/fletchling/nests/${nestId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ name, pokemon_id: pokemonId })
+        });
+        
+        if (result.success) {
+            showToast('Nest updated successfully', 'success');
+            closeModal('editNestModal');
+            loadNestList(nestCurrentPage);
+            loadNestStats();
+        } else {
+            showToast(result.message || 'Failed to update nest', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Delete nest
+function confirmDeleteNest(nestId, name) {
+    if (confirm(`Are you sure you want to delete the nest "${name}"?\n\nThis cannot be undone.`)) {
+        deleteNestById(nestId);
+    }
+}
+
+async function deleteNest() {
+    const nestId = document.getElementById('editNestId').value;
+    if (confirm('Are you sure you want to delete this nest?\n\nThis cannot be undone.')) {
+        await deleteNestById(nestId);
+        closeModal('editNestModal');
+    }
+}
+
+async function deleteNestById(nestId) {
+    try {
+        const result = await fetchAPI(`/api/fletchling/nests/${nestId}`, {
+            method: 'DELETE'
+        });
+        
+        if (result.success) {
+            showToast('Nest deleted successfully', 'success');
+            loadNestList(nestCurrentPage);
+            loadNestStats();
+        } else {
+            showToast(result.message || 'Failed to delete nest', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Add area modal
+function showAddAreaModal() {
+    document.getElementById('addAreaName').value = '';
+    openModal('addAreaModal');
+}
+
+// Add monitored area and run OSM import
+async function addMonitoredArea() {
+    const areaName = document.getElementById('addAreaName').value.trim();
+    const importMethod = document.querySelector('input[name="importMethod"]:checked').value;
+    
+    if (!areaName) {
+        showToast('Please enter an area name', 'warning');
+        return;
+    }
+    
+    closeModal('addAreaModal');
+    
+    if (importMethod === 'osm') {
+        // Run OSM import for the area
+        document.getElementById('fletchlingOSMArea').value = areaName;
+        await importFletchlingOSM();
+    } else {
+        showToast('Manual area addition coming soon. Use OSM import for now.', 'info');
+    }
+    
+    // Reload stats
+    loadNestStats();
+    loadNestList();
+}
+
+// Re-import OSM data for an area
+async function reimportArea(areaName) {
+    if (confirm(`Re-import OSM park data for "${areaName}"?\n\nThis will fetch the latest park boundaries from OpenStreetMap.`)) {
+        document.getElementById('fletchlingOSMArea').value = areaName;
+        await importFletchlingOSM();
+        loadNestStats();
+        loadNestList();
+    }
+}
+
+// Delete all nests in an area
+async function deleteArea(areaName) {
+    if (confirm(`Delete ALL nests in "${areaName}"?\n\nThis will remove all nest data for this area. You can re-import later.`)) {
+        try {
+            const result = await fetchAPI('/api/fletchling/areas/' + encodeURIComponent(areaName), {
+                method: 'DELETE'
+            });
+            
+            if (result.success) {
+                showToast(`Deleted ${result.deleted_count || 0} nests from ${areaName}`, 'success');
+                loadNestStats();
+                loadNestList();
+            } else {
+                showToast(result.message || 'Failed to delete area', 'error');
+            }
+        } catch (e) {
+            showToast('Error: ' + e.message, 'error');
+        }
+    }
+}
+
+// Format relative time
+function formatRelativeTime(timestamp) {
+    if (!timestamp) return 'Never';
+    const date = new Date(timestamp);
+    const now = new Date();
+    const diffMs = now - date;
+    const diffMins = Math.floor(diffMs / 60000);
+    const diffHours = Math.floor(diffMins / 60);
+    const diffDays = Math.floor(diffHours / 24);
+    
+    if (diffMins < 1) return 'Just now';
+    if (diffMins < 60) return `${diffMins}m ago`;
+    if (diffHours < 24) return `${diffHours}h ago`;
+    if (diffDays < 7) return `${diffDays}d ago`;
+    return date.toLocaleDateString();
+}
+
+// Add event listener for Pokemon ID input preview
+document.addEventListener('DOMContentLoaded', function() {
+    const pokemonIdInput = document.getElementById('editNestPokemonId');
+    if (pokemonIdInput) {
+        pokemonIdInput.addEventListener('input', updatePokemonPreview);
+    }
+});
 
 async function restartGolbat() {
     try {

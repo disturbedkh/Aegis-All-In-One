@@ -1585,6 +1585,105 @@
                             </div>
                         </div>
                         
+                        <!-- Nest Management Section -->
+                        <div class="fletchling-management" id="fletchlingManagement">
+                            <h3>🗺️ Nest Management</h3>
+                            
+                            <!-- Area Statistics -->
+                            <div class="nest-stats-grid" id="nestStatsGrid">
+                                <div class="nest-stat-card">
+                                    <div class="stat-icon">🏞️</div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="totalAreasCount">-</div>
+                                        <div class="stat-label">Monitored Areas</div>
+                                    </div>
+                                </div>
+                                <div class="nest-stat-card">
+                                    <div class="stat-icon">🪹</div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="totalNestsCount">-</div>
+                                        <div class="stat-label">Total Nests</div>
+                                    </div>
+                                </div>
+                                <div class="nest-stat-card">
+                                    <div class="stat-icon">✅</div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="activeNestsCount">-</div>
+                                        <div class="stat-label">Active Nests</div>
+                                    </div>
+                                </div>
+                                <div class="nest-stat-card">
+                                    <div class="stat-icon">❓</div>
+                                    <div class="stat-info">
+                                        <div class="stat-value" id="unknownNestsCount">-</div>
+                                        <div class="stat-label">Unknown Names</div>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Nest List Controls -->
+                            <div class="nest-controls">
+                                <div class="nest-filters">
+                                    <select id="nestAreaFilter" class="form-select" onchange="loadNestList()">
+                                        <option value="">All Areas</option>
+                                    </select>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="showUnknownOnly" onchange="loadNestList()">
+                                        <span>Show only unknown nests</span>
+                                    </label>
+                                    <label class="checkbox-label">
+                                        <input type="checkbox" id="showActiveOnly" onchange="loadNestList()">
+                                        <span>Active nests only</span>
+                                    </label>
+                                </div>
+                                <div class="nest-actions">
+                                    <button class="btn btn-sm" onclick="loadNestList()">🔄 Refresh</button>
+                                    <button class="btn btn-sm btn-primary" onclick="showAddAreaModal()">➕ Add Area</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Nest List Table -->
+                            <div class="nest-table-container">
+                                <table class="nest-table" id="nestTable">
+                                    <thead>
+                                        <tr>
+                                            <th>Name</th>
+                                            <th>Area</th>
+                                            <th>Pokemon</th>
+                                            <th>Spawns</th>
+                                            <th>Last Updated</th>
+                                            <th>Actions</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody id="nestTableBody">
+                                        <tr>
+                                            <td colspan="6" class="loading-row">Loading nests...</td>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                            
+                            <!-- Pagination -->
+                            <div class="nest-pagination" id="nestPagination">
+                                <button class="btn btn-sm" onclick="loadNestList(1)">« First</button>
+                                <button class="btn btn-sm" id="nestPrevBtn" onclick="nestPrevPage()">‹ Prev</button>
+                                <span class="page-info" id="nestPageInfo">Page 1 of 1</span>
+                                <button class="btn btn-sm" id="nestNextBtn" onclick="nestNextPage()">Next ›</button>
+                                <button class="btn btn-sm" id="nestLastBtn" onclick="nestLastPage()">Last »</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Monitored Areas Section -->
+                        <div class="fletchling-areas" id="fletchlingAreas">
+                            <h3>📍 Monitored Areas</h3>
+                            <p class="section-desc">
+                                Areas imported from Koji for OSM park data. Each area can have multiple nests.
+                            </p>
+                            <div class="areas-list" id="areasListContainer">
+                                <div class="loading-placeholder">Loading areas...</div>
+                            </div>
+                        </div>
+                        
                         <!-- Documentation Links -->
                         <div class="fletchling-docs">
                             <h3>📚 Documentation</h3>
@@ -1600,6 +1699,89 @@
                                 </a>
                             </div>
                         </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Edit Nest Modal -->
+            <div id="editNestModal" class="modal">
+                <div class="modal-content modal-md">
+                    <div class="modal-header">
+                        <h3>Edit Nest</h3>
+                        <button class="modal-close" onclick="closeModal('editNestModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <input type="hidden" id="editNestId">
+                        <div class="form-group">
+                            <label>Nest Name</label>
+                            <input type="text" id="editNestName" class="form-input" placeholder="Park name">
+                            <small class="form-hint">The display name for this nest location</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Nesting Pokemon ID</label>
+                            <div class="pokemon-input-group">
+                                <input type="number" id="editNestPokemonId" class="form-input" placeholder="0 = no nest detected" min="0">
+                                <span class="pokemon-preview" id="editNestPokemonPreview"></span>
+                            </div>
+                            <small class="form-hint">0 = No nesting Pokemon detected. Use Pokedex number (e.g., 25 = Pikachu)</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Area</label>
+                            <input type="text" id="editNestArea" class="form-input" readonly>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Latitude</label>
+                                <input type="number" id="editNestLat" class="form-input" step="0.000001" readonly>
+                            </div>
+                            <div class="form-group">
+                                <label>Longitude</label>
+                                <input type="number" id="editNestLon" class="form-input" step="0.000001" readonly>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn" onclick="closeModal('editNestModal')">Cancel</button>
+                        <button class="btn btn-danger" onclick="deleteNest()">🗑️ Delete</button>
+                        <button class="btn btn-primary" onclick="saveNest()">💾 Save</button>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Add Area Modal -->
+            <div id="addAreaModal" class="modal">
+                <div class="modal-content modal-md">
+                    <div class="modal-header">
+                        <h3>Add Monitored Area</h3>
+                        <button class="modal-close" onclick="closeModal('addAreaModal')">&times;</button>
+                    </div>
+                    <div class="modal-body">
+                        <div class="form-group">
+                            <label>Area Name</label>
+                            <input type="text" id="addAreaName" class="form-input" placeholder="e.g., Downtown, North Park">
+                            <small class="form-hint">Must match a geofence name in Koji exactly</small>
+                        </div>
+                        <div class="form-group">
+                            <label>Import Method</label>
+                            <div class="radio-group">
+                                <label class="radio-label">
+                                    <input type="radio" name="importMethod" value="osm" checked>
+                                    <span>Import from OpenStreetMap (recommended)</span>
+                                </label>
+                                <label class="radio-label">
+                                    <input type="radio" name="importMethod" value="manual">
+                                    <span>Add manually (advanced)</span>
+                                </label>
+                            </div>
+                        </div>
+                        <div class="alert alert-info">
+                            <strong>Note:</strong> After adding an area, you'll need to run the OSM importer 
+                            to download park boundaries for that area.
+                        </div>
+                    </div>
+                    <div class="modal-footer">
+                        <button class="btn" onclick="closeModal('addAreaModal')">Cancel</button>
+                        <button class="btn btn-primary" onclick="addMonitoredArea()">➕ Add Area</button>
                     </div>
                 </div>
             </div>

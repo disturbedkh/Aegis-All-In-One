@@ -7428,6 +7428,336 @@ select:focus {
     line-height: 1.6;
 }
 
+/* =============================================================================
+   FLETCHLING NEST MANAGEMENT
+   ============================================================================= */
+
+.fletchling-management {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-management h3 {
+    margin: 0 0 16px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+/* Nest Statistics Grid */
+.nest-stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.nest-stat-card {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 16px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+}
+
+.nest-stat-card .stat-icon {
+    font-size: 24px;
+}
+
+.nest-stat-card .stat-value {
+    font-size: 24px;
+    font-weight: 700;
+    color: var(--text-primary);
+    line-height: 1;
+}
+
+.nest-stat-card .stat-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 4px;
+}
+
+/* Nest Controls */
+.nest-controls {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 12px;
+    margin-bottom: 16px;
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.nest-filters {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    flex-wrap: wrap;
+}
+
+.nest-filters select {
+    min-width: 180px;
+}
+
+.checkbox-label {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+.nest-actions {
+    display: flex;
+    gap: 8px;
+}
+
+/* Nest Table */
+.nest-table-container {
+    overflow-x: auto;
+    margin-bottom: 16px;
+}
+
+.nest-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 13px;
+}
+
+.nest-table th,
+.nest-table td {
+    padding: 10px 12px;
+    text-align: left;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.nest-table th {
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+    font-weight: 600;
+    font-size: 12px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.nest-table tr:hover {
+    background: var(--bg-hover);
+}
+
+.nest-table tr.active {
+    background: rgba(46, 204, 113, 0.05);
+}
+
+.nest-table tr.inactive {
+    opacity: 0.7;
+}
+
+.nest-table .unknown-nest {
+    color: var(--warning);
+    font-style: italic;
+}
+
+.nest-table .loading-row,
+.nest-table .error-row,
+.nest-table .empty-row {
+    text-align: center;
+    color: var(--text-secondary);
+    padding: 40px 12px;
+}
+
+.nest-table .error-row {
+    color: var(--danger);
+}
+
+/* Pokemon Badge */
+.pokemon-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    font-size: 12px;
+}
+
+.pokemon-badge img {
+    width: 24px;
+    height: 24px;
+}
+
+.no-pokemon {
+    color: var(--text-tertiary);
+    font-style: italic;
+    font-size: 12px;
+}
+
+/* Pagination */
+.nest-pagination {
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    gap: 8px;
+    padding: 12px;
+}
+
+.nest-pagination .page-info {
+    padding: 0 16px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+/* Monitored Areas Section */
+.fletchling-areas {
+    margin-top: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.fletchling-areas h3 {
+    margin: 0 0 8px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.areas-list {
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
+    gap: 12px;
+    margin-top: 16px;
+}
+
+.area-card {
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.area-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.area-header h4 {
+    margin: 0;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.area-actions {
+    display: flex;
+    gap: 4px;
+}
+
+.area-stats {
+    display: flex;
+    justify-content: space-around;
+    padding: 12px;
+}
+
+.area-stat {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 12px;
+    color: var(--text-secondary);
+}
+
+.area-stat .stat-icon {
+    font-size: 14px;
+}
+
+/* Edit Nest Modal Pokemon Preview */
+.pokemon-input-group {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.pokemon-input-group input {
+    flex: 1;
+}
+
+.pokemon-preview {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    min-width: 120px;
+}
+
+.pokemon-preview img {
+    width: 32px;
+    height: 32px;
+}
+
+/* Radio Group */
+.radio-group {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.radio-label {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    cursor: pointer;
+    font-size: 13px;
+    color: var(--text-primary);
+}
+
+.radio-label input[type="radio"] {
+    width: 16px;
+    height: 16px;
+    cursor: pointer;
+}
+
+/* Empty State */
+.empty-state {
+    text-align: center;
+    padding: 40px 20px;
+    color: var(--text-secondary);
+}
+
+.empty-state p {
+    margin: 8px 0;
+}
+
+/* Loading Placeholder */
+.loading-placeholder {
+    text-align: center;
+    padding: 40px;
+    color: var(--text-secondary);
+}
+
+/* Extra small buttons */
+.btn-xs {
+    padding: 4px 8px;
+    font-size: 11px;
+}
+
 /* OSM Import Progress Indicator */
 .osm-progress {
     margin-top: 12px;

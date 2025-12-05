@@ -12700,6 +12700,325 @@ def api_fletchling_import_osm():
 
 
 # =============================================================================
+# FLETCHLING NEST MANAGEMENT API
+# =============================================================================
+
+def get_db_connection():
+    """Get database connection for nest queries"""
+    # Try to get credentials from .env
+    env_path = AEGIS_ROOT / '.env'
+    db_host = 'localhost'
+    db_port = 3306
+    db_user = 'root'
+    db_pass = ''
+    
+    if env_path.exists():
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line.startswith('MYSQL_ROOT_PASSWORD='):
+                    db_pass = line.split('=', 1)[1].strip('"\'')
+    
+    return db_host, db_port, db_user, db_pass
+
+
+@app.route('/api/fletchling/nests/stats')
+def api_fletchling_nests_stats():
+    """Get nest statistics and area breakdown"""
+    result = {'success': False, 'stats': {}}
+    
+    try:
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        # Query via docker exec or direct mysql
+        queries = """
+            SELECT 
+                COUNT(*) as total_nests,
+                SUM(CASE WHEN pokemon_id > 0 THEN 1 ELSE 0 END) as active_nests,
+                SUM(CASE WHEN name = 'Unknown Nest' OR name IS NULL OR name = '' THEN 1 ELSE 0 END) as unknown_nests,
+                COUNT(DISTINCT area_name) as total_areas
+            FROM golbat.nests;
+            
+            SELECT 
+                area_name as name,
+                COUNT(*) as nest_count,
+                SUM(CASE WHEN pokemon_id > 0 THEN 1 ELSE 0 END) as active_count,
+                SUM(CASE WHEN name = 'Unknown Nest' OR name IS NULL OR name = '' THEN 1 ELSE 0 END) as unknown_count
+            FROM golbat.nests
+            GROUP BY area_name
+            ORDER BY area_name;
+        """
+        
+        # Try docker exec first
+        proc = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', queries],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc.returncode == 0:
+            lines = proc.stdout.strip().split('\n')
+            
+            # Parse first query result (totals)
+            if lines:
+                parts = lines[0].split('\t')
+                if len(parts) >= 4:
+                    result['stats']['total_nests'] = int(parts[0]) if parts[0].isdigit() else 0
+                    result['stats']['active_nests'] = int(parts[1]) if parts[1].isdigit() else 0
+                    result['stats']['unknown_nests'] = int(parts[2]) if parts[2].isdigit() else 0
+                    result['stats']['total_areas'] = int(parts[3]) if parts[3].isdigit() else 0
+            
+            # Parse area breakdown (remaining lines)
+            result['stats']['areas'] = []
+            for line in lines[1:]:
+                if line.strip():
+                    parts = line.split('\t')
+                    if len(parts) >= 4:
+                        result['stats']['areas'].append({
+                            'name': parts[0],
+                            'nest_count': int(parts[1]) if parts[1].isdigit() else 0,
+                            'active_count': int(parts[2]) if parts[2].isdigit() else 0,
+                            'unknown_count': int(parts[3]) if parts[3].isdigit() else 0
+                        })
+            
+            result['success'] = True
+        else:
+            result['message'] = 'Failed to query database: ' + proc.stderr[:200]
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/nests')
+def api_fletchling_nests_list():
+    """Get paginated list of nests with filters"""
+    result = {'success': False, 'nests': [], 'total': 0, 'total_pages': 0}
+    
+    page = request.args.get('page', 1, type=int)
+    limit = request.args.get('limit', 25, type=int)
+    area = request.args.get('area', '')
+    unknown_only = request.args.get('unknown_only', 'false').lower() == 'true'
+    active_only = request.args.get('active_only', 'false').lower() == 'true'
+    
+    offset = (page - 1) * limit
+    
+    try:
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        # Build WHERE clause
+        where_parts = []
+        if area:
+            where_parts.append(f"area_name = '{area}'")
+        if unknown_only:
+            where_parts.append("(name = 'Unknown Nest' OR name IS NULL OR name = '')")
+        if active_only:
+            where_parts.append("pokemon_id > 0")
+        
+        where_clause = 'WHERE ' + ' AND '.join(where_parts) if where_parts else ''
+        
+        # Count query
+        count_query = f"SELECT COUNT(*) FROM golbat.nests {where_clause};"
+        
+        # Data query
+        data_query = f"""
+            SELECT nest_id, name, lat, lon, pokemon_id, pokemon_count, area_name, updated
+            FROM golbat.nests
+            {where_clause}
+            ORDER BY area_name, name
+            LIMIT {limit} OFFSET {offset};
+        """
+        
+        # Execute count
+        proc_count = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc_count.returncode == 0:
+            total = int(proc_count.stdout.strip()) if proc_count.stdout.strip().isdigit() else 0
+            result['total'] = total
+            result['total_pages'] = (total + limit - 1) // limit
+        
+        # Execute data query
+        proc_data = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', data_query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc_data.returncode == 0:
+            nests = []
+            for line in proc_data.stdout.strip().split('\n'):
+                if line.strip():
+                    parts = line.split('\t')
+                    if len(parts) >= 8:
+                        nests.append({
+                            'nest_id': int(parts[0]) if parts[0].isdigit() else 0,
+                            'name': parts[1] if parts[1] != 'NULL' else '',
+                            'lat': float(parts[2]) if parts[2] else 0,
+                            'lon': float(parts[3]) if parts[3] else 0,
+                            'pokemon_id': int(parts[4]) if parts[4].isdigit() else 0,
+                            'pokemon_count': int(parts[5]) if parts[5].isdigit() else 0,
+                            'area_name': parts[6] if parts[6] != 'NULL' else '',
+                            'updated': parts[7] if parts[7] != 'NULL' else None
+                        })
+            result['nests'] = nests
+            result['success'] = True
+        else:
+            result['message'] = 'Failed to query nests: ' + proc_data.stderr[:200]
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/nests/<int:nest_id>')
+def api_fletchling_nest_get(nest_id):
+    """Get a single nest by ID"""
+    result = {'success': False, 'nest': None}
+    
+    try:
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        query = f"""
+            SELECT nest_id, name, lat, lon, pokemon_id, pokemon_count, area_name, updated
+            FROM golbat.nests
+            WHERE nest_id = {nest_id};
+        """
+        
+        proc = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc.returncode == 0 and proc.stdout.strip():
+            parts = proc.stdout.strip().split('\t')
+            if len(parts) >= 8:
+                result['nest'] = {
+                    'nest_id': int(parts[0]) if parts[0].isdigit() else 0,
+                    'name': parts[1] if parts[1] != 'NULL' else '',
+                    'lat': float(parts[2]) if parts[2] else 0,
+                    'lon': float(parts[3]) if parts[3] else 0,
+                    'pokemon_id': int(parts[4]) if parts[4].isdigit() else 0,
+                    'pokemon_count': int(parts[5]) if parts[5].isdigit() else 0,
+                    'area_name': parts[6] if parts[6] != 'NULL' else '',
+                    'updated': parts[7] if parts[7] != 'NULL' else None
+                }
+                result['success'] = True
+        else:
+            result['message'] = 'Nest not found'
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/nests/<int:nest_id>', methods=['PUT'])
+def api_fletchling_nest_update(nest_id):
+    """Update a nest's name or pokemon_id"""
+    result = {'success': False, 'message': ''}
+    
+    try:
+        data = request.get_json() or {}
+        name = data.get('name', '').strip()
+        pokemon_id = data.get('pokemon_id', 0)
+        
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        # Escape name for SQL
+        name_escaped = name.replace("'", "''")
+        
+        query = f"""
+            UPDATE golbat.nests 
+            SET name = '{name_escaped}', pokemon_id = {pokemon_id}, updated = NOW()
+            WHERE nest_id = {nest_id};
+        """
+        
+        proc = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc.returncode == 0:
+            result['success'] = True
+            result['message'] = 'Nest updated successfully'
+        else:
+            result['message'] = 'Failed to update nest: ' + proc.stderr[:200]
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/nests/<int:nest_id>', methods=['DELETE'])
+def api_fletchling_nest_delete(nest_id):
+    """Delete a nest"""
+    result = {'success': False, 'message': ''}
+    
+    try:
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        query = f"DELETE FROM golbat.nests WHERE nest_id = {nest_id};"
+        
+        proc = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc.returncode == 0:
+            result['success'] = True
+            result['message'] = 'Nest deleted successfully'
+        else:
+            result['message'] = 'Failed to delete nest: ' + proc.stderr[:200]
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/fletchling/areas/<path:area_name>', methods=['DELETE'])
+def api_fletchling_area_delete(area_name):
+    """Delete all nests in an area"""
+    result = {'success': False, 'message': '', 'deleted_count': 0}
+    
+    try:
+        db_host, db_port, db_user, db_pass = get_db_connection()
+        
+        # First count how many will be deleted
+        count_query = f"SELECT COUNT(*) FROM golbat.nests WHERE area_name = '{area_name}';"
+        proc_count = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc_count.returncode == 0:
+            result['deleted_count'] = int(proc_count.stdout.strip()) if proc_count.stdout.strip().isdigit() else 0
+        
+        # Delete all nests in the area
+        delete_query = f"DELETE FROM golbat.nests WHERE area_name = '{area_name}';"
+        
+        proc = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', delete_query],
+            capture_output=True, text=True, timeout=30
+        )
+        
+        if proc.returncode == 0:
+            result['success'] = True
+            result['message'] = f'Deleted {result["deleted_count"]} nests from {area_name}'
+        else:
+            result['message'] = 'Failed to delete area: ' + proc.stderr[:200]
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+# =============================================================================
 # PORACLE MANAGEMENT API (Discord/Telegram Alert Bot)
 # =============================================================================
 
