@@ -6717,6 +6717,36 @@ async function nginxAction(action) {
     }
 }
 
+// Service display info - clarify what each service is and if it has a UI
+const SERVICE_INFO = {
+    'reactmap': { name: 'ReactMap', desc: 'Map Frontend', hasUI: true, icon: '🗺️' },
+    'admin': { name: 'Admin Panel', desc: 'Dragonite Web UI', hasUI: true, icon: '⚙️' },
+    'rotom': { name: 'Rotom', desc: 'Device Manager', hasUI: true, icon: '📱' },
+    'koji': { name: 'Koji', desc: 'Geofence Editor', hasUI: true, icon: '📍' },
+    'grafana': { name: 'Grafana', desc: 'Monitoring Dashboard', hasUI: true, icon: '📊' },
+    'shellder': { name: 'Shellder', desc: 'Control Panel', hasUI: true, icon: '🐚' },
+    'phpmyadmin': { name: 'phpMyAdmin', desc: 'Database Admin', hasUI: true, icon: '🗄️' },
+    'pma': { name: 'phpMyAdmin', desc: 'Database Admin', hasUI: true, icon: '🗄️' },
+    // Backend-only services - no UI, shouldn't be proxied directly
+    'dragonite': { name: 'Dragonite', desc: 'Backend API Only', hasUI: false, icon: '⚠️', warning: 'No web UI - use Admin Panel instead' },
+    'golbat': { name: 'Golbat', desc: 'Backend API Only', hasUI: false, icon: '⚠️', warning: 'No web UI - data processor only' },
+    'xilriws': { name: 'Xilriws', desc: 'Auth Proxy API', hasUI: false, icon: '⚠️', warning: 'No web UI - auth API only' },
+};
+
+function getSiteDisplayInfo(siteName) {
+    // Extract service name from site config name (e.g., "aegis-reactmap" -> "reactmap", "map.example.com" -> check content)
+    const lower = siteName.toLowerCase();
+    
+    for (const [key, info] of Object.entries(SERVICE_INFO)) {
+        if (lower.includes(key)) {
+            return { ...info, originalName: siteName };
+        }
+    }
+    
+    // Unknown service - assume it's a custom site
+    return { name: siteName, desc: 'Custom Site', hasUI: true, icon: '🌐', originalName: siteName };
+}
+
 async function loadNginxSites() {
     const enabledEl = document.getElementById('sitesEnabledList');
     const availableEl = document.getElementById('sitesAvailableList');
@@ -6730,49 +6760,67 @@ async function loadNginxSites() {
         document.getElementById('sitesAvailable').textContent = data.available_count || 0;
         document.getElementById('sslCerts').textContent = data.ssl_certs || 0;
         
-        // Render enabled sites
+        // Render enabled sites with enhanced display
         if (enabledEl) {
             if (data.enabled && data.enabled.length > 0) {
-                enabledEl.innerHTML = data.enabled.map(site => `
-                    <div class="site-item enabled">
-                        <span class="site-icon">🌐</span>
-                        <span class="site-name">${site.name}</span>
+                enabledEl.innerHTML = data.enabled.map(site => {
+                    const info = getSiteDisplayInfo(site.name);
+                    const warningHtml = info.warning ? `<span class="site-warning" title="${info.warning}">⚠️</span>` : '';
+                    const descClass = info.hasUI ? '' : 'text-warning';
+                    return `
+                    <div class="site-item enabled ${info.hasUI ? '' : 'backend-only'}">
+                        <span class="site-icon">${info.icon}</span>
+                        <div class="site-info">
+                            <span class="site-name">${site.name}</span>
+                            <span class="site-desc ${descClass}">${info.desc} ${warningHtml}</span>
+                        </div>
                         <div class="site-actions">
                             <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
                             <button class="btn btn-sm btn-warning" onclick="disableSite('${site.name}')" title="Disable">⏸️</button>
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } else {
                 enabledEl.innerHTML = '<div class="no-data">No sites enabled</div>';
             }
         }
         
-        // Render available (disabled) sites
+        // Render available (disabled) sites with enhanced display
         if (availableEl) {
             const disabled = data.available?.filter(s => !s.enabled) || [];
             if (disabled.length > 0) {
-                availableEl.innerHTML = disabled.map(site => `
-                    <div class="site-item disabled">
-                        <span class="site-icon">📁</span>
-                        <span class="site-name">${site.name}</span>
+                availableEl.innerHTML = disabled.map(site => {
+                    const info = getSiteDisplayInfo(site.name);
+                    const warningHtml = info.warning ? `<span class="site-warning" title="${info.warning}">⚠️</span>` : '';
+                    const descClass = info.hasUI ? '' : 'text-warning';
+                    return `
+                    <div class="site-item disabled ${info.hasUI ? '' : 'backend-only'}">
+                        <span class="site-icon">${info.icon}</span>
+                        <div class="site-info">
+                            <span class="site-name">${site.name}</span>
+                            <span class="site-desc ${descClass}">${info.desc} ${warningHtml}</span>
+                        </div>
                         <div class="site-actions">
                             <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
                             <button class="btn btn-sm btn-success" onclick="enableSite('${site.name}')" title="Enable">▶️</button>
                         </div>
                     </div>
-                `).join('');
+                `}).join('');
             } else {
                 availableEl.innerHTML = '<div class="no-data">All sites are enabled</div>';
             }
         }
         
-        // Populate selector
+        // Populate selector with clarified names
         if (selectorEl) {
             const allSites = [...(data.enabled || []), ...(data.available || [])];
             const uniqueSites = [...new Set(allSites.map(s => s.name))];
             selectorEl.innerHTML = '<option value="">Select a site to edit...</option>' +
-                uniqueSites.map(name => `<option value="${name}">${name}</option>`).join('');
+                uniqueSites.map(name => {
+                    const info = getSiteDisplayInfo(name);
+                    const warning = info.hasUI ? '' : ' ⚠️';
+                    return `<option value="${name}">${name} (${info.desc})${warning}</option>`;
+                }).join('');
         }
         
     } catch (e) {

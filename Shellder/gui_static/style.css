@@ -4309,14 +4309,39 @@ select:focus {
     opacity: 0.7;
 }
 
+.site-item.backend-only {
+    border-left: 3px solid var(--warning) !important;
+    background: rgba(255, 193, 7, 0.05);
+}
+
 .site-icon {
     font-size: 1.2rem;
 }
 
-.site-name {
+.site-info {
     flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.site-name {
     font-family: var(--font-mono);
     font-size: 13px;
+}
+
+.site-desc {
+    font-size: 11px;
+    color: var(--text-muted);
+}
+
+.site-desc.text-warning {
+    color: var(--warning);
+}
+
+.site-warning {
+    margin-left: 4px;
+    cursor: help;
 }
 
 .site-actions {
