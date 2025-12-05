@@ -450,19 +450,21 @@ html, body {
     flex: 1;
     display: flex;
     align-items: flex-end;
-    gap: 0;
+    gap: 1px; /* Small gap between bars */
     border-left: 1px solid var(--border-color);
     border-bottom: 1px solid var(--border-color);
     padding: 4px 4px 0 4px;
     min-height: 150px;
+    /* Ensure bars fill the entire width */
+    justify-content: stretch;
     overflow: hidden; /* Prevent scrollbar - bars will shrink to fit */
 }
 
 .chart-bar {
     flex: 1 1 0; /* Allow shrinking below content size */
-    min-width: 0; /* Allow bars to shrink as small as needed */
-    max-width: 20px;
-    border-radius: 1px 1px 0 0;
+    min-width: 1px; /* Minimum visibility */
+    /* No max-width - let bars expand to fill space when few data points */
+    border-radius: 2px 2px 0 0;
     transition: opacity 0.2s;
     cursor: crosshair;
 }
