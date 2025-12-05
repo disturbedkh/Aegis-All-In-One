@@ -94,6 +94,7 @@ Aegis Phone → Rotom → Dragonite → Golbat → MariaDB → ReactMap
 |-----------|---------|------|
 | **Shellder** | Web dashboard & CLI management | 5000 |
 | **Koji** | Geofence/area management | 6004 |
+| **Poracle** | Discord/Telegram alert bot | 3030 (webhook) |
 | **Grafana** | Performance monitoring | 6006 |
 | **phpMyAdmin** | Database administration | 6005 |
 

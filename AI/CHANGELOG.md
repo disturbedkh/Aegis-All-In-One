@@ -32,6 +32,12 @@
 - Sidebar menu scrollbar for small screens
 - **Golbat Webhook Manager** - CRUD UI for webhooks in config editor
 - **Fletchling Tab** - Under Management section with status and setup wizard
+- **Poracle Tab** - Discord/Telegram alert bot management
+  - Status grid: Docker, Config, Container, Database, Discord, Telegram, Webhook
+  - 7-step setup wizard with Discord/Telegram bot configuration
+  - Geofence import from Koji
+  - Container controls and log preview
+  - API endpoints: `/api/poracle/status`, `/api/poracle/configure-discord`, etc.
 - **File Manager Enhancements** - Upload, ownership, permissions, sudo support
 - **Config Editor** - Shows commented-out optional fields with badges
 

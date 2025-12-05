@@ -131,15 +131,32 @@ reactmap/
 
 ---
 
-## Poracle/ Directory
+## Poracle/ Directory (Discord/Telegram Alert Bot)
 
 ```
 Poracle/
 ├── 📁 config/
-│   └── 📄 local.json                 # Poracle configuration
+│   └── 📄 local.json                 # Main Poracle configuration
+│       ├── database.conn             # DB connection (from .env)
+│       ├── server.port (3030)        # Webhook receiver port
+│       ├── discord                   # Discord bot settings
+│       │   ├── enabled               # true/false
+│       │   ├── token                 # Bot token (from Developer Portal)
+│       │   └── admins                # Admin user IDs
+│       └── telegram                  # Telegram bot settings
+│           ├── enabled               # true/false
+│           ├── token                 # Bot token (from @BotFather)
+│           └── admins                # Admin user IDs
 └── 📁 geofence/
-    └── 📄 default.json               # Geofence definitions
+    ├── 📄 default.json               # Default geofence template
+    └── 📄 koji_import.json           # Imported from Koji (auto-generated)
 ```
+
+**Data Flow:** `Golbat → webhook (port 3030) → Poracle → Discord/Telegram`
+
+**References:**
+- [Poracle Wiki](https://muckelba.github.io/poracleWiki/)
+- [PoracleJS GitHub](https://github.com/KartulUdus/PoracleJS)
 
 ---
 
