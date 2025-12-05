@@ -663,6 +663,7 @@ function navigateTo(page) {
         'files': 'File Manager',
         'scripts': 'Scripts',
         'logs': 'Logs',
+        'fletchling': 'Fletchling - Nest Detection',
         'updates': 'Updates'
     };
     document.getElementById('pageTitle').textContent = titles[page] || page;
@@ -680,6 +681,8 @@ function navigateTo(page) {
         checkGitStatus();
     } else if (page === 'containers') {
         loadContainerDetails();
+    } else if (page === 'fletchling') {
+        loadFletchlingStatus();
     }
 }
 
@@ -5442,9 +5445,6 @@ function showSetupTab(tabName) {
             break;
         case 'env':
             loadConfigVariablesStatus();  // New comprehensive config variables status
-            break;
-        case 'fletchling':
-            loadFletchlingStatus();
             break;
     }
 }

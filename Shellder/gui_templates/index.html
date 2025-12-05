@@ -79,6 +79,10 @@
                     <span class="nav-icon">📜</span>
                     <span>Logs</span>
                 </a>
+                <a href="#" class="nav-item" data-page="fletchling" onclick="navigateTo('fletchling'); return false;">
+                    <span class="nav-icon">🪺</span>
+                    <span>Fletchling</span>
+                </a>
                 <a href="#" class="nav-item" data-page="updates" onclick="navigateTo('updates'); return false;">
                     <span class="nav-icon">🔄</span>
                     <span>Updates</span>
@@ -778,7 +782,6 @@
                     <button class="setup-tab" onclick="showSetupTab('configs')">📄 Configs</button>
                     <button class="setup-tab" onclick="showSetupTab('env')">⚙️ Config Status</button>
                     <button class="setup-tab" onclick="showSetupTab('scripts')">🚀 Setup Scripts</button>
-                    <button class="setup-tab" onclick="showSetupTab('fletchling')">🪺 Fletchling</button>
                 </div>
                 
                 <!-- GitHub Manager Tab -->
@@ -1219,144 +1222,145 @@
                     </div>
                 </div>
                 
-                <!-- Fletchling Tab (Optional Service) -->
-                <div id="setup-tab-fletchling" class="setup-tab-content">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>🪺 Fletchling - Nest Detection</h2>
-                            <button class="btn btn-sm" onclick="loadFletchlingStatus()">🔄 Refresh</button>
+            </div>
+            
+            <!-- Fletchling Page (Optional Service - Nest Detection) -->
+            <div id="page-fletchling" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🪺 Fletchling - Nest Detection</h2>
+                        <button class="btn btn-sm" onclick="loadFletchlingStatus()">🔄 Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="section-desc">
+                            Fletchling detects Pokemon nests in parks and displays them on ReactMap.
+                            This is an <strong>optional</strong> feature that requires Koji geofences.
+                        </p>
+                        
+                        <!-- Status Lights Grid -->
+                        <div class="fletchling-status-grid" id="fletchlingStatusGrid">
+                            <div class="status-item" id="fletchling-compose-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Docker Compose</div>
+                                    <div class="status-desc">Service enabled in docker-compose.yaml</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="fletchling-config-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Configuration</div>
+                                    <div class="status-desc">fletchling.toml configured with Koji project</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="fletchling-container-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Container Running</div>
+                                    <div class="status-desc">Fletchling container status</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="fletchling-nests-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Nests Table</div>
+                                    <div class="status-desc">Nests data in golbat database</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="fletchling-webhook-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Golbat Webhook</div>
+                                    <div class="status-desc">Pokemon data flowing to Fletchling</div>
+                                </div>
+                            </div>
                         </div>
-                        <div class="card-body">
-                            <p class="section-desc">
-                                Fletchling detects Pokemon nests in parks and displays them on ReactMap.
-                                This is an <strong>optional</strong> feature that requires Koji geofences.
-                            </p>
+                        
+                        <!-- Setup Section -->
+                        <div class="fletchling-setup-section">
+                            <h3>🔧 Setup Steps</h3>
                             
-                            <!-- Status Lights Grid -->
-                            <div class="fletchling-status-grid" id="fletchlingStatusGrid">
-                                <div class="status-item" id="fletchling-compose-status">
-                                    <div class="status-light checking"></div>
-                                    <div class="status-info">
-                                        <div class="status-title">Docker Compose</div>
-                                        <div class="status-desc">Service enabled in docker-compose.yaml</div>
-                                    </div>
+                            <!-- Step 1: Enable in Docker Compose -->
+                            <div class="setup-step" id="fletchling-step-enable">
+                                <div class="step-number">1</div>
+                                <div class="step-content">
+                                    <div class="step-title">Enable Fletchling Service</div>
+                                    <div class="step-desc">Uncomment Fletchling in docker-compose.yaml</div>
+                                    <button class="btn btn-sm btn-primary" onclick="enableFletchling()">Enable Service</button>
                                 </div>
-                                <div class="status-item" id="fletchling-config-status">
-                                    <div class="status-light checking"></div>
-                                    <div class="status-info">
-                                        <div class="status-title">Configuration</div>
-                                        <div class="status-desc">fletchling.toml configured with Koji project</div>
+                            </div>
+                            
+                            <!-- Step 2: Configure Project -->
+                            <div class="setup-step" id="fletchling-step-config">
+                                <div class="step-number">2</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Koji Project</div>
+                                    <div class="step-desc">Set your Koji project name in fletchling.toml</div>
+                                    <div class="step-input-group">
+                                        <input type="text" id="fletchlingProjectName" class="form-input" 
+                                               placeholder="Enter Koji project name (e.g., MyCity)">
+                                        <button class="btn btn-sm btn-primary" onclick="configureFletchling()">Configure</button>
                                     </div>
-                                </div>
-                                <div class="status-item" id="fletchling-container-status">
-                                    <div class="status-light checking"></div>
-                                    <div class="status-info">
-                                        <div class="status-title">Container Running</div>
-                                        <div class="status-desc">Fletchling container status</div>
-                                    </div>
-                                </div>
-                                <div class="status-item" id="fletchling-nests-status">
-                                    <div class="status-light checking"></div>
-                                    <div class="status-info">
-                                        <div class="status-title">Nests Table</div>
-                                        <div class="status-desc">Nests data in golbat database</div>
-                                    </div>
-                                </div>
-                                <div class="status-item" id="fletchling-webhook-status">
-                                    <div class="status-light checking"></div>
-                                    <div class="status-info">
-                                        <div class="status-title">Golbat Webhook</div>
-                                        <div class="status-desc">Pokemon data flowing to Fletchling</div>
+                                    <div class="step-hint">
+                                        <span class="hint-icon">💡</span>
+                                        <span>This must match the project name you created in Koji Admin exactly</span>
                                     </div>
                                 </div>
                             </div>
                             
-                            <!-- Setup Section -->
-                            <div class="fletchling-setup-section">
-                                <h3>🔧 Setup Steps</h3>
-                                
-                                <!-- Step 1: Enable in Docker Compose -->
-                                <div class="setup-step" id="fletchling-step-enable">
-                                    <div class="step-number">1</div>
-                                    <div class="step-content">
-                                        <div class="step-title">Enable Fletchling Service</div>
-                                        <div class="step-desc">Uncomment Fletchling in docker-compose.yaml</div>
-                                        <button class="btn btn-sm btn-primary" onclick="enableFletchling()">Enable Service</button>
-                                    </div>
-                                </div>
-                                
-                                <!-- Step 2: Configure Project -->
-                                <div class="setup-step" id="fletchling-step-config">
-                                    <div class="step-number">2</div>
-                                    <div class="step-content">
-                                        <div class="step-title">Configure Koji Project</div>
-                                        <div class="step-desc">Set your Koji project name in fletchling.toml</div>
-                                        <div class="step-input-group">
-                                            <input type="text" id="fletchlingProjectName" class="form-input" 
-                                                   placeholder="Enter Koji project name (e.g., MyCity)">
-                                            <button class="btn btn-sm btn-primary" onclick="configureFletchling()">Configure</button>
-                                        </div>
-                                        <div class="step-hint">
-                                            <span class="hint-icon">💡</span>
-                                            <span>This must match the project name you created in Koji Admin exactly</span>
-                                        </div>
-                                    </div>
-                                </div>
-                                
-                                <!-- Step 3: Add Webhook -->
-                                <div class="setup-step" id="fletchling-step-webhook">
-                                    <div class="step-number">3</div>
-                                    <div class="step-content">
-                                        <div class="step-title">Configure Golbat Webhook</div>
-                                        <div class="step-desc">Add webhook to send Pokemon data to Fletchling</div>
-                                        <button class="btn btn-sm btn-primary" onclick="addFletchlingWebhook()">Add Webhook</button>
-                                    </div>
-                                </div>
-                                
-                                <!-- Step 4: Start Container -->
-                                <div class="setup-step" id="fletchling-step-start">
-                                    <div class="step-number">4</div>
-                                    <div class="step-content">
-                                        <div class="step-title">Start Fletchling</div>
-                                        <div class="step-desc">Start the Fletchling containers</div>
-                                        <div class="button-group">
-                                            <button class="btn btn-sm btn-success" onclick="startFletchling()">▶️ Start</button>
-                                            <button class="btn btn-sm btn-danger" onclick="stopFletchling()">⏹️ Stop</button>
-                                            <button class="btn btn-sm btn-warning" onclick="restartGolbat()">🔄 Restart Golbat</button>
-                                        </div>
-                                    </div>
+                            <!-- Step 3: Add Webhook -->
+                            <div class="setup-step" id="fletchling-step-webhook">
+                                <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Golbat Webhook</div>
+                                    <div class="step-desc">Add webhook to send Pokemon data to Fletchling</div>
+                                    <button class="btn btn-sm btn-primary" onclick="addFletchlingWebhook()">Add Webhook</button>
                                 </div>
                             </div>
                             
-                            <!-- Nest Statistics -->
-                            <div class="fletchling-stats" id="fletchlingStats" style="display: none;">
-                                <h3>📊 Nest Statistics</h3>
-                                <div class="stats-grid">
-                                    <div class="stat-box">
-                                        <div class="stat-value" id="totalNests">0</div>
-                                        <div class="stat-label">Total Nests</div>
-                                    </div>
-                                    <div class="stat-box">
-                                        <div class="stat-value" id="activeNests">0</div>
-                                        <div class="stat-label">Active Nests</div>
+                            <!-- Step 4: Start Container -->
+                            <div class="setup-step" id="fletchling-step-start">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
+                                    <div class="step-title">Start Fletchling</div>
+                                    <div class="step-desc">Start the Fletchling containers</div>
+                                    <div class="button-group">
+                                        <button class="btn btn-sm btn-success" onclick="startFletchling()">▶️ Start</button>
+                                        <button class="btn btn-sm btn-danger" onclick="stopFletchling()">⏹️ Stop</button>
+                                        <button class="btn btn-sm btn-warning" onclick="restartGolbat()">🔄 Restart Golbat</button>
                                     </div>
                                 </div>
                             </div>
-                            
-                            <!-- Documentation Links -->
-                            <div class="fletchling-docs">
-                                <h3>📚 Documentation</h3>
-                                <div class="docs-links">
-                                    <a href="https://unownhash.com/docs/other/fletchling" target="_blank" class="doc-link">
-                                        📖 Fletchling Docs
-                                    </a>
-                                    <a href="https://github.com/UnownHash/Fletchling" target="_blank" class="doc-link">
-                                        🐙 GitHub Repository
-                                    </a>
-                                    <a href="https://github.com/disturbedkh/Aegis-All-In-One/wiki/Optional-Features" target="_blank" class="doc-link">
-                                        📋 Aegis AIO Wiki
-                                    </a>
+                        </div>
+                        
+                        <!-- Nest Statistics -->
+                        <div class="fletchling-stats" id="fletchlingStats" style="display: none;">
+                            <h3>📊 Nest Statistics</h3>
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <div class="stat-value" id="totalNests">0</div>
+                                    <div class="stat-label">Total Nests</div>
                                 </div>
+                                <div class="stat-box">
+                                    <div class="stat-value" id="activeNests">0</div>
+                                    <div class="stat-label">Active Nests</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Documentation Links -->
+                        <div class="fletchling-docs">
+                            <h3>📚 Documentation</h3>
+                            <div class="docs-links">
+                                <a href="https://unownhash.com/docs/other/fletchling" target="_blank" class="doc-link">
+                                    📖 Fletchling Docs
+                                </a>
+                                <a href="https://github.com/UnownHash/Fletchling" target="_blank" class="doc-link">
+                                    🐙 GitHub Repository
+                                </a>
+                                <a href="https://github.com/disturbedkh/Aegis-All-In-One/wiki/Optional-Features" target="_blank" class="doc-link">
+                                    📋 Aegis AIO Wiki
+                                </a>
                             </div>
                         </div>
                     </div>
