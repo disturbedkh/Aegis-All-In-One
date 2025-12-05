@@ -2799,14 +2799,28 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                                 </div>
                             </div>
                             
-                            <div class="wizard-step" id="step-certbot" data-step="certbot">
+                            <div class="wizard-step" id="step-sites" data-step="sites">
                                 <div class="step-indicator">
                                     <span class="step-number">2</span>
                                     <span class="step-status checking">⏳</span>
                                 </div>
                                 <div class="step-content">
+                                    <div class="step-title">Configure Sites</div>
+                                    <div class="step-desc">Set up reverse proxy for ReactMap, Koji, etc.</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="showSiteSetupModal()">Configure</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-certbot" data-step="certbot">
+                                <div class="step-indicator">
+                                    <span class="step-number">3</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
                                     <div class="step-title">Certbot (Let's Encrypt)</div>
-                                    <div class="step-desc">Free SSL certificates with auto-renewal</div>
+                                    <div class="step-desc">SSL certificates (requires sites configured first)</div>
                                 </div>
                                 <div class="step-action">
                                     <button class="btn btn-sm btn-primary" onclick="installCertbot()">Install</button>
@@ -2815,7 +2829,7 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                             
                             <div class="wizard-step" id="step-fail2ban" data-step="fail2ban">
                                 <div class="step-indicator">
-                                    <span class="step-number">3</span>
+                                    <span class="step-number">4</span>
                                     <span class="step-status checking">⏳</span>
                                 </div>
                                 <div class="step-content">
@@ -2829,7 +2843,7 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                             
                             <div class="wizard-step" id="step-ufw" data-step="ufw">
                                 <div class="step-indicator">
-                                    <span class="step-number">4</span>
+                                    <span class="step-number">5</span>
                                     <span class="step-status checking">⏳</span>
                                 </div>
                                 <div class="step-content">
@@ -2838,20 +2852,6 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                                 </div>
                                 <div class="step-action">
                                     <button class="btn btn-sm btn-primary" onclick="setupUfw()">Setup</button>
-                                </div>
-                            </div>
-                            
-                            <div class="wizard-step" id="step-sites" data-step="sites">
-                                <div class="step-indicator">
-                                    <span class="step-number">5</span>
-                                    <span class="step-status checking">⏳</span>
-                                </div>
-                                <div class="step-content">
-                                    <div class="step-title">Configure Sites</div>
-                                    <div class="step-desc">Set up reverse proxy for ReactMap, Koji, etc.</div>
-                                </div>
-                                <div class="step-action">
-                                    <button class="btn btn-sm btn-primary" onclick="showSiteSetupModal()">Configure</button>
                                 </div>
                             </div>
                         </div>
@@ -2934,13 +2934,13 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                             <div class="form-group">
                                 <label>Service to Proxy:</label>
                                 <select id="setupService" class="form-input">
-                                    <option value="reactmap:6001">ReactMap (Port 6001)</option>
-                                    <option value="koji:6002">Koji (Port 6002)</option>
-                                    <option value="dragonite:6003">Dragonite (Port 6003)</option>
-                                    <option value="rotom:6004">Rotom (Port 6004)</option>
-                                    <option value="golbat:6005">Golbat (Port 6005)</option>
-                                    <option value="grafana:3000">Grafana (Port 3000)</option>
-                                    <option value="shellder:5000">Shellder (Port 5000)</option>
+                                    <option value="reactmap:6001">ReactMap - Map Frontend (Port 6001)</option>
+                                    <option value="admin:6002">Admin - Dragonite UI (Port 6002)</option>
+                                    <option value="rotom:6003">Rotom - Device Manager (Port 6003)</option>
+                                    <option value="koji:6004">Koji - Geofence Editor (Port 6004)</option>
+                                    <option value="pma:6005">phpMyAdmin - Database Admin (Port 6005)</option>
+                                    <option value="grafana:6006">Grafana - Monitoring (Port 6006)</option>
+                                    <option value="shellder:5000">Shellder - Control Panel (Port 5000)</option>
                                     <option value="custom">Custom Port...</option>
                                 </select>
                             </div>

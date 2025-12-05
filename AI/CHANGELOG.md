@@ -31,7 +31,11 @@
   - Support for local Docker containers OR remote services per component
 - Sidebar menu scrollbar for small screens
 - **Golbat Webhook Manager** - CRUD UI for webhooks in config editor
-- **Fletchling Tab** - Under Management section with status and setup wizard
+- **Fletchling Tab** - Under Management with status, setup wizard, and nest management
+  - OSM park data import step (critical for nest detection)
+  - Nest list with filtering by area, unknown names, active status
+  - Edit/delete nests, bulk operations by area
+  - Statistics dashboard (total nests, active, unknown names)
 - **Poracle Tab** - Discord/Telegram alert bot management
   - Status grid: Docker, Config, Container, Database, Discord, Telegram, Webhook
   - 7-step setup wizard with Discord/Telegram bot configuration
@@ -40,6 +44,22 @@
   - API endpoints: `/api/poracle/status`, `/api/poracle/configure-discord`, etc.
 - **File Manager Enhancements** - Upload, ownership, permissions, sudo support
 - **Config Editor** - Shows commented-out optional fields with badges
+- **Sites & Security Setup Wizard** - Under Overview section
+  - 5-step wizard: Nginx → Sites → Certbot → Fail2Ban → UFW
+  - Sites must be configured BEFORE SSL certificates
+  - Individual install buttons with status indicators
+- **Enhanced Logs Page** - Moved to Monitoring section
+  - Tab-based container selection (All, Dragonite, Golbat, Rotom, etc.)
+  - Custom search tab with advanced filtering:
+    - Multi-container selection for combined logs
+    - Time range filtering with timezone conversion (UTC → local)
+    - Text search and regex patterns
+    - Exclude filters (DEBUG, INFO, heartbeat, health checks)
+    - Log level filtering (ERROR, WARN, INFO, DEBUG)
+    - Saved presets
+  - Live clock showing user's local timezone
+  - Download logs to file
+  - Auto-refresh toggle
 
 ### Changed
 - Moved DEEP_ANALYSIS.md to AI/ folder
@@ -47,6 +67,17 @@
 - Updated .gitignore to exclude node_modules in mcp-server
 - Updated shellder_service.py to use configurable component paths
 - AI Debug API port corrected: 5000 (not 5050) - same as web dashboard
+- **Navigation Reorganization:**
+  - Sites & Security moved from Management to Overview
+  - Logs moved from Management to Monitoring
+  - Xilriws moved from Monitoring to Management
+- **Service dropdown corrected** - Fixed incorrect port assignments:
+  - Removed Dragonite (has no UI) - Admin IS the Dragonite UI
+  - Removed Golbat (has no UI)
+  - Fixed Koji port: 6004 (was incorrectly 6002)
+  - Fixed Rotom port: 6003 (was incorrectly 6004)
+  - Added phpMyAdmin: 6005
+  - Fixed Grafana port: 6006 (was incorrectly 3000)
 
 ### Fixed
 - **Xilriws Log Parsing** - ANSI color codes now stripped before regex matching

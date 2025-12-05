@@ -72,13 +72,16 @@
 
 ### Scanning Pipeline
 
-| Component | Purpose | Ports |
-|-----------|---------|-------|
-| **Aegis** | Mobile device app that scans Pokemon GO | Connects to 7070 |
-| **Rotom** | Device manager & communication hub | 7070 (devices), 6003 (UI) |
-| **Dragonite** | Scanner backend & task distribution | 7272 (API), 6002 (Admin) |
-| **Golbat** | Data processor & Pokemon tracker | 9001 (HTTP), 50001 (gRPC) |
-| **Xilriws** | Pokemon GO authentication proxy | 5090 |
+| Component | Purpose | Ports | Has UI? |
+|-----------|---------|-------|---------|
+| **Aegis** | Mobile device app that scans Pokemon GO | Connects to 7070 | Phone app |
+| **Rotom** | Device manager & communication hub | 7070 (devices), 6003 (Web UI) | ✅ Yes |
+| **Dragonite** | Scanner backend & task distribution | 7272 (API only) | ❌ No UI |
+| **Admin** | Web UI frontend for Dragonite | 6002 | ✅ Yes (Dragonite's UI) |
+| **Golbat** | Data processor & Pokemon tracker | 9001 (API), 50001 (gRPC) | ❌ No UI |
+| **Xilriws** | Pokemon GO authentication proxy | 5090 (API only) | ❌ No UI |
+
+**Important:** Dragonite and Golbat are backend services with NO web interface. The "Admin" container IS the web UI for managing Dragonite.
 
 ### Data Flow
 
