@@ -30,12 +30,29 @@
   - API endpoints: `/api/stack-config`, `/api/stack-config/components`, etc.
   - Support for local Docker containers OR remote services per component
 - Sidebar menu scrollbar for small screens
+- **Golbat Webhook Manager** - CRUD UI for webhooks in config editor
+- **Fletchling Tab** - Under Management section with status and setup wizard
+- **File Manager Enhancements** - Upload, ownership, permissions, sudo support
+- **Config Editor** - Shows commented-out optional fields with badges
 
 ### Changed
 - Moved DEEP_ANALYSIS.md to AI/ folder
 - Moved STACK_SIMULATION.md to AI/ folder
 - Updated .gitignore to exclude node_modules in mcp-server
 - Updated shellder_service.py to use configurable component paths
+- AI Debug API port corrected: 5000 (not 5050) - same as web dashboard
+
+### Fixed
+- **Xilriws Log Parsing** - ANSI color codes now stripped before regex matching
+- **Xilriws Stats Display** - Removed duplicate `updateXilriwsPage` function that was overwriting correct one
+- **Xilriws Proxy Stats** - Added 'local' tracking when no external proxy configured
+- **Metrics Charts** - SQLite busy_timeout and WAL mode prevent database locking
+- **Metrics Charts** - AbortController cancels in-flight requests when switching periods
+- **Metrics Charts** - Bar width CSS fixed to fill container proportionally
+- **Config Editor** - Fixed nested TOML section navigation (db.dragonite.user)
+- **Config Status** - Fixed detection of configured vs default values
+- **File Manager** - Base64 encoding for paths with special characters
+- **Docker Start** - Handles already-running containers and port conflicts gracefully
 
 ---
 

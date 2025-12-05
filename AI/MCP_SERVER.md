@@ -9,8 +9,10 @@
 The Shellder MCP Server (`Shellder/mcp-server/`) allows AI assistants (Cursor, Claude, etc.) to interact directly with your Aegis AIO infrastructure through a standardized protocol.
 
 **Location:** `Shellder/mcp-server/`  
-**Backend:** Shellder Service at `http://localhost:5050`  
+**Backend:** Shellder Service at `http://localhost:5000` (or remote server IP)  
 **Protocol:** Model Context Protocol (MCP) via stdio
+
+> **Note:** The MCP server connects to Shellder's web dashboard port (5000), not a separate port.
 
 ---
 
@@ -74,6 +76,7 @@ node index.js
 **Windows:** `%APPDATA%\Cursor\User\globalStorage\cursor.mcp\mcp.json`  
 **Mac/Linux:** `~/.cursor/mcp.json` or equivalent
 
+**Local Development (Shellder on same machine):**
 ```json
 {
   "mcpServers": {
@@ -81,14 +84,32 @@ node index.js
       "command": "node",
       "args": ["C:\\path\\to\\Aegis-All-In-One\\Shellder\\mcp-server\\index.js"],
       "env": {
-        "SHELLDER_URL": "http://localhost:5050"
+        "SHELLDER_URL": "http://localhost:5000"
       }
     }
   }
 }
 ```
 
-**Important:** Restart Cursor after creating/modifying this file.
+**Remote Server (Cursor on Windows, Shellder on Linux):**
+```json
+{
+  "mcpServers": {
+    "shellder": {
+      "command": "node",
+      "args": ["C:\\Users\\khutt\\Aegis-All-In-One\\Shellder\\mcp-server\\index.js"],
+      "env": {
+        "SHELLDER_URL": "http://77.237.241.111:5000"
+      }
+    }
+  }
+}
+```
+
+**Important:** 
+- Restart Cursor after creating/modifying this file
+- Port is **5000** (same as web dashboard), not 5050
+- For remote servers, ensure port 5000 is open in firewall
 
 ---
 

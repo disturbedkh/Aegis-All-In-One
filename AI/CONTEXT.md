@@ -204,9 +204,17 @@ Located at `Shellder/mcp-server/`, provides tools for AI assistants:
 **See:** [MCP_SERVER.md](MCP_SERVER.md)
 
 ### AI Debug API
-REST API at `http://localhost:5050/api/ai-debug/*`
+REST API at `http://localhost:5000/api/ai-debug/*`
+
+**Note:** The AI Debug API runs on the same port as the web dashboard (5000), not 5050.
 
 **See:** [AI_DEBUG_API.md](AI_DEBUG_API.md)
+
+### Remote Access
+When connecting from a different machine (e.g., Cursor on Windows to a Linux server):
+- Use the server's IP instead of `localhost`
+- Example: `http://77.237.241.111:5000/api/ai-debug/diagnose`
+- Ensure port 5000 is accessible through firewall
 
 ---
 

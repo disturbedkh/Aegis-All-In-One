@@ -2,8 +2,10 @@
 
 > Complete REST API documentation for AI assistants to interact with Aegis AIO.
 
-**Base URL:** `http://localhost:5050`  
+**Base URL:** `http://localhost:5000` (same as web dashboard)  
 **Content-Type:** `application/json`
+
+**Remote Access:** Replace `localhost` with server IP (e.g., `http://77.237.241.111:5000`)
 
 ---
 

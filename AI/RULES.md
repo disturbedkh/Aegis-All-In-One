@@ -213,12 +213,34 @@ bash Shellder/dbsetup.sh      # Database maintenance
 - Check command success: `if ! command; then`
 - Use meaningful function names
 
-### Python
+### Python (shellder_service.py)
 
 - Follow existing patterns in shellder_service.py
-- Use Flask conventions
-- Handle exceptions properly
-- Log with appropriate levels
+- Use Flask conventions with `@app.route()` decorators
+- Handle exceptions properly with try/except
+- Log with appropriate levels (debug, info, warning, error)
+- **CRITICAL:** Always strip ANSI codes from Docker logs before regex parsing
+- SQLite: Always set `busy_timeout` and use WAL mode for concurrent access
+
+### JavaScript (script.js)
+
+- **Search for existing functions before adding new ones** - duplicates silently override!
+- Use `async/await` with `fetchAPI()` for API calls
+- Implement AbortController for cancellable requests
+- Use `TextEncoder`/`TextDecoder` for base64 encoding (not deprecated escape/unescape)
+- Check DevTools Network tab to verify actual API response field names
+
+### CSS (style.css)
+
+- Follow existing class naming conventions
+- Use CSS variables for colors (defined at top of file)
+- For flex items that should fill space: use `flex: 1` without `max-width`
+
+### TOML/JSON Configs
+
+- Nested TOML sections like `[db.dragonite]` create nested objects
+- Navigate with optional chaining: `obj.db?.dragonite?.user`
+- Don't use flat key access: `obj['db.dragonite']` won't work
 
 ### Documentation
 

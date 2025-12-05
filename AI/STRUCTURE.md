@@ -55,18 +55,23 @@ AI/
 ```
 Shellder/
 ├── 📁 gui_static/              # Web dashboard assets
-│   ├── script.js               # Frontend JavaScript
-│   └── style.css               # CSS styles
+│   ├── script.js               # Frontend JavaScript (~11k lines)
+│   └── style.css               # CSS styles (~8.5k lines)
 ├── 📁 gui_templates/           # HTML templates
-│   └── index.html              # Main dashboard template
+│   └── index.html              # Main dashboard template (~3.2k lines)
 ├── 📁 mcp-server/              # MCP server for AI
 │   ├── index.js                # MCP server entry point
 │   ├── package.json            # Node.js dependencies
 │   └── node_modules/           # Installed packages (gitignored)
 ├── 📁 data/                    # Persistent data storage
+│   └── shellder.db             # SQLite database (metrics, stats)
 ├── 📁 logs/                    # Shellder logs
+│   └── debuglog.txt            # Debug log file
 │
-├── 📄 shellder_service.py      # Main Python web service
+├── 📄 shellder_service.py      # Main Python web service (~17k lines)
+├── 📄 shellder_config.toml     # Stack configuration (NEW)
+├── 📄 config_loader.py         # Python config loader (NEW)
+├── 📄 config_loader.sh         # Shell config loader (NEW)
 ├── 📄 debug_logger.py          # Debug logging module
 ├── 📄 requirements.txt         # Python dependencies
 ├── 📄 Dockerfile               # Docker build file
@@ -85,6 +90,14 @@ Shellder/
 ├── 📄 db_helper.sh             # SQLite operations helper
 └── 📄 log_helper.sh            # Logging operations helper
 ```
+
+### Key File Sizes (for context)
+| File | Lines | Notes |
+|------|-------|-------|
+| shellder_service.py | ~17,000 | Main backend - too large to read fully |
+| script.js | ~11,000 | Search for functions before adding |
+| style.css | ~8,500 | Uses CSS variables |
+| index.html | ~3,200 | Single-page app with tabs |
 
 ---
 
