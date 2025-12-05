@@ -88,6 +88,10 @@
                         <span class="nav-icon">🪺</span>
                         <span>Fletchling</span>
                     </a>
+                    <a href="#" class="nav-item" data-page="poracle" onclick="navigateTo('poracle'); return false;">
+                        <span class="nav-icon">🔔</span>
+                        <span>Poracle</span>
+                    </a>
                     <a href="#" class="nav-item" data-page="updates" onclick="navigateTo('updates'); return false;">
                         <span class="nav-icon">🔄</span>
                         <span>Updates</span>
@@ -1552,6 +1556,235 @@
                                 </a>
                                 <a href="https://github.com/UnownHash/Fletchling" target="_blank" class="doc-link">
                                     🐙 GitHub Repository
+                                </a>
+                                <a href="https://github.com/disturbedkh/Aegis-All-In-One/wiki/Optional-Features" target="_blank" class="doc-link">
+                                    📋 Aegis AIO Wiki
+                                </a>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Poracle Page (Discord/Telegram Notifications) -->
+            <div id="page-poracle" class="page">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🔔 Poracle - Discord & Telegram Alerts</h2>
+                        <button class="btn btn-sm" onclick="loadPoracleStatus()">🔄 Refresh</button>
+                    </div>
+                    <div class="card-body">
+                        <p class="section-desc">
+                            Poracle sends customizable notifications to Discord or Telegram when Pokemon spawn, raids start,
+                            quests appear, or Team Rocket invades. Users can set up their own filters via bot commands.
+                            This is an <strong>optional</strong> feature.
+                        </p>
+                        
+                        <!-- Status Lights Grid -->
+                        <div class="poracle-status-grid" id="poracleStatusGrid">
+                            <div class="status-item" id="poracle-compose-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Docker Compose</div>
+                                    <div class="status-desc">Service enabled in docker-compose.yaml</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-config-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Configuration</div>
+                                    <div class="status-desc">Poracle/config/local.json configured</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-container-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Container Running</div>
+                                    <div class="status-desc">Poracle container status</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-database-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Database</div>
+                                    <div class="status-desc">Poracle database tables exist</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-discord-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Discord Bot</div>
+                                    <div class="status-desc">Discord integration status</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-telegram-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Telegram Bot</div>
+                                    <div class="status-desc">Telegram integration status</div>
+                                </div>
+                            </div>
+                            <div class="status-item" id="poracle-webhook-status">
+                                <div class="status-light checking"></div>
+                                <div class="status-info">
+                                    <div class="status-title">Golbat Webhook</div>
+                                    <div class="status-desc">Receiving data from Golbat</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Setup Section -->
+                        <div class="poracle-setup-section">
+                            <h3>🔧 Setup Steps</h3>
+                            
+                            <!-- Step 1: Enable in Docker Compose -->
+                            <div class="setup-step" id="poracle-step-enable">
+                                <div class="step-number">1</div>
+                                <div class="step-content">
+                                    <div class="step-title">Enable Poracle Service</div>
+                                    <div class="step-desc">Uncomment Poracle in docker-compose.yaml</div>
+                                    <button class="btn btn-sm btn-primary" onclick="enablePoracle()">Enable Service</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 2: Configure Database -->
+                            <div class="setup-step" id="poracle-step-database">
+                                <div class="step-number">2</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Database Connection</div>
+                                    <div class="step-desc">Database settings auto-configured from .env</div>
+                                    <button class="btn btn-sm btn-primary" onclick="configurePoracleDatabase()">Apply DB Settings</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 3: Discord Bot Setup -->
+                            <div class="setup-step" id="poracle-step-discord">
+                                <div class="step-number">3</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Discord Bot (Optional)</div>
+                                    <div class="step-desc">Set up Discord bot for notifications</div>
+                                    <div class="step-input-group">
+                                        <input type="password" id="poracleDiscordToken" class="form-input" 
+                                               placeholder="Discord Bot Token">
+                                        <button class="btn btn-sm" onclick="togglePasswordVisibility('poracleDiscordToken')">👁️</button>
+                                    </div>
+                                    <div class="step-input-group">
+                                        <input type="text" id="poracleDiscordAdmin" class="form-input" 
+                                               placeholder="Your Discord User ID (for admin commands)">
+                                        <button class="btn btn-sm btn-primary" onclick="configurePoracleDiscord()">Configure Discord</button>
+                                    </div>
+                                    <div class="step-hint">
+                                        <span class="hint-icon">💡</span>
+                                        <span>Get bot token from <a href="https://discord.com/developers/applications" target="_blank">Discord Developer Portal</a>.
+                                        Get your User ID by enabling Developer Mode in Discord settings, then right-click your name.</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 4: Telegram Bot Setup -->
+                            <div class="setup-step" id="poracle-step-telegram">
+                                <div class="step-number">4</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Telegram Bot (Optional)</div>
+                                    <div class="step-desc">Set up Telegram bot for notifications</div>
+                                    <div class="step-input-group">
+                                        <input type="password" id="poracleTelegramToken" class="form-input" 
+                                               placeholder="Telegram Bot Token">
+                                        <button class="btn btn-sm" onclick="togglePasswordVisibility('poracleTelegramToken')">👁️</button>
+                                    </div>
+                                    <div class="step-input-group">
+                                        <input type="text" id="poracleTelegramAdmin" class="form-input" 
+                                               placeholder="Your Telegram User ID (for admin commands)">
+                                        <button class="btn btn-sm btn-primary" onclick="configurePoracleTelegram()">Configure Telegram</button>
+                                    </div>
+                                    <div class="step-hint">
+                                        <span class="hint-icon">💡</span>
+                                        <span>Create bot via <a href="https://t.me/BotFather" target="_blank">@BotFather</a> on Telegram.
+                                        Get your User ID from <a href="https://t.me/userinfobot" target="_blank">@userinfobot</a>.</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 5: Add Webhook -->
+                            <div class="setup-step" id="poracle-step-webhook">
+                                <div class="step-number">5</div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Golbat Webhook</div>
+                                    <div class="step-desc">Add webhook to send Pokemon/raid/quest data to Poracle</div>
+                                    <button class="btn btn-sm btn-primary" onclick="addPoracleWebhook()">Add Webhook</button>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 6: Geofences -->
+                            <div class="setup-step" id="poracle-step-geofence">
+                                <div class="step-number">6</div>
+                                <div class="step-content">
+                                    <div class="step-title">Import Geofences from Koji</div>
+                                    <div class="step-desc">Import area definitions for location-based alerts</div>
+                                    <button class="btn btn-sm btn-primary" onclick="importPoracleGeofences()">Import from Koji</button>
+                                    <div class="step-hint">
+                                        <span class="hint-icon">💡</span>
+                                        <span>Geofences define areas where users can receive alerts (e.g., "Downtown", "North Side")</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Step 7: Start Container -->
+                            <div class="setup-step" id="poracle-step-start">
+                                <div class="step-number">7</div>
+                                <div class="step-content">
+                                    <div class="step-title">Start Poracle</div>
+                                    <div class="step-desc">Start the Poracle container</div>
+                                    <div class="button-group">
+                                        <button class="btn btn-sm btn-success" onclick="startPoracle()">▶️ Start</button>
+                                        <button class="btn btn-sm btn-danger" onclick="stopPoracle()">⏹️ Stop</button>
+                                        <button class="btn btn-sm btn-warning" onclick="restartPoracle()">🔄 Restart</button>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Poracle Statistics -->
+                        <div class="poracle-stats" id="poracleStats" style="display: none;">
+                            <h3>📊 Statistics</h3>
+                            <div class="stats-grid">
+                                <div class="stat-box">
+                                    <div class="stat-value" id="poracleUsers">0</div>
+                                    <div class="stat-label">Registered Users</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-value" id="poracleAlertsToday">0</div>
+                                    <div class="stat-label">Alerts Today</div>
+                                </div>
+                                <div class="stat-box">
+                                    <div class="stat-value" id="poracleGeofences">0</div>
+                                    <div class="stat-label">Geofences</div>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Recent Logs Preview -->
+                        <div class="poracle-logs-preview">
+                            <h3>📜 Recent Logs</h3>
+                            <pre id="poracleLogsPreview" class="log-preview">Logs will appear when Poracle is running...</pre>
+                            <button class="btn btn-sm" onclick="loadPoracleLogs()">Refresh Logs</button>
+                        </div>
+                        
+                        <!-- Documentation Links -->
+                        <div class="poracle-docs">
+                            <h3>📚 Documentation</h3>
+                            <div class="docs-links">
+                                <a href="https://muckelba.github.io/poracleWiki/" target="_blank" class="doc-link">
+                                    📖 Poracle Wiki
+                                </a>
+                                <a href="https://github.com/KartulUdus/PoracleJS" target="_blank" class="doc-link">
+                                    🐙 GitHub Repository
+                                </a>
+                                <a href="https://muckelba.github.io/poracleWiki/configuration/discord.html" target="_blank" class="doc-link">
+                                    💬 Discord Setup Guide
+                                </a>
+                                <a href="https://muckelba.github.io/poracleWiki/configuration/telegram.html" target="_blank" class="doc-link">
+                                    📱 Telegram Setup Guide
                                 </a>
                                 <a href="https://github.com/disturbedkh/Aegis-All-In-One/wiki/Optional-Features" target="_blank" class="doc-link">
                                     📋 Aegis AIO Wiki

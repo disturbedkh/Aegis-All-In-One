@@ -12602,6 +12602,552 @@ def api_fletchling_stop():
 
 
 # =============================================================================
+# PORACLE MANAGEMENT API (Discord/Telegram Alert Bot)
+# =============================================================================
+
+@app.route('/api/poracle/status')
+def api_poracle_status():
+    """Get comprehensive Poracle status for management tab"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    status = {
+        'docker_compose': {
+            'enabled': False,
+            'comment_status': 'unknown'
+        },
+        'config': {
+            'file_exists': False,
+            'has_placeholder': True,
+            'db_configured': False
+        },
+        'container': {
+            'running': False,
+            'health': 'unknown',
+            'image': None
+        },
+        'database': {
+            'connected': False,
+            'user_count': 0,
+            'error': None
+        },
+        'discord': {
+            'enabled': False,
+            'token_set': False
+        },
+        'telegram': {
+            'enabled': False,
+            'token_set': False
+        },
+        'golbat_webhook': {
+            'configured': False
+        },
+        'geofences': {
+            'count': 0
+        }
+    }
+    
+    try:
+        # Check docker-compose.yaml for poracle service
+        compose_file = os.path.join(aegis_root, 'docker-compose.yaml')
+        if os.path.exists(compose_file):
+            with open(compose_file, 'r') as f:
+                content = f.read()
+            # Check if poracle service is enabled (not commented)
+            if 'poracle:' in content:
+                # Check if it's commented out
+                lines = content.split('\n')
+                for line in lines:
+                    stripped = line.strip()
+                    if stripped.startswith('poracle:') or stripped.startswith('# poracle:'):
+                        status['docker_compose']['enabled'] = not stripped.startswith('#')
+                        status['docker_compose']['comment_status'] = 'commented' if stripped.startswith('#') else 'enabled'
+                        break
+        
+        # Check Poracle config file
+        config_file = os.path.join(aegis_root, 'Poracle', 'config', 'local.json')
+        if os.path.exists(config_file):
+            status['config']['file_exists'] = True
+            with open(config_file, 'r') as f:
+                config = json.load(f)
+            
+            # Check if database password is placeholder
+            db_password = config.get('database', {}).get('conn', {}).get('password', 'CHANGE_ME')
+            status['config']['has_placeholder'] = db_password in ['CHANGE_ME', 'dbuser', '']
+            status['config']['db_configured'] = not status['config']['has_placeholder']
+            
+            # Check Discord settings
+            discord_config = config.get('discord', {})
+            status['discord']['enabled'] = discord_config.get('enabled', False)
+            discord_token = discord_config.get('token', [''])[0] if isinstance(discord_config.get('token'), list) else discord_config.get('token', '')
+            status['discord']['token_set'] = bool(discord_token) and discord_token != 'YOUR_DISCORD_BOT_TOKEN'
+            
+            # Check Telegram settings
+            telegram_config = config.get('telegram', {})
+            status['telegram']['enabled'] = telegram_config.get('enabled', False)
+            telegram_token = telegram_config.get('token', '')
+            status['telegram']['token_set'] = bool(telegram_token) and telegram_token != 'YOUR_TELEGRAM_BOT_TOKEN'
+        
+        # Check container status
+        if docker_client:
+            try:
+                container = docker_client.containers.get('poracle')
+                status['container']['running'] = container.status == 'running'
+                status['container']['health'] = container.status
+                status['container']['image'] = container.image.tags[0] if container.image.tags else None
+            except docker.errors.NotFound:
+                pass
+        
+        # Check if Poracle database has users
+        if status['config']['db_configured']:
+            try:
+                # Try to query the poracle database
+                env_file = os.path.join(aegis_root, '.env')
+                db_password = None
+                if os.path.exists(env_file):
+                    with open(env_file, 'r') as f:
+                        for line in f:
+                            if line.startswith('MYSQL_PASSWORD='):
+                                db_password = line.split('=', 1)[1].strip().strip('"\'')
+                                break
+                
+                if db_password:
+                    import subprocess
+                    result = subprocess.run(
+                        ['mysql', '-h', 'localhost', '-u', 'pokemap', f'-p{db_password}', 
+                         '-e', 'SELECT COUNT(*) FROM humans;', 'poracle'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0:
+                        status['database']['connected'] = True
+                        # Parse count from output
+                        lines = result.stdout.strip().split('\n')
+                        if len(lines) > 1:
+                            status['database']['user_count'] = int(lines[1])
+            except Exception as e:
+                status['database']['error'] = str(e)
+        
+        # Check Golbat webhook configuration
+        golbat_config = os.path.join(aegis_root, 'unown', 'golbat_config.toml')
+        if os.path.exists(golbat_config):
+            with open(golbat_config, 'r') as f:
+                content = f.read()
+            status['golbat_webhook']['configured'] = 'poracle' in content.lower() and '3030' in content
+        
+        # Check geofences
+        geofence_dir = os.path.join(aegis_root, 'Poracle', 'geofence')
+        if os.path.exists(geofence_dir):
+            geofence_count = 0
+            for f in os.listdir(geofence_dir):
+                if f.endswith('.json'):
+                    try:
+                        with open(os.path.join(geofence_dir, f), 'r') as gf:
+                            data = json.load(gf)
+                            if isinstance(data, list):
+                                geofence_count += len(data)
+                    except:
+                        pass
+            status['geofences']['count'] = geofence_count
+        
+    except Exception as e:
+        print(f"Error getting Poracle status: {e}")
+    
+    return jsonify(status)
+
+
+@app.route('/api/poracle/enable', methods=['POST'])
+def api_poracle_enable():
+    """Enable Poracle in docker-compose.yaml by uncommenting the service"""
+    aegis_root = str(AEGIS_ROOT)
+    compose_file = os.path.join(aegis_root, 'docker-compose.yaml')
+    
+    result = {'success': False, 'message': '', 'changes': []}
+    
+    if not os.path.exists(compose_file):
+        result['message'] = 'docker-compose.yaml not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(compose_file, 'r') as f:
+            content = f.read()
+        
+        if '# poracle:' not in content:
+            if 'poracle:' in content:
+                result['success'] = True
+                result['message'] = 'Poracle is already enabled'
+            else:
+                result['message'] = 'Poracle service not found in docker-compose.yaml'
+            return jsonify(result)
+        
+        # Uncomment poracle section
+        lines = content.split('\n')
+        new_lines = []
+        in_poracle_section = False
+        section_depth = 0
+        
+        for line in lines:
+            # Detect start of poracle section
+            if line.strip().startswith('# poracle:') or line.strip().startswith('#  poracle:'):
+                in_poracle_section = True
+                section_depth = len(line) - len(line.lstrip())
+                new_lines.append(line.lstrip('#').lstrip(' #'))
+                result['changes'].append('Uncommented poracle service')
+                continue
+            
+            if in_poracle_section:
+                current_depth = len(line) - len(line.lstrip())
+                stripped = line.strip()
+                
+                # Check if we've exited the section
+                if stripped and not stripped.startswith('#') and current_depth <= section_depth:
+                    in_poracle_section = False
+                    new_lines.append(line)
+                    continue
+                
+                # Uncomment lines in the section
+                if stripped.startswith('#'):
+                    uncommented = line.replace('#', '', 1)
+                    new_lines.append(uncommented)
+                else:
+                    new_lines.append(line)
+            else:
+                new_lines.append(line)
+        
+        new_content = '\n'.join(new_lines)
+        
+        success, error = safe_write_file(compose_file, new_content)
+        if success:
+            result['success'] = True
+            result['message'] = 'Poracle enabled in docker-compose.yaml'
+        else:
+            result['message'] = f'Failed to write file: {error}'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/configure-database', methods=['POST'])
+def api_poracle_configure_database():
+    """Configure Poracle database settings from .env"""
+    aegis_root = str(AEGIS_ROOT)
+    config_file = os.path.join(aegis_root, 'Poracle', 'config', 'local.json')
+    env_file = os.path.join(aegis_root, '.env')
+    
+    result = {'success': False, 'message': ''}
+    
+    if not os.path.exists(config_file):
+        result['message'] = 'Poracle/config/local.json not found'
+        return jsonify(result), 404
+    
+    # Read database credentials from .env
+    db_user = 'pokemap'
+    db_password = None
+    
+    if os.path.exists(env_file):
+        with open(env_file, 'r') as f:
+            for line in f:
+                if line.startswith('MYSQL_USER='):
+                    db_user = line.split('=', 1)[1].strip().strip('"\'')
+                elif line.startswith('MYSQL_PASSWORD='):
+                    db_password = line.split('=', 1)[1].strip().strip('"\'')
+    
+    if not db_password:
+        result['message'] = 'Could not find MYSQL_PASSWORD in .env file'
+        return jsonify(result), 400
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        
+        # Update database settings
+        if 'database' not in config:
+            config['database'] = {}
+        if 'conn' not in config['database']:
+            config['database']['conn'] = {}
+        
+        config['database']['conn']['user'] = db_user
+        config['database']['conn']['password'] = db_password
+        config['database']['conn']['host'] = 'database'
+        config['database']['conn']['port'] = 3306
+        config['database']['conn']['database'] = 'poracle'
+        
+        # Write back
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        result['success'] = True
+        result['message'] = 'Database settings configured from .env'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/configure-discord', methods=['POST'])
+def api_poracle_configure_discord():
+    """Configure Discord bot settings"""
+    aegis_root = str(AEGIS_ROOT)
+    config_file = os.path.join(aegis_root, 'Poracle', 'config', 'local.json')
+    
+    data = request.json or {}
+    token = data.get('token', '').strip()
+    admin_id = data.get('admin_id', '').strip()
+    
+    result = {'success': False, 'message': ''}
+    
+    if not token:
+        result['message'] = 'Discord bot token is required'
+        return jsonify(result), 400
+    
+    if not os.path.exists(config_file):
+        result['message'] = 'Poracle/config/local.json not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        
+        # Update Discord settings
+        if 'discord' not in config:
+            config['discord'] = {}
+        
+        config['discord']['enabled'] = True
+        config['discord']['token'] = [token]
+        
+        if admin_id:
+            config['discord']['admins'] = [admin_id]
+        
+        # Write back
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        result['success'] = True
+        result['message'] = 'Discord bot configured successfully'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/configure-telegram', methods=['POST'])
+def api_poracle_configure_telegram():
+    """Configure Telegram bot settings"""
+    aegis_root = str(AEGIS_ROOT)
+    config_file = os.path.join(aegis_root, 'Poracle', 'config', 'local.json')
+    
+    data = request.json or {}
+    token = data.get('token', '').strip()
+    admin_id = data.get('admin_id', '').strip()
+    
+    result = {'success': False, 'message': ''}
+    
+    if not token:
+        result['message'] = 'Telegram bot token is required'
+        return jsonify(result), 400
+    
+    if not os.path.exists(config_file):
+        result['message'] = 'Poracle/config/local.json not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(config_file, 'r') as f:
+            config = json.load(f)
+        
+        # Update Telegram settings
+        if 'telegram' not in config:
+            config['telegram'] = {}
+        
+        config['telegram']['enabled'] = True
+        config['telegram']['token'] = token
+        
+        if admin_id:
+            config['telegram']['admins'] = [admin_id]
+        
+        # Write back
+        with open(config_file, 'w') as f:
+            json.dump(config, f, indent=2)
+        
+        result['success'] = True
+        result['message'] = 'Telegram bot configured successfully'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/add-webhook', methods=['POST'])
+def api_poracle_add_webhook():
+    """Add Poracle webhook to golbat_config.toml"""
+    aegis_root = str(AEGIS_ROOT)
+    golbat_config = os.path.join(aegis_root, 'unown', 'golbat_config.toml')
+    
+    result = {'success': False, 'message': ''}
+    
+    if not os.path.exists(golbat_config):
+        result['message'] = 'golbat_config.toml not found'
+        return jsonify(result), 404
+    
+    try:
+        with open(golbat_config, 'r') as f:
+            content = f.read()
+        
+        # Check if already configured
+        if 'poracle' in content.lower() and '3030' in content:
+            result['success'] = True
+            result['message'] = 'Poracle webhook already configured in Golbat'
+            return jsonify(result)
+        
+        # Add webhook section - Poracle needs all data types
+        webhook_config = '''
+# Poracle notification webhook (Discord/Telegram alerts)
+[[webhooks]]
+url = "http://poracle:3030"
+types = ["pokemon", "pokemon_iv", "pokemon_no_iv", "gym", "invasion", "quest", "pokestop", "raid", "weather"]
+'''
+        content += webhook_config
+        
+        success, error = safe_write_file(golbat_config, content)
+        if success:
+            result['success'] = True
+            result['message'] = 'Poracle webhook added to Golbat config'
+        else:
+            result['message'] = f'Failed to write file: {error}'
+        
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/import-geofences', methods=['POST'])
+def api_poracle_import_geofences():
+    """Import geofences from Koji to Poracle"""
+    aegis_root = str(AEGIS_ROOT)
+    geofence_dir = os.path.join(aegis_root, 'Poracle', 'geofence')
+    
+    result = {'success': False, 'message': '', 'imported': 0}
+    
+    try:
+        # Try to get geofences from Koji API
+        import requests
+        koji_url = 'http://localhost:6004'  # Default Koji port
+        
+        # Get all projects from Koji
+        try:
+            resp = requests.get(f'{koji_url}/api/v1/geofence/all', timeout=10)
+            if resp.status_code == 200:
+                geofences = resp.json()
+                
+                # Create geofence directory if needed
+                os.makedirs(geofence_dir, exist_ok=True)
+                
+                # Convert Koji format to Poracle format
+                poracle_geofences = []
+                for gf in geofences:
+                    if gf.get('geo_type') == 'Polygon' and gf.get('geometry'):
+                        poracle_gf = {
+                            'name': gf.get('name', 'Unknown'),
+                            'color': '#FF0000',
+                            'path': []
+                        }
+                        
+                        # Convert coordinates
+                        coords = gf.get('geometry', {}).get('coordinates', [])
+                        if coords and len(coords) > 0:
+                            for coord in coords[0]:  # First ring of polygon
+                                if len(coord) >= 2:
+                                    poracle_gf['path'].append([coord[1], coord[0]])  # lat, lng
+                        
+                        if poracle_gf['path']:
+                            poracle_geofences.append(poracle_gf)
+                
+                if poracle_geofences:
+                    # Write to geofence file
+                    output_file = os.path.join(geofence_dir, 'koji_import.json')
+                    with open(output_file, 'w') as f:
+                        json.dump(poracle_geofences, f, indent=2)
+                    
+                    result['success'] = True
+                    result['imported'] = len(poracle_geofences)
+                    result['message'] = f'Imported {len(poracle_geofences)} geofences from Koji'
+                else:
+                    result['message'] = 'No polygon geofences found in Koji'
+            else:
+                result['message'] = f'Failed to fetch from Koji: HTTP {resp.status_code}'
+        except requests.exceptions.RequestException as e:
+            result['message'] = f'Could not connect to Koji: {e}'
+            
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/start', methods=['POST'])
+def api_poracle_start():
+    """Start Poracle container"""
+    result = {'success': False, 'message': '', 'output': ''}
+    
+    try:
+        proc = subprocess.run(
+            ['docker', 'compose', 'up', '-d', 'poracle'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        result['output'] = proc.stdout + '\n' + proc.stderr
+        result['success'] = proc.returncode == 0
+        result['message'] = 'Poracle container started' if result['success'] else 'Failed to start container'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/stop', methods=['POST'])
+def api_poracle_stop():
+    """Stop Poracle container"""
+    result = {'success': False, 'message': '', 'output': ''}
+    
+    try:
+        proc = subprocess.run(
+            ['docker', 'compose', 'stop', 'poracle'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        result['output'] = proc.stdout + '\n' + proc.stderr
+        result['success'] = proc.returncode == 0
+        result['message'] = 'Poracle container stopped' if result['success'] else 'Failed to stop container'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/poracle/restart', methods=['POST'])
+def api_poracle_restart():
+    """Restart Poracle container"""
+    result = {'success': False, 'message': '', 'output': ''}
+    
+    try:
+        proc = subprocess.run(
+            ['docker', 'compose', 'restart', 'poracle'],
+            capture_output=True, text=True, timeout=60,
+            cwd=str(AEGIS_ROOT)
+        )
+        result['output'] = proc.stdout + '\n' + proc.stderr
+        result['success'] = proc.returncode == 0
+        result['message'] = 'Poracle container restarted' if result['success'] else 'Failed to restart container'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+# =============================================================================
 # INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)
 # =============================================================================
 

@@ -1253,6 +1253,7 @@ function navigateTo(page) {
         'scripts': 'Scripts',
         'logs': 'Logs',
         'fletchling': 'Fletchling - Nest Detection',
+        'poracle': 'Poracle - Discord & Telegram Alerts',
         'updates': 'Updates',
         'debug': 'Debug & Diagnostics'
     };
@@ -1282,6 +1283,9 @@ function navigateTo(page) {
         // Load shellder config when navigating to the page
         if (typeof loadShellderConfig === 'function') loadShellderConfig();
         if (typeof loadRawShellderConfig === 'function') loadRawShellderConfig();
+    } else if (page === 'poracle') {
+        // Load Poracle status when navigating to the page
+        if (typeof loadPoracleStatus === 'function') loadPoracleStatus();
     }
 }
 
@@ -7200,6 +7204,306 @@ async function restartGolbat() {
         }
     } catch (e) {
         showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// =============================================================================
+// PORACLE MANAGEMENT
+// =============================================================================
+
+async function loadPoracleStatus() {
+    try {
+        const data = await fetchAPI('/api/poracle/status');
+        
+        // Update Docker Compose status
+        const composeStatus = document.querySelector('#poracle-compose-status .status-light');
+        const composeDesc = document.querySelector('#poracle-compose-status .status-desc');
+        if (composeStatus) {
+            composeStatus.className = 'status-light ' + (data.docker_compose.enabled ? 'success' : 'error');
+            composeDesc.textContent = data.docker_compose.enabled 
+                ? 'Service enabled in docker-compose.yaml'
+                : 'Service commented out (disabled)';
+        }
+        
+        // Update Config status
+        const configStatus = document.querySelector('#poracle-config-status .status-light');
+        const configDesc = document.querySelector('#poracle-config-status .status-desc');
+        if (configStatus) {
+            if (!data.config.file_exists) {
+                configStatus.className = 'status-light error';
+                configDesc.textContent = 'Poracle/config/local.json not found';
+            } else if (data.config.has_placeholder) {
+                configStatus.className = 'status-light warning';
+                configDesc.textContent = 'Database password not configured';
+            } else {
+                configStatus.className = 'status-light success';
+                configDesc.textContent = 'Configuration file ready';
+            }
+        }
+        
+        // Update Container status
+        const containerStatus = document.querySelector('#poracle-container-status .status-light');
+        const containerDesc = document.querySelector('#poracle-container-status .status-desc');
+        if (containerStatus) {
+            containerStatus.className = 'status-light ' + (data.container.running ? 'success' : 'error');
+            containerDesc.textContent = data.container.running ? 'Container running' : 'Container not running';
+        }
+        
+        // Update Database status
+        const dbStatus = document.querySelector('#poracle-database-status .status-light');
+        const dbDesc = document.querySelector('#poracle-database-status .status-desc');
+        if (dbStatus) {
+            if (data.database.connected) {
+                dbStatus.className = 'status-light success';
+                dbDesc.textContent = `Database ready (${data.database.user_count || 0} users)`;
+            } else {
+                dbStatus.className = 'status-light error';
+                dbDesc.textContent = data.database.error || 'Database not connected';
+            }
+        }
+        
+        // Update Discord status
+        const discordStatus = document.querySelector('#poracle-discord-status .status-light');
+        const discordDesc = document.querySelector('#poracle-discord-status .status-desc');
+        if (discordStatus) {
+            if (data.discord.enabled) {
+                discordStatus.className = 'status-light ' + (data.discord.token_set ? 'success' : 'warning');
+                discordDesc.textContent = data.discord.token_set ? 'Discord bot configured' : 'Token not set';
+            } else {
+                discordStatus.className = 'status-light neutral';
+                discordDesc.textContent = 'Discord disabled';
+            }
+        }
+        
+        // Update Telegram status
+        const telegramStatus = document.querySelector('#poracle-telegram-status .status-light');
+        const telegramDesc = document.querySelector('#poracle-telegram-status .status-desc');
+        if (telegramStatus) {
+            if (data.telegram.enabled) {
+                telegramStatus.className = 'status-light ' + (data.telegram.token_set ? 'success' : 'warning');
+                telegramDesc.textContent = data.telegram.token_set ? 'Telegram bot configured' : 'Token not set';
+            } else {
+                telegramStatus.className = 'status-light neutral';
+                telegramDesc.textContent = 'Telegram disabled';
+            }
+        }
+        
+        // Update Webhook status
+        const webhookStatus = document.querySelector('#poracle-webhook-status .status-light');
+        const webhookDesc = document.querySelector('#poracle-webhook-status .status-desc');
+        if (webhookStatus) {
+            webhookStatus.className = 'status-light ' + (data.golbat_webhook.configured ? 'success' : 'error');
+            webhookDesc.textContent = data.golbat_webhook.configured 
+                ? 'Golbat webhook configured'
+                : 'Webhook not configured in Golbat';
+        }
+        
+        // Show stats if container is running
+        const statsSection = document.getElementById('poracleStats');
+        if (statsSection && data.container.running && data.database.connected) {
+            statsSection.style.display = 'block';
+            document.getElementById('poracleUsers').textContent = data.database.user_count || 0;
+            document.getElementById('poracleGeofences').textContent = data.geofences?.count || 0;
+        }
+        
+        // Load recent logs if running
+        if (data.container.running) {
+            loadPoracleLogs();
+        }
+        
+    } catch (e) {
+        console.error('Error loading Poracle status:', e);
+        // Set all status lights to error
+        document.querySelectorAll('#poracleStatusGrid .status-light').forEach(el => {
+            el.className = 'status-light error';
+        });
+    }
+}
+
+async function enablePoracle() {
+    try {
+        showToast('Enabling Poracle in docker-compose.yaml...', 'info');
+        const result = await fetchAPI('/api/poracle/enable', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to enable Poracle', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function configurePoracleDatabase() {
+    try {
+        showToast('Configuring Poracle database settings...', 'info');
+        const result = await fetchAPI('/api/poracle/configure-database', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to configure database', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function configurePoracleDiscord() {
+    const token = document.getElementById('poracleDiscordToken').value.trim();
+    const adminId = document.getElementById('poracleDiscordAdmin').value.trim();
+    
+    if (!token) {
+        showToast('Please enter your Discord bot token', 'warning');
+        return;
+    }
+    
+    try {
+        showToast('Configuring Discord bot...', 'info');
+        const result = await fetchAPI('/api/poracle/configure-discord', {
+            method: 'POST',
+            body: JSON.stringify({ token, admin_id: adminId })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            document.getElementById('poracleDiscordToken').value = '';
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to configure Discord', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function configurePoracleTelegram() {
+    const token = document.getElementById('poracleTelegramToken').value.trim();
+    const adminId = document.getElementById('poracleTelegramAdmin').value.trim();
+    
+    if (!token) {
+        showToast('Please enter your Telegram bot token', 'warning');
+        return;
+    }
+    
+    try {
+        showToast('Configuring Telegram bot...', 'info');
+        const result = await fetchAPI('/api/poracle/configure-telegram', {
+            method: 'POST',
+            body: JSON.stringify({ token, admin_id: adminId })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            document.getElementById('poracleTelegramToken').value = '';
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to configure Telegram', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function addPoracleWebhook() {
+    try {
+        showToast('Adding Poracle webhook to Golbat...', 'info');
+        const result = await fetchAPI('/api/poracle/add-webhook', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message + ' (Restart Golbat to apply)', 'success');
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to add webhook', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function importPoracleGeofences() {
+    try {
+        showToast('Importing geofences from Koji...', 'info');
+        const result = await fetchAPI('/api/poracle/import-geofences', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to import geofences', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function startPoracle() {
+    try {
+        showToast('Starting Poracle container...', 'info');
+        const result = await fetchAPI('/api/poracle/start', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            setTimeout(loadPoracleStatus, 3000); // Wait for container to start
+        } else {
+            showToast(result.message || 'Failed to start Poracle', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function stopPoracle() {
+    try {
+        showToast('Stopping Poracle container...', 'info');
+        const result = await fetchAPI('/api/poracle/stop', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            loadPoracleStatus();
+        } else {
+            showToast(result.message || 'Failed to stop Poracle', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function restartPoracle() {
+    try {
+        showToast('Restarting Poracle container...', 'info');
+        const result = await fetchAPI('/api/poracle/restart', { method: 'POST' });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            setTimeout(loadPoracleStatus, 3000);
+        } else {
+            showToast(result.message || 'Failed to restart Poracle', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+async function loadPoracleLogs() {
+    const logsEl = document.getElementById('poracleLogsPreview');
+    if (!logsEl) return;
+    
+    try {
+        const data = await fetchAPI('/api/container/poracle/logs?lines=20');
+        logsEl.textContent = data.logs || 'No logs available';
+    } catch (e) {
+        logsEl.textContent = 'Failed to load Poracle logs';
+    }
+}
+
+function togglePasswordVisibility(inputId) {
+    const input = document.getElementById(inputId);
+    if (input) {
+        input.type = input.type === 'password' ? 'text' : 'password';
     }
 }
 
