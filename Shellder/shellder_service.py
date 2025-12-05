@@ -2934,7 +2934,12 @@ class ShellderDB:
         """Create a new connection for thread safety"""
         if not self.db_path.exists():
             return None
-        return sqlite3.connect(str(self.db_path), timeout=10)
+        conn = sqlite3.connect(str(self.db_path), timeout=30)
+        # Set busy timeout to wait up to 5 seconds when database is locked
+        conn.execute("PRAGMA busy_timeout = 5000")
+        # Use WAL mode for better concurrent read/write performance
+        conn.execute("PRAGMA journal_mode = WAL")
+        return conn
     
     def get_proxy_stats(self, limit=50):
         """Get proxy statistics"""

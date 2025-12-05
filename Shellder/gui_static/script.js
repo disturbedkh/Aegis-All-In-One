@@ -1667,15 +1667,36 @@ async function showMetricDetail(metric) {
     loadMetricHistory(metric, 0.167);
 }
 
+// Track active metric history request for cancellation
+let activeMetricHistoryController = null;
+
 async function loadMetricHistory(metric, hours) {
     const chartEl = document.getElementById('metricChart');
     const statsEl = document.getElementById('metricStats');
+    
+    // Cancel any pending request when switching time periods
+    if (activeMetricHistoryController) {
+        activeMetricHistoryController.abort();
+    }
+    activeMetricHistoryController = new AbortController();
+    
+    // Update button states to show which is active
+    const hoursToLabel = {0.167: '10m', 1: '1h', 6: '6h', 24: '24h', 168: '7d'};
+    const targetLabel = hoursToLabel[hours] || '';
+    document.querySelectorAll('.metric-time-controls .btn').forEach(btn => {
+        btn.classList.toggle('active', btn.textContent.trim() === targetLabel);
+    });
+    
+    chartEl.innerHTML = '<div class="loading">Loading...</div>';
     
     try {
         const metricName = metric === 'cpu' ? 'cpu_percent' : 
                          metric === 'memory' ? 'memory_percent' : 'disk_percent';
         
-        const data = await fetchAPI(`/api/metrics/history/${metricName}?hours=${hours}`);
+        const response = await fetch(`/api/metrics/history/${metricName}?hours=${hours}`, {
+            signal: activeMetricHistoryController.signal
+        });
+        const data = await response.json();
         
         if (data.error) {
             chartEl.innerHTML = `<div class="no-data">${data.error}<br><small>Metrics are recorded every 30 seconds.</small></div>`;
@@ -1812,20 +1833,17 @@ async function loadMetricHistory(metric, hours) {
             </div>
         `;
         
-        // Update active button - find by hours
-        document.querySelectorAll('.metric-time-controls .btn').forEach(b => {
-            b.classList.remove('active');
-            // Match button by its label
-            const hoursMap = {'10m': 0.167, '1h': 1, '6h': 6, '24h': 24, '7d': 168};
-            if (Math.abs(hoursMap[b.textContent] - hours) < 0.02) {
-                b.classList.add('active');
-            }
-        });
-        
     } catch (e) {
+        // Ignore AbortError - this happens when user switches time periods quickly
+        if (e.name === 'AbortError') {
+            return;
+        }
         SHELLDER_DEBUG.error('METRICS', `Failed to load history for ${metric}: ${e.message}`);
         chartEl.innerHTML = `<div class="text-danger">Failed to load history<br><small>Metrics are collected every 30 seconds. If you just started the server, please wait.</small></div>`;
         statsEl.innerHTML = '';
+    } finally {
+        // Clear controller if this was the active request
+        activeMetricHistoryController = null;
     }
 }
 
