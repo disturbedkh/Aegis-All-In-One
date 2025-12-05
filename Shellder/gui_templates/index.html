@@ -1481,73 +1481,59 @@
                         </p>
                         
                         <div class="stream-options">
-                            <!-- Plain Text Stream -->
-                            <div class="stream-option">
+                            <!-- Browser Live Stream -->
+                            <div class="stream-option" id="browserStreamOption">
                                 <div class="stream-header">
-                                    <span class="stream-icon">📄</span>
+                                    <span class="stream-icon">🖥️</span>
                                     <div class="stream-info">
-                                        <strong>Plain Text Stream</strong>
-                                        <span class="stream-desc">Raw log lines like tail -f (recommended for AI)</span>
+                                        <strong>Browser Live Stream</strong>
+                                        <span class="stream-desc">View live logs directly in this page</span>
                                     </div>
-                                    <div class="stream-status" id="streamTailStatus">
-                                        <span class="status-dot"></span>
-                                        <span>Ready</span>
+                                    <div class="stream-controls">
+                                        <button class="btn btn-sm btn-success" id="streamStartBtn" onclick="startBrowserStream()">
+                                            ▶️ Start
+                                        </button>
+                                        <button class="btn btn-sm btn-danger" id="streamStopBtn" onclick="stopBrowserStream()" style="display: none;">
+                                            ⏹️ Stop
+                                        </button>
                                     </div>
                                 </div>
-                                <div class="stream-command">
-                                    <code id="streamTailCmd">curl -N http://localhost:5050/api/debug/tail</code>
-                                    <button class="btn btn-xs" onclick="copyStreamCommand('tail')" title="Copy command">📋</button>
-                                    <button class="btn btn-xs btn-primary" onclick="openStreamInNewTab('tail')" title="Open in browser">🔗</button>
+                                <div class="stream-status-bar" id="browserStreamStatus">
+                                    <span class="status-dot stopped"></span>
+                                    <span class="status-text">Stopped</span>
+                                    <span class="status-stats" id="streamStats"></span>
+                                </div>
+                                <div id="browserStreamViewer" class="debug-log-viewer" style="display: none; max-height: 400px;">
+                                    <pre id="browserStreamContent">Waiting to start...</pre>
                                 </div>
                             </div>
                             
-                            <!-- JSON Event Stream -->
+                            <!-- Terminal Commands -->
                             <div class="stream-option">
                                 <div class="stream-header">
-                                    <span class="stream-icon">🔌</span>
+                                    <span class="stream-icon">💻</span>
                                     <div class="stream-info">
-                                        <strong>JSON Event Stream (SSE)</strong>
-                                        <span class="stream-desc">Structured events with heartbeats</span>
-                                    </div>
-                                    <div class="stream-status" id="streamSSEStatus">
-                                        <span class="status-dot"></span>
-                                        <span>Ready</span>
+                                        <strong>Terminal Commands</strong>
+                                        <span class="stream-desc">Run these in terminal for AI debugging</span>
                                     </div>
                                 </div>
-                                <div class="stream-command">
-                                    <code id="streamSSECmd">curl -N http://localhost:5050/api/debug/stream</code>
-                                    <button class="btn btn-xs" onclick="copyStreamCommand('stream')" title="Copy command">📋</button>
-                                    <button class="btn btn-xs btn-primary" onclick="openStreamInNewTab('stream')" title="Open in browser">🔗</button>
-                                </div>
-                            </div>
-                            
-                            <!-- Direct File Tail -->
-                            <div class="stream-option">
-                                <div class="stream-header">
-                                    <span class="stream-icon">📁</span>
-                                    <div class="stream-info">
-                                        <strong>Direct File Tail</strong>
-                                        <span class="stream-desc">No server needed - direct file access</span>
+                                <div class="terminal-commands">
+                                    <div class="cmd-row">
+                                        <span class="cmd-label">Plain Text:</span>
+                                        <code id="streamTailCmd">curl -N http://localhost:5050/api/debug/tail</code>
+                                        <button class="btn btn-xs" onclick="copyStreamCommand('tail')">📋</button>
+                                    </div>
+                                    <div class="cmd-row">
+                                        <span class="cmd-label">JSON Events:</span>
+                                        <code id="streamSSECmd">curl -N http://localhost:5050/api/debug/stream</code>
+                                        <button class="btn btn-xs" onclick="copyStreamCommand('stream')">📋</button>
+                                    </div>
+                                    <div class="cmd-row">
+                                        <span class="cmd-label">File Tail:</span>
+                                        <code id="streamFileCmd">tail -f ~/Desktop/Aegis-All-In-One/Shellder/logs/debuglog.txt</code>
+                                        <button class="btn btn-xs" onclick="copyStreamCommand('file')">📋</button>
                                     </div>
                                 </div>
-                                <div class="stream-command">
-                                    <code id="streamFileCmd">tail -f ~/Desktop/Aegis-All-In-One/Shellder/logs/debuglog.txt</code>
-                                    <button class="btn btn-xs" onclick="copyStreamCommand('file')" title="Copy command">📋</button>
-                                </div>
-                            </div>
-                        </div>
-                        
-                        <!-- Live Preview Toggle -->
-                        <div class="stream-preview-toggle" style="margin-top: 16px;">
-                            <label class="toggle-label">
-                                <input type="checkbox" id="livePreviewToggle" onchange="toggleLivePreview()">
-                                <span>Enable live preview in browser (updates every 2s)</span>
-                            </label>
-                        </div>
-                        
-                        <div id="livePreviewContainer" style="display: none; margin-top: 12px;">
-                            <div class="debug-log-viewer" id="livePreviewLogs" style="max-height: 300px;">
-                                <pre>Connecting to live stream...</pre>
                             </div>
                         </div>
                     </div>

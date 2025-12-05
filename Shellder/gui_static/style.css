@@ -7613,43 +7613,86 @@ select:focus {
     font-size: 12px;
 }
 
-.stream-status {
+.stream-controls {
     display: flex;
-    align-items: center;
-    gap: 6px;
-    font-size: 12px;
-    color: var(--text-secondary);
+    gap: 8px;
 }
 
-.stream-status .status-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: var(--success);
-}
-
-.stream-command {
+.stream-status-bar {
     display: flex;
     align-items: center;
     gap: 8px;
+    padding: 8px 12px;
     background: var(--bg-secondary);
-    padding: 10px 12px;
+    border-radius: var(--radius-sm);
+    margin-bottom: 12px;
+    font-size: 13px;
+}
+
+.stream-status-bar .status-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    flex-shrink: 0;
+}
+
+.stream-status-bar .status-dot.stopped {
+    background: var(--text-muted);
+}
+
+.stream-status-bar .status-dot.running {
+    background: var(--success);
+    animation: pulse 1.5s infinite;
+}
+
+.stream-status-bar .status-dot.error {
+    background: var(--danger);
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.stream-status-bar .status-text {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.stream-status-bar .status-stats {
+    color: var(--text-secondary);
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.terminal-commands {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.cmd-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: var(--bg-secondary);
+    padding: 8px 12px;
     border-radius: var(--radius-sm);
 }
 
-.stream-command code {
+.cmd-row .cmd-label {
+    font-size: 12px;
+    color: var(--text-secondary);
+    min-width: 80px;
+}
+
+.cmd-row code {
     flex: 1;
     font-family: var(--font-mono);
-    font-size: 12px;
+    font-size: 11px;
     color: var(--accent-primary);
     overflow-x: auto;
     white-space: nowrap;
-}
-
-.stream-preview-toggle {
-    padding: 12px 16px;
-    background: var(--bg-tertiary);
-    border-radius: var(--radius-sm);
 }
 
 .toggle-label {

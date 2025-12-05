@@ -456,7 +456,11 @@ async function loadDebugServerLog() {
 }
 
 // Live stream controls
-let livePreviewInterval = null;
+let browserStreamActive = false;
+let browserStreamInterval = null;
+let browserStreamEventSource = null;
+let streamLinesReceived = 0;
+let streamStartTime = null;
 
 function copyStreamCommand(type) {
     let cmd = '';
@@ -478,70 +482,155 @@ function copyStreamCommand(type) {
     navigator.clipboard.writeText(cmd).then(() => {
         showToast('Command copied to clipboard!', 'success');
     }).catch(() => {
-        // Fallback
         prompt('Copy this command:', cmd);
     });
 }
 
-function openStreamInNewTab(type) {
-    const port = window.location.port || '5050';
-    const host = window.location.hostname;
-    const url = `http://${host}:${port}/api/debug/${type}`;
-    window.open(url, '_blank');
-}
-
-function toggleLivePreview() {
-    const enabled = document.getElementById('livePreviewToggle').checked;
-    const container = document.getElementById('livePreviewContainer');
+// Browser live stream controls
+function startBrowserStream() {
+    if (browserStreamActive) return;
     
-    if (enabled) {
-        container.style.display = 'block';
-        startLivePreview();
-    } else {
-        container.style.display = 'none';
-        stopLivePreview();
+    browserStreamActive = true;
+    streamLinesReceived = 0;
+    streamStartTime = Date.now();
+    
+    // Update UI
+    document.getElementById('streamStartBtn').style.display = 'none';
+    document.getElementById('streamStopBtn').style.display = 'inline-flex';
+    document.getElementById('browserStreamViewer').style.display = 'block';
+    
+    updateStreamStatus('running', 'Connecting...');
+    
+    const content = document.getElementById('browserStreamContent');
+    content.textContent = '';
+    
+    // Try SSE first
+    try {
+        const port = window.location.port || '5050';
+        const host = window.location.hostname;
+        browserStreamEventSource = new EventSource(`http://${host}:${port}/api/debug/stream`);
+        
+        browserStreamEventSource.onopen = () => {
+            updateStreamStatus('running', 'Connected');
+        };
+        
+        browserStreamEventSource.onmessage = (event) => {
+            try {
+                const data = JSON.parse(event.data);
+                if (data.type === 'log' && data.line) {
+                    appendStreamLine(data.line);
+                } else if (data.type === 'heartbeat') {
+                    updateStreamStats();
+                } else if (data.type === 'connected' || data.type === 'ready') {
+                    appendStreamLine(`=== ${data.message || 'Stream connected'} ===`);
+                }
+            } catch (e) {
+                appendStreamLine(event.data);
+            }
+        };
+        
+        browserStreamEventSource.onerror = () => {
+            // Fall back to polling
+            if (browserStreamActive) {
+                browserStreamEventSource.close();
+                browserStreamEventSource = null;
+                startPollingStream();
+            }
+        };
+    } catch (e) {
+        startPollingStream();
     }
 }
 
-function startLivePreview() {
-    const viewer = document.getElementById('livePreviewLogs');
-    if (!viewer) return;
+function startPollingStream() {
+    updateStreamStatus('running', 'Polling...');
     
-    // Initial load
-    updateLivePreview();
+    // Initial fetch
+    fetchStreamLogs();
     
-    // Update every 2 seconds
-    livePreviewInterval = setInterval(updateLivePreview, 2000);
+    // Poll every second
+    browserStreamInterval = setInterval(fetchStreamLogs, 1000);
 }
 
-function stopLivePreview() {
-    if (livePreviewInterval) {
-        clearInterval(livePreviewInterval);
-        livePreviewInterval = null;
-    }
-}
-
-async function updateLivePreview() {
-    const viewer = document.getElementById('livePreviewLogs');
-    if (!viewer) return;
+async function fetchStreamLogs() {
+    if (!browserStreamActive) return;
     
     try {
         const response = await fetch('/api/debug/debuglog?lines=50&format=json');
         const data = await response.json();
         
-        if (data.error) {
-            viewer.innerHTML = `<pre style="color: var(--warning);">${data.error}</pre>`;
-            return;
+        if (data.lines) {
+            const content = document.getElementById('browserStreamContent');
+            content.textContent = data.lines.join('\n');
+            streamLinesReceived = data.total_lines || 0;
+            
+            // Auto-scroll
+            const viewer = document.getElementById('browserStreamViewer');
+            viewer.scrollTop = viewer.scrollHeight;
         }
         
-        const lines = data.lines || [];
-        viewer.innerHTML = `<pre>${escapeHtml(lines.join('\n'))}</pre>`;
-        
-        // Auto-scroll to bottom
-        viewer.scrollTop = viewer.scrollHeight;
+        updateStreamStats();
     } catch (e) {
-        viewer.innerHTML = `<pre style="color: var(--danger);">Connection error: ${e.message}</pre>`;
+        updateStreamStatus('error', `Error: ${e.message}`);
     }
+}
+
+function stopBrowserStream() {
+    browserStreamActive = false;
+    
+    // Stop SSE
+    if (browserStreamEventSource) {
+        browserStreamEventSource.close();
+        browserStreamEventSource = null;
+    }
+    
+    // Stop polling
+    if (browserStreamInterval) {
+        clearInterval(browserStreamInterval);
+        browserStreamInterval = null;
+    }
+    
+    // Update UI
+    document.getElementById('streamStartBtn').style.display = 'inline-flex';
+    document.getElementById('streamStopBtn').style.display = 'none';
+    
+    updateStreamStatus('stopped', 'Stopped');
+    
+    const duration = streamStartTime ? Math.round((Date.now() - streamStartTime) / 1000) : 0;
+    document.getElementById('streamStats').textContent = `Duration: ${duration}s | Lines: ${streamLinesReceived}`;
+}
+
+function appendStreamLine(line) {
+    const content = document.getElementById('browserStreamContent');
+    content.textContent += line + '\n';
+    streamLinesReceived++;
+    
+    // Keep only last 500 lines to prevent memory issues
+    const lines = content.textContent.split('\n');
+    if (lines.length > 500) {
+        content.textContent = lines.slice(-500).join('\n');
+    }
+    
+    // Auto-scroll
+    const viewer = document.getElementById('browserStreamViewer');
+    viewer.scrollTop = viewer.scrollHeight;
+    
+    updateStreamStats();
+}
+
+function updateStreamStatus(state, text) {
+    const statusBar = document.getElementById('browserStreamStatus');
+    const dot = statusBar.querySelector('.status-dot');
+    const textEl = statusBar.querySelector('.status-text');
+    
+    dot.className = 'status-dot ' + state;
+    textEl.textContent = text;
+}
+
+function updateStreamStats() {
+    const stats = document.getElementById('streamStats');
+    const duration = streamStartTime ? Math.round((Date.now() - streamStartTime) / 1000) : 0;
+    stats.textContent = `${duration}s | ${streamLinesReceived} lines`;
 }
 
 // Update stream commands with correct host/port on page load
