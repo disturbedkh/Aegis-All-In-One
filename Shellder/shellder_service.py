@@ -3392,29 +3392,58 @@ class ShellderDB:
             conn.close()
     
     def get_metric_history(self, metric_name, hours=24, limit=500):
-        """Get historical values for a metric"""
+        """Get historical values for a metric
+        
+        For long time periods, uses downsampling to return evenly distributed data points
+        across the entire time range instead of just the most recent N records.
+        """
         conn = self._connect()
         if not conn:
             return []
         
         try:
             cursor = conn.cursor()
-            # Convert to minutes for better SQLite compatibility with fractional values
-            # Use round() to avoid truncation (0.0833 * 60 = 4.998, should be 5 not 4)
             minutes = round(hours * 60)
-            # Use subquery to get NEWEST records (not oldest) within time range
-            # Inner query: get newest {limit} records ordered DESC
-            # Outer query: re-order ASC for chart display (oldest to newest)
+            
+            # First, count how many records exist in the time range
             cursor.execute("""
-                SELECT metric_value, recorded_at FROM (
+                SELECT COUNT(*) FROM metrics_history
+                WHERE metric_name = ?
+                  AND recorded_at >= datetime('now', ?)
+            """, (metric_name, f'-{minutes} minutes'))
+            total_count = cursor.fetchone()[0]
+            
+            if total_count == 0:
+                return []
+            
+            # If we have more records than the limit, use downsampling
+            # to get evenly distributed data points across the entire time range
+            if total_count > limit:
+                # Calculate step to get ~limit evenly distributed records
+                # We use NTILE to partition data and take one sample per partition
+                step = max(1, total_count // limit)
+                cursor.execute("""
+                    SELECT metric_value, recorded_at 
+                    FROM (
+                        SELECT metric_value, recorded_at, 
+                               ROW_NUMBER() OVER (ORDER BY recorded_at) as rn
+                        FROM metrics_history
+                        WHERE metric_name = ?
+                          AND recorded_at >= datetime('now', ?)
+                    )
+                    WHERE rn % ? = 0 OR rn = 1
+                    ORDER BY recorded_at ASC
+                    LIMIT ?
+                """, (metric_name, f'-{minutes} minutes', step, limit))
+            else:
+                # Return all records if under the limit
+                cursor.execute("""
                     SELECT metric_value, recorded_at
                     FROM metrics_history
                     WHERE metric_name = ?
                       AND recorded_at >= datetime('now', ?)
-                    ORDER BY recorded_at DESC
-                    LIMIT ?
-                ) ORDER BY recorded_at ASC
-            """, (metric_name, f'-{minutes} minutes', limit))
+                    ORDER BY recorded_at ASC
+                """, (metric_name, f'-{minutes} minutes'))
             
             # Return times in ISO 8601 format with Z suffix (UTC)
             return [{'value': row[0], 'time': row[1].replace(' ', 'T') + 'Z'} for row in cursor.fetchall()]
@@ -5541,7 +5570,23 @@ def api_metrics_history(metric_name):
     """Get historical data for a specific metric"""
     try:
         hours = request.args.get('hours', 24, type=float)  # Support fractional hours (e.g. 0.0833 for 5 min)
-        limit = request.args.get('limit', 500, type=int)
+        
+        # Scale limit based on requested time period:
+        # - Short periods (<= 1h): every data point (~120 max at 30s intervals)
+        # - Medium periods (1-6h): ~500 points
+        # - Long periods (6-24h): ~1000 points  
+        # - Very long (24h+): aggregate by minute/hour, limit ~2000
+        if hours <= 1:
+            limit = 200
+        elif hours <= 6:
+            limit = 500
+        elif hours <= 24:
+            limit = 1500
+        else:
+            limit = 3000  # For 7 days, we want good coverage
+        
+        # Allow override via query param
+        limit = request.args.get('limit', limit, type=int)
         
         # Validate metric name
         valid_metrics = ['cpu_percent', 'memory_percent', 'memory_used', 'disk_percent']
