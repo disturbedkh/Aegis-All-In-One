@@ -8918,6 +8918,7 @@ AEGIS_SECRETS = {
         'color': '#ec4899',
         'generate_length': 40,
         'targets': [
+            {'file': '.env', 'pattern': 'SESSION_SECRET=(.*)'},
             {'file': 'reactmap/local.json', 'json_path': 'api.sessionSecret'},
         ]
     },
@@ -8942,6 +8943,7 @@ AEGIS_SECRETS = {
         'color': '#ef4444',
         'generate_length': 32,
         'targets': [
+            {'file': '.env', 'pattern': 'ROTOM_AUTH_BEARER=(.*)'},
             {'file': 'unown/rotom_config.json', 'json_path': 'deviceListener.secret'},
         ]
     },
@@ -8955,6 +8957,7 @@ AEGIS_SECRETS = {
         'color': '#a855f7',
         'generate_length': 32,
         'targets': [
+            {'file': '.env', 'pattern': 'PORACLE_API_SECRET=(.*)'},
             {'file': 'reactmap/local.json', 'json_path': 'webhooks[0].poracleSecret'},
         ]
     },
@@ -12024,11 +12027,17 @@ def api_secrets_apply():
                             var_name = pattern.split('=')[0]
                             lines = content.split('\n')
                             new_lines = []
+                            found = False
                             for line in lines:
                                 if line.startswith(f'{var_name}='):
                                     new_lines.append(f'{var_name}={new_value}')
+                                    found = True
                                 else:
                                     new_lines.append(line)
+                            # Add the variable if not found
+                            if not found:
+                                # Find a good spot to add it (after similar vars or at end)
+                                new_lines.append(f'{var_name}={new_value}')
                             updated_content = '\n'.join(new_lines)
                         else:
                             updated_content = content.replace(default_placeholder, new_value)
