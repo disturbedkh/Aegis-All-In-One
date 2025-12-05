@@ -9732,7 +9732,7 @@ def api_wizard_status():
     databases_created = False
     if db_container_running:
         try:
-        result = subprocess.run(
+            result = subprocess.run(
                 ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e', 'SHOW DATABASES'],
                 capture_output=True, text=True, timeout=10
             )
