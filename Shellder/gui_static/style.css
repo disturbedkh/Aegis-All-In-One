@@ -6486,6 +6486,43 @@ select:focus {
     flex-wrap: wrap;
 }
 
+/* Optional field styling */
+.config-field.is-optional {
+    opacity: 0.9;
+}
+
+.config-field.using-default {
+    opacity: 0.7;
+}
+
+.config-field.using-default input {
+    font-style: italic;
+    color: var(--text-muted);
+}
+
+.optional-badge {
+    font-size: 0.65em;
+    background: var(--bg-tertiary);
+    color: var(--text-muted);
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+}
+
+.using-default-badge {
+    font-size: 0.65em;
+    background: #6366f122;
+    color: #818cf8;
+    padding: 2px 6px;
+    border-radius: 3px;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+    font-weight: 500;
+    margin-left: 6px;
+}
+
 /* Section description */
 .config-section-header .section-desc {
     font-size: 0.75em;

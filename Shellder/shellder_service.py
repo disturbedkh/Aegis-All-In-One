@@ -10047,6 +10047,7 @@ CONFIG_FIELD_SCHEMAS = {
                 'desc': 'Core Dragonite server configuration',
                 'fields': {
                     'login_delay': {'type': 'number', 'label': 'Login Delay', 'desc': 'Seconds between account logins on same proxy (0=no delay, higher=safer)', 'default': 0},
+                    'token_init_enabled': {'type': 'checkbox', 'label': 'Pre-auth Accounts', 'desc': 'Prepare accounts in background before needed (faster switching)', 'default': True, 'optional': True},
                     'stats': {'type': 'checkbox', 'label': 'Enable Stats', 'desc': 'Record detailed worker performance statistics', 'default': True},
                     'api_host': {'type': 'text', 'label': 'API Host', 'desc': 'Network address to listen on (0.0.0.0 = all interfaces)', 'default': '0.0.0.0'},
                     'api_port': {'type': 'number', 'label': 'API Port', 'desc': 'Port for web interface and API (Docker maps externally)', 'default': 7272},
@@ -10069,6 +10070,7 @@ CONFIG_FIELD_SCHEMAS = {
                 'desc': 'Nintendo-linked or Google-linked account configuration',
                 'fields': {
                     'enable': {'type': 'checkbox', 'label': 'Enable NK', 'desc': 'Allow Nintendo/Google linked accounts', 'default': False},
+                    'login_delay': {'type': 'number', 'label': 'NK Login Delay', 'desc': 'Seconds between NK login attempts', 'default': 20, 'optional': True},
                     'token_init_enabled': {'type': 'checkbox', 'label': 'Pre-auth Accounts', 'desc': 'Prepare accounts before needed', 'default': True},
                     'token_refresh_only': {'type': 'checkbox', 'label': 'Token Refresh Only', 'desc': 'Only use accounts with valid cached tokens', 'default': True},
                 }
@@ -10092,8 +10094,21 @@ CONFIG_FIELD_SCHEMAS = {
                 'title': '⚙️ Account Tuning',
                 'desc': 'Control how aggressively accounts are used',
                 'fields': {
+                    'recycle_gmo_limit': {'type': 'number', 'label': 'GMO Limit', 'desc': 'Max map requests before rotating account (lower=safer, higher=faster)', 'default': 4900, 'optional': True},
+                    'recycle_encounter_limit': {'type': 'number', 'label': 'Encounter Limit', 'desc': 'Max Pokemon encounters before rotating account', 'default': 9900, 'optional': True},
                     'recycle_on_jail': {'type': 'checkbox', 'label': 'Recycle Jailed', 'desc': 'Put jailed accounts back in rotation after cooldown', 'default': False},
                     'minimum_account_reuse_hours': {'type': 'number', 'label': 'Account Reuse Hours', 'desc': 'Hours an account must rest before reuse (72=3 days)', 'default': 72},
+                    'location_delay': {'type': 'number', 'label': 'Location Delay (ms)', 'desc': 'Milliseconds to wait between location updates', 'default': 0, 'optional': True},
+                    'fort_location_delay': {'type': 'number', 'label': 'Fort Location Delay (ms)', 'desc': 'Delay for gym/pokestop scanning', 'default': 0, 'optional': True},
+                    'scout_age_limit': {'type': 'number', 'label': 'Scout Age Limit (sec)', 'desc': 'How old encounter data can be before refresh', 'default': 30, 'optional': True},
+                }
+            },
+            'accounts': {
+                'title': '👤 Account Requirements',
+                'desc': 'Level requirements for scanning accounts',
+                'fields': {
+                    'required_level': {'type': 'number', 'label': 'Required Level', 'desc': 'Minimum level for most scanning (30 for IV, 31+ for some quests)', 'default': 30, 'optional': True},
+                    'leveling_level': {'type': 'number', 'label': 'Leveling Target', 'desc': 'Stop auto-leveling accounts at this level', 'default': 31, 'optional': True},
                 }
             },
             'rotom': {
@@ -10108,6 +10123,9 @@ CONFIG_FIELD_SCHEMAS = {
                 'desc': 'Debug and log file settings',
                 'fields': {
                     'save': {'type': 'checkbox', 'label': 'Save Logs', 'desc': 'Write logs to files (needed for Blissey stats)', 'default': False},
+                    'debug': {'type': 'checkbox', 'label': 'Debug Mode', 'desc': 'Enable verbose debug logging (only for troubleshooting)', 'default': False, 'optional': True},
+                    'max_size': {'type': 'number', 'label': 'Max Log Size (MB)', 'desc': 'Maximum log file size before rotation', 'default': 500, 'optional': True},
+                    'max_age': {'type': 'number', 'label': 'Max Log Age (Days)', 'desc': 'Delete log files older than this', 'default': 30, 'optional': True},
                 }
             },
             'processors': {

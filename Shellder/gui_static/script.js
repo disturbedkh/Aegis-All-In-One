@@ -7547,17 +7547,28 @@ function renderConfigField(section, key, field, value, sharedInfo = null) {
     const inputId = `config-${section}-${key}`;
     let inputHtml = '';
     
+    // Check if this is an optional field using default (commented out in config)
+    const isUsingDefault = field.optional && (value === undefined || value === null || value === '');
+    const displayValue = isUsingDefault ? '' : value;
+    const placeholderText = field.default !== undefined ? `Default: ${field.default}` : '';
+    
+    // Optional field indicator
+    const optionalBadge = field.optional ? `<span class="optional-badge" title="Optional - leave empty to use default">optional</span>` : '';
+    const usingDefaultBadge = isUsingDefault ? `<span class="using-default-badge" title="Currently commented out, using default value">using default</span>` : '';
+    
     if (field.type === 'checkbox') {
+        const isChecked = isUsingDefault ? field.default : value;
         inputHtml = `
             <label class="checkbox-label">
-                <input type="checkbox" id="${inputId}" ${value ? 'checked' : ''}>
+                <input type="checkbox" id="${inputId}" ${isChecked ? 'checked' : ''} data-optional="${field.optional || false}" data-default="${field.default}">
                 <span>Enabled</span>
+                ${usingDefaultBadge}
             </label>
         `;
     } else if (field.type === 'password') {
         inputHtml = `
             <div class="input-with-action">
-                <input type="password" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}">
+                <input type="password" id="${inputId}" value="${escapeHtml(String(displayValue))}" placeholder="${placeholderText}" data-optional="${field.optional || false}" data-default="${field.default || ''}">
                 <button class="btn btn-xs" onclick="toggleFieldVisibility('${inputId}')" title="Show/Hide">👁️</button>
                 <button class="btn btn-xs" onclick="generateFieldValue('${inputId}')" title="Generate random">🎲</button>
                 ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
@@ -7566,14 +7577,16 @@ function renderConfigField(section, key, field, value, sharedInfo = null) {
     } else if (field.type === 'number') {
         inputHtml = `
             <div class="input-with-action">
-                <input type="number" id="${inputId}" value="${value}" placeholder="${field.default || ''}" style="flex:1;">
+                <input type="number" id="${inputId}" value="${isUsingDefault ? '' : displayValue}" placeholder="${placeholderText}" style="flex:1;" data-optional="${field.optional || false}" data-default="${field.default || 0}">
+                ${usingDefaultBadge}
                 ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
             </div>
         `;
     } else {
         inputHtml = `
             <div class="input-with-action">
-                <input type="text" id="${inputId}" value="${escapeHtml(String(value))}" placeholder="${field.default || ''}" style="flex:1;">
+                <input type="text" id="${inputId}" value="${escapeHtml(String(displayValue))}" placeholder="${placeholderText}" style="flex:1;" data-optional="${field.optional || false}" data-default="${field.default || ''}">
+                ${usingDefaultBadge}
                 ${sharedInfo ? `<button class="btn btn-xs btn-sync" onclick="syncSharedField('${inputId}', '${sharedInfo.key}')" title="Sync to ${sharedInfo.total_configs} configs" style="background: ${sharedInfo.color}22; border-color: ${sharedInfo.color};">🔄 Sync All</button>` : ''}
             </div>
         `;
@@ -7593,10 +7606,11 @@ function renderConfigField(section, key, field, value, sharedInfo = null) {
     }
     
     return `
-        <div class="config-field ${sharedInfo ? 'has-shared' : ''}">
+        <div class="config-field ${sharedInfo ? 'has-shared' : ''} ${field.optional ? 'is-optional' : ''} ${isUsingDefault ? 'using-default' : ''}">
             <div class="config-field-info">
                 <div class="config-field-label-row">
                     <span class="config-field-label">${field.label}</span>
+                    ${optionalBadge}
                     ${sharedIndicator}
                 </div>
                 <div class="config-field-desc">${field.desc}</div>
@@ -7762,12 +7776,30 @@ function collectFormValues() {
         for (const [fieldKey, field] of Object.entries(section.fields)) {
             const input = document.getElementById(`config-${sectionKey}-${fieldKey}`);
             if (input) {
+                const isOptional = input.dataset.optional === 'true';
+                
                 if (field.type === 'checkbox') {
-                    current[fieldKey] = input.checked;
+                    // For optional checkboxes, skip if matches default
+                    const checked = input.checked;
+                    if (isOptional && checked === (field.default === true)) {
+                        // Skip - using default
+                        continue;
+                    }
+                    current[fieldKey] = checked;
                 } else if (field.type === 'number') {
-                    current[fieldKey] = parseFloat(input.value) || 0;
+                    const numValue = input.value.trim();
+                    // For optional numbers, skip if empty (using default)
+                    if (isOptional && numValue === '') {
+                        continue;
+                    }
+                    current[fieldKey] = parseFloat(numValue) || 0;
                 } else {
-                    current[fieldKey] = input.value;
+                    const strValue = input.value;
+                    // For optional strings, skip if empty (using default)
+                    if (isOptional && strValue === '') {
+                        continue;
+                    }
+                    current[fieldKey] = strValue;
                 }
             }
         }
