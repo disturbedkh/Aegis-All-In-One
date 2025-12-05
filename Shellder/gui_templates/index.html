@@ -87,33 +87,16 @@
                     <span class="nav-icon">🔄</span>
                     <span>Updates</span>
                 </a>
+                <a href="#" class="nav-item" data-page="debug" onclick="navigateTo('debug'); return false;">
+                    <span class="nav-icon">🔧</span>
+                    <span>Debug</span>
+                </a>
             </div>
             
             <div class="sidebar-footer">
-                <div class="status-indicator" onclick="toggleDebugPanel()" style="cursor: pointer;" title="Click to toggle debug panel">
+                <div class="status-indicator" title="Connection status">
                     <span class="status-dot" id="connectionStatus"></span>
                     <span id="connectionText">Connecting...</span>
-                </div>
-                <div id="debugPanel" style="display: none; font-size: 10px; margin-top: 8px; padding: 8px; background: rgba(0,0,0,0.5); border-radius: 4px; max-height: 300px; overflow-y: auto;">
-                    <div style="margin-bottom: 6px; font-weight: bold; color: #f59e0b;">🔧 Debug Panel (AI-Friendly)</div>
-                    <div>JS: <span id="debugJS">checking...</span></div>
-                    <div>API: <span id="debugAPI">checking...</span></div>
-                    <div>WS: <span id="debugWS">checking...</span></div>
-                    <div>Client Logs: <span id="debugLogCount">0</span></div>
-                    <div style="margin-top: 8px; display: flex; flex-direction: column; gap: 4px;">
-                        <button onclick="SHELLDER_DEBUG.copyToClipboard()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">📋 Copy Client Logs</button>
-                        <button onclick="SHELLDER_DEBUG.download()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">💾 Download Client</button>
-                        <button onclick="SHELLDER_DEBUG.sendToServer()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">📤 Send to Server</button>
-                        <button onclick="downloadServerDebugLog()" style="font-size: 10px; padding: 4px 8px; cursor: pointer; background: #f59e0b; color: black;">📥 Download debuglog.txt</button>
-                        <button onclick="viewDebugLog()" style="font-size: 10px; padding: 4px 8px; cursor: pointer;">👁️ View Server Log</button>
-                    </div>
-                    <div style="margin-top: 6px; font-size: 9px; color: #888;">
-                        <b>For AI debugging:</b><br>
-                        • debuglog.txt in Shellder/<br>
-                        • Contains ALL server + client logs<br>
-                        • Auto-synced every 30s<br>
-                        • Console: SD.export()
-                    </div>
                 </div>
             </div>
         </nav>
@@ -1407,6 +1390,110 @@
                         
                         <div id="updateOutput" class="update-output" style="display: none;">
                             <pre></pre>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Debug Page (AI-Friendly) -->
+            <div id="page-debug" class="page">
+                <div class="dashboard-grid">
+                    <!-- Connection Status -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🔌 Connection Status</h2>
+                        </div>
+                        <div class="card-body">
+                            <div class="debug-status-grid">
+                                <div class="debug-status-item">
+                                    <span class="debug-label">JavaScript:</span>
+                                    <span class="debug-value" id="debugStatusJS">checking...</span>
+                                </div>
+                                <div class="debug-status-item">
+                                    <span class="debug-label">API Connection:</span>
+                                    <span class="debug-value" id="debugStatusAPI">checking...</span>
+                                </div>
+                                <div class="debug-status-item">
+                                    <span class="debug-label">WebSocket:</span>
+                                    <span class="debug-value" id="debugStatusWS">checking...</span>
+                                </div>
+                                <div class="debug-status-item">
+                                    <span class="debug-label">Client Logs:</span>
+                                    <span class="debug-value" id="debugStatusLogCount">0</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Client-Side Logs -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>💻 Client-Side Logs</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-sm" onclick="SHELLDER_DEBUG.copyToClipboard()">📋 Copy</button>
+                                <button class="btn btn-sm" onclick="SHELLDER_DEBUG.download()">💾 Download</button>
+                                <button class="btn btn-sm btn-primary" onclick="SHELLDER_DEBUG.sendToServer()">📤 Sync to Server</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="section-desc">Browser-side logs captured by the GUI. Useful for debugging UI issues.</p>
+                            <div class="debug-log-viewer" id="debugClientLogs">
+                                <pre>Loading client logs...</pre>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Server-Side Logs -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>🖥️ Server Debug Log (debuglog.txt)</h2>
+                            <div class="card-actions">
+                                <button class="btn btn-sm" onclick="loadDebugServerLog()">🔄 Refresh</button>
+                                <button class="btn btn-sm" onclick="downloadServerDebugLog()">📥 Download</button>
+                                <button class="btn btn-sm btn-danger" onclick="clearServerDebugLog()">🗑️ Clear</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <p class="section-desc">
+                                Combined server + client logs in <code>Shellder/debuglog.txt</code>. 
+                                Auto-synced every 30 seconds. For AI debugging, share this file.
+                            </p>
+                            <div class="debug-log-info" id="debugLogInfo">
+                                <span>Lines: -</span>
+                                <span>Size: -</span>
+                            </div>
+                            <div class="debug-log-viewer" id="debugServerLogs">
+                                <pre>Loading server logs...</pre>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- AI Debug Tips -->
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h2>🤖 AI Debugging Tips</h2>
+                    </div>
+                    <div class="card-body">
+                        <div class="debug-tips">
+                            <div class="tip-item">
+                                <strong>📁 Debug Log Location:</strong>
+                                <code>Shellder/debuglog.txt</code>
+                            </div>
+                            <div class="tip-item">
+                                <strong>🔄 Auto-Sync:</strong>
+                                Client logs sync to server every 30 seconds automatically
+                            </div>
+                            <div class="tip-item">
+                                <strong>💻 Console Commands:</strong>
+                                <code>SD.export()</code> - Export all logs | 
+                                <code>SD.logs</code> - View log array |
+                                <code>SD.clear()</code> - Clear client logs
+                            </div>
+                            <div class="tip-item">
+                                <strong>📤 Share with AI:</strong>
+                                Download debuglog.txt and share it with your AI assistant for debugging help
+                            </div>
                         </div>
                     </div>
                 </div>

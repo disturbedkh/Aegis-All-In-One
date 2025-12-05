@@ -362,18 +362,8 @@ function updateDebug(key, value, isError = false) {
 }
 
 function toggleDebugPanel() {
-    const panel = document.getElementById('debugPanel');
-    if (panel) {
-        debugMode = !debugMode;
-        panel.style.display = debugMode ? 'block' : 'none';
-        if (debugMode) {
-            updateDebug('JS', 'loaded ✓');
-            updateDebug('API', wsConnected ? 'connected ✓' : 'polling...');
-            updateDebug('WS', wsConnected ? 'live ✓' : 'not connected');
-            updateDebug('LogCount', SHELLDER_DEBUG.logs.length);
-        }
-    }
-    SHELLDER_DEBUG.state('debugMode', !debugMode, debugMode);
+    // Legacy function - now redirects to debug page
+    navigateTo('debug');
 }
 
 // Download the server-side unified debug log
@@ -382,36 +372,86 @@ async function downloadServerDebugLog() {
     window.location.href = '/api/debug/debuglog/download';
 }
 
-// View the server debug log in a modal
-async function viewDebugLog() {
-    SHELLDER_DEBUG.info('DEBUG', 'Viewing server debug log');
-    openModal('🔧 Server Debug Log (debuglog.txt)', '<div class="loading">Loading debug log...</div>');
+// Load debug page content
+async function loadDebugPage() {
+    // Update status indicators
+    const jsEl = document.getElementById('debugStatusJS');
+    const apiEl = document.getElementById('debugStatusAPI');
+    const wsEl = document.getElementById('debugStatusWS');
+    const logCountEl = document.getElementById('debugStatusLogCount');
+    
+    if (jsEl) {
+        jsEl.textContent = 'loaded ✓';
+        jsEl.className = 'debug-value success';
+    }
+    if (apiEl) {
+        apiEl.textContent = wsConnected ? 'connected ✓' : 'polling...';
+        apiEl.className = wsConnected ? 'debug-value success' : 'debug-value warning';
+    }
+    if (wsEl) {
+        wsEl.textContent = wsConnected ? 'live ✓' : 'not connected';
+        wsEl.className = wsConnected ? 'debug-value success' : 'debug-value warning';
+    }
+    if (logCountEl) {
+        logCountEl.textContent = SHELLDER_DEBUG.logs.length;
+    }
+    
+    // Load client logs
+    loadDebugClientLogs();
+    
+    // Load server logs
+    loadDebugServerLog();
+}
+
+function loadDebugClientLogs() {
+    const container = document.getElementById('debugClientLogs');
+    if (!container) return;
+    
+    const logs = SHELLDER_DEBUG.logs.slice(-100); // Last 100 entries
+    if (logs.length === 0) {
+        container.innerHTML = '<pre style="color: var(--text-muted);">No client logs yet...</pre>';
+        return;
+    }
+    
+    const logText = logs.map(log => {
+        const time = new Date(log.t).toLocaleTimeString();
+        return `[${time}] [${log.l}] ${log.c}: ${log.m}`;
+    }).join('\n');
+    
+    container.innerHTML = `<pre>${escapeHtml(logText)}</pre>`;
+}
+
+async function loadDebugServerLog() {
+    const container = document.getElementById('debugServerLogs');
+    const infoEl = document.getElementById('debugLogInfo');
+    if (!container) return;
     
     try {
-        const response = await fetch('/api/debug/debuglog?lines=300&format=json');
+        const response = await fetch('/api/debug/debuglog?lines=200&format=json');
         const data = await response.json();
         
         if (data.error) {
-            document.getElementById('modalBody').innerHTML = `<div class="text-danger">Error: ${data.error}</div>`;
+            container.innerHTML = `<pre style="color: var(--danger);">Error: ${data.error}</pre>`;
             return;
         }
         
-        document.getElementById('modalBody').innerHTML = `
-            <div style="margin-bottom: 10px; font-size: 12px; color: var(--text-muted);">
-                File: ${data.path}<br>
-                Total lines: ${data.total_lines} | Showing: ${data.returned_lines} | Size: ${(data.size_bytes/1024).toFixed(1)}KB
-            </div>
-            <div style="display: flex; gap: 8px; margin-bottom: 10px;">
-                <button class="btn btn-sm" onclick="downloadServerDebugLog()">📥 Download Full</button>
-                <button class="btn btn-sm" onclick="viewDebugLog()">🔄 Refresh</button>
-                <button class="btn btn-sm" onclick="clearServerDebugLog()">🗑️ Clear</button>
-            </div>
-            <pre class="log-viewer" style="max-height: 400px; overflow: auto; font-size: 11px; white-space: pre-wrap; word-break: break-all;">${escapeHtml(data.lines.join('\n'))}</pre>
-        `;
+        if (infoEl) {
+            infoEl.innerHTML = `
+                <span>Lines: ${data.total_lines}</span>
+                <span>Size: ${(data.size_bytes/1024).toFixed(1)}KB</span>
+                <span>Showing: last ${data.returned_lines}</span>
+            `;
+        }
+        
+        container.innerHTML = `<pre>${escapeHtml(data.lines.join('\n'))}</pre>`;
     } catch (e) {
-        document.getElementById('modalBody').innerHTML = `<div class="text-danger">Failed to load debug log: ${e.message}</div>`;
-        SHELLDER_DEBUG.error('DEBUG', 'Failed to load debug log', { error: e.message });
+        container.innerHTML = `<pre style="color: var(--danger);">Failed to load: ${e.message}</pre>`;
     }
+}
+
+// View the server debug log (legacy, opens debug page)
+async function viewDebugLog() {
+    navigateTo('debug');
 }
 
 // Clear server debug log
@@ -420,10 +460,11 @@ async function clearServerDebugLog() {
     
     try {
         await fetch('/api/debug/clear', { method: 'POST' });
-        viewDebugLog(); // Refresh
+        loadDebugServerLog(); // Refresh the page view
         SHELLDER_DEBUG.info('DEBUG', 'Server debug log cleared');
+        showToast('Debug log cleared', 'success');
     } catch (e) {
-        alert('Failed to clear: ' + e.message);
+        showToast('Failed to clear: ' + e.message, 'error');
     }
 }
 
@@ -664,7 +705,8 @@ function navigateTo(page) {
         'scripts': 'Scripts',
         'logs': 'Logs',
         'fletchling': 'Fletchling - Nest Detection',
-        'updates': 'Updates'
+        'updates': 'Updates',
+        'debug': 'Debug & Diagnostics'
     };
     document.getElementById('pageTitle').textContent = titles[page] || page;
     
@@ -686,6 +728,8 @@ function navigateTo(page) {
     } else if (page === 'files') {
         navigateToPath(''); // Start at Aegis root
         loadCurrentUser(); // Show current user in toolbar
+    } else if (page === 'debug') {
+        loadDebugPage();
     }
 }
 
