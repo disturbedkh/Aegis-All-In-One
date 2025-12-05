@@ -4641,6 +4641,7 @@ navigateTo = function(page) {
             loadNginxSites();
             loadNginxLogs();
             loadSecurityData();  // Load security services
+            updateSetupWizardStatus();  // Update setup wizard status
             break;
         case 'stats':
             loadHistoricalStats();
@@ -6151,6 +6152,186 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 // =============================================================================
 
 // Load all security service statuses
+// =============================================================================
+// NGINX SETUP WIZARD
+// =============================================================================
+
+// Refresh security service status for setup wizard
+async function refreshSecurityStatus() {
+    showToast('Checking security services...', 'info');
+    await updateSetupWizardStatus();
+    await loadSecurityStatus();
+    showToast('Status updated', 'success');
+}
+
+// Update setup wizard step statuses
+async function updateSetupWizardStatus() {
+    try {
+        const data = await fetchAPI('/api/security/setup-status');
+        
+        const steps = ['nginx', 'certbot', 'fail2ban', 'ufw', 'sites'];
+        steps.forEach(step => {
+            const stepEl = document.getElementById(`step-${step}`);
+            if (!stepEl) return;
+            
+            const statusEl = stepEl.querySelector('.step-status');
+            const actionBtn = stepEl.querySelector('.step-action button');
+            
+            const status = data[step];
+            if (status) {
+                if (status.installed && status.running) {
+                    statusEl.textContent = '✅';
+                    statusEl.className = 'step-status success';
+                    if (actionBtn) actionBtn.textContent = 'Installed ✓';
+                    if (actionBtn) actionBtn.disabled = true;
+                } else if (status.installed) {
+                    statusEl.textContent = '⚠️';
+                    statusEl.className = 'step-status warning';
+                    if (actionBtn) actionBtn.textContent = 'Start';
+                } else {
+                    statusEl.textContent = '❌';
+                    statusEl.className = 'step-status error';
+                    if (actionBtn) actionBtn.textContent = 'Install';
+                    if (actionBtn) actionBtn.disabled = false;
+                }
+            }
+        });
+    } catch (e) {
+        console.error('Failed to update setup wizard status:', e);
+    }
+}
+
+// Install Nginx
+async function installNginx() {
+    if (!confirm('Install Nginx web server?\n\nThis will:\n- Install nginx package\n- Start the nginx service\n- Enable nginx to start on boot')) return;
+    
+    showSetupOutput('Installing Nginx...');
+    try {
+        const result = await fetchAPI('/api/security/install/nginx', { method: 'POST' });
+        appendSetupOutput(result.output || result.message);
+        if (result.success) {
+            showToast('Nginx installed successfully', 'success');
+            updateSetupWizardStatus();
+            loadNginxStatus();
+        } else {
+            showToast('Nginx installation failed', 'error');
+        }
+    } catch (e) {
+        appendSetupOutput('Error: ' + e.message);
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Install Certbot
+async function installCertbot() {
+    if (!confirm('Install Certbot for SSL certificates?\n\nThis will:\n- Install certbot package\n- Enable auto-renewal timer')) return;
+    
+    showSetupOutput('Installing Certbot...');
+    try {
+        const result = await fetchAPI('/api/security/install/certbot', { method: 'POST' });
+        appendSetupOutput(result.output || result.message);
+        if (result.success) {
+            showToast('Certbot installed successfully', 'success');
+            updateSetupWizardStatus();
+        } else {
+            showToast('Certbot installation failed', 'error');
+        }
+    } catch (e) {
+        appendSetupOutput('Error: ' + e.message);
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Install Fail2Ban
+async function installFail2ban() {
+    if (!confirm('Install Fail2Ban for brute-force protection?\n\nThis will:\n- Install fail2ban package\n- Configure nginx jails\n- Start fail2ban service')) return;
+    
+    showSetupOutput('Installing Fail2Ban...');
+    try {
+        const result = await fetchAPI('/api/security/install/fail2ban', { method: 'POST' });
+        appendSetupOutput(result.output || result.message);
+        if (result.success) {
+            showToast('Fail2Ban installed successfully', 'success');
+            updateSetupWizardStatus();
+            loadFail2banStatus();
+        } else {
+            showToast('Fail2Ban installation failed', 'error');
+        }
+    } catch (e) {
+        appendSetupOutput('Error: ' + e.message);
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Setup UFW Firewall
+async function setupUfw() {
+    if (!confirm('Setup UFW Firewall?\n\nThis will:\n- Install ufw if needed\n- Allow SSH (port 22)\n- Allow HTTP/HTTPS (80, 443)\n- Allow Aegis ports (5000-7272)\n- Enable UFW')) return;
+    
+    showSetupOutput('Setting up UFW Firewall...');
+    try {
+        const result = await fetchAPI('/api/security/install/ufw', { method: 'POST' });
+        appendSetupOutput(result.output || result.message);
+        if (result.success) {
+            showToast('UFW configured successfully', 'success');
+            updateSetupWizardStatus();
+            loadUfwRules();
+        } else {
+            showToast('UFW setup failed', 'error');
+        }
+    } catch (e) {
+        appendSetupOutput('Error: ' + e.message);
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Show site setup modal
+function showSiteSetupModal() {
+    // Scroll to the Quick Setup section
+    const quickSetup = document.querySelector('.nginx-setup-form');
+    if (quickSetup) {
+        quickSetup.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        quickSetup.style.boxShadow = '0 0 20px var(--accent-primary)';
+        setTimeout(() => { quickSetup.style.boxShadow = ''; }, 2000);
+    }
+}
+
+// Run full nginx-setup.sh script
+async function runFullSetup() {
+    if (!confirm('Run the full nginx-setup.sh script?\n\nThis will open an interactive terminal session to:\n- Install nginx, certbot, fail2ban, ufw\n- Configure SSL certificates\n- Set up reverse proxy sites\n- Configure security services\n\nNote: This requires terminal access on the server.')) {
+        return;
+    }
+    
+    showSetupOutput('To run the full setup script, execute this on your server:\n\nsudo bash Shellder/nginx-setup.sh\n\nOr use the terminal option below.');
+    showToast('Run "sudo bash Shellder/nginx-setup.sh" on your server', 'info');
+}
+
+// Show setup output panel
+function showSetupOutput(text) {
+    const output = document.getElementById('setupWizardOutput');
+    const content = document.getElementById('setupOutputContent');
+    if (output && content) {
+        output.style.display = 'block';
+        content.textContent = text;
+    }
+}
+
+// Append to setup output
+function appendSetupOutput(text) {
+    const content = document.getElementById('setupOutputContent');
+    if (content) {
+        content.textContent += '\n' + text;
+        content.scrollTop = content.scrollHeight;
+    }
+}
+
+// Clear setup output
+function clearSetupOutput() {
+    const output = document.getElementById('setupWizardOutput');
+    if (output) {
+        output.style.display = 'none';
+    }
+}
+
 async function loadSecurityStatus() {
     try {
         const data = await fetchAPI('/api/security/status');

@@ -36,6 +36,10 @@
                         <span class="nav-icon">🐳</span>
                         <span>Containers</span>
                     </a>
+                    <a href="#" class="nav-item" data-page="nginx" onclick="navigateTo('nginx'); return false;">
+                        <span class="nav-icon">🔐</span>
+                        <span>Sites & Security</span>
+                    </a>
                     <a href="#" class="nav-item" data-page="shellder-config" onclick="navigateTo('shellder-config'); return false;">
                         <span class="nav-icon">🐚</span>
                         <span>Shellder</span>
@@ -68,10 +72,6 @@
                 
                 <div class="nav-section">
                     <div class="nav-label">Management</div>
-                    <a href="#" class="nav-item" data-page="nginx" onclick="navigateTo('nginx'); return false;">
-                        <span class="nav-icon">🔐</span>
-                        <span>Sites & Security</span>
-                    </a>
                     <a href="#" class="nav-item" data-page="files" onclick="navigateTo('files'); return false;">
                         <span class="nav-icon">📁</span>
                         <span>Files</span>
@@ -2546,6 +2546,100 @@ GET http://77.237.241.111:5000/api/ai-debug/system</pre>
                         <div class="stat-info">
                             <div class="stat-value" id="siteHealth">--</div>
                             <div class="stat-label">Sites Healthy</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Initial Setup Wizard -->
+                <div class="card nginx-setup-wizard" id="nginxSetupWizard">
+                    <div class="card-header">
+                        <h2>🚀 Initial Security Setup</h2>
+                        <span class="text-muted">First-time configuration for nginx, SSL, and security services</span>
+                    </div>
+                    <div class="card-body">
+                        <div class="setup-wizard-status" id="setupWizardStatus">
+                            <div class="wizard-step" id="step-nginx" data-step="nginx">
+                                <div class="step-indicator">
+                                    <span class="step-number">1</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">Nginx Web Server</div>
+                                    <div class="step-desc">Reverse proxy for all services</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="installNginx()">Install</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-certbot" data-step="certbot">
+                                <div class="step-indicator">
+                                    <span class="step-number">2</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">Certbot (Let's Encrypt)</div>
+                                    <div class="step-desc">Free SSL certificates with auto-renewal</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="installCertbot()">Install</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-fail2ban" data-step="fail2ban">
+                                <div class="step-indicator">
+                                    <span class="step-number">3</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">Fail2Ban</div>
+                                    <div class="step-desc">Brute-force and bot protection</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="installFail2ban()">Install</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-ufw" data-step="ufw">
+                                <div class="step-indicator">
+                                    <span class="step-number">4</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">UFW Firewall</div>
+                                    <div class="step-desc">Network traffic filtering</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="setupUfw()">Setup</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-sites" data-step="sites">
+                                <div class="step-indicator">
+                                    <span class="step-number">5</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">Configure Sites</div>
+                                    <div class="step-desc">Set up reverse proxy for ReactMap, Koji, etc.</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="showSiteSetupModal()">Configure</button>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <div class="setup-wizard-actions">
+                            <button class="btn" onclick="refreshSecurityStatus()">🔄 Check Status</button>
+                            <button class="btn btn-primary" onclick="runFullSetup()">🔧 Run Full Setup Script</button>
+                        </div>
+                        
+                        <div class="setup-wizard-output" id="setupWizardOutput" style="display: none;">
+                            <div class="output-header">
+                                <span>Setup Output</span>
+                                <button class="btn btn-xs" onclick="clearSetupOutput()">✕ Close</button>
+                            </div>
+                            <pre id="setupOutputContent"></pre>
                         </div>
                     </div>
                 </div>

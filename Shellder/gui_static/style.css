@@ -3762,6 +3762,143 @@ select:focus {
    NGINX & SITES MANAGER
    ============================================================================= */
 
+/* =============================================================================
+   NGINX SETUP WIZARD
+   ============================================================================= */
+
+.nginx-setup-wizard {
+    margin-bottom: 24px;
+}
+
+.setup-wizard-status {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+}
+
+.wizard-step {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    padding: 12px 16px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    transition: all 0.2s ease;
+}
+
+.wizard-step:hover {
+    border-color: var(--accent-primary);
+}
+
+.wizard-step .step-indicator {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 60px;
+}
+
+.wizard-step .step-number {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    background: var(--bg-secondary);
+    border-radius: 50%;
+    font-weight: 600;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.wizard-step .step-status {
+    font-size: 16px;
+}
+
+.wizard-step .step-status.checking {
+    animation: pulse 1.5s ease-in-out infinite;
+}
+
+.wizard-step .step-status.success {
+    color: var(--success);
+}
+
+.wizard-step .step-status.warning {
+    color: var(--warning);
+}
+
+.wizard-step .step-status.error {
+    color: var(--danger);
+}
+
+.wizard-step .step-content {
+    flex: 1;
+}
+
+.wizard-step .step-title {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.wizard-step .step-desc {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: 2px;
+}
+
+.wizard-step .step-action {
+    min-width: 100px;
+    text-align: right;
+}
+
+.wizard-step .step-action button:disabled {
+    background: var(--success);
+    color: white;
+    opacity: 0.7;
+    cursor: default;
+}
+
+.setup-wizard-actions {
+    display: flex;
+    gap: 12px;
+    margin-top: 20px;
+    padding-top: 20px;
+    border-top: 1px solid var(--border-color);
+}
+
+.setup-wizard-output {
+    margin-top: 16px;
+    background: var(--bg-primary);
+    border-radius: var(--radius-sm);
+    border: 1px solid var(--border-color);
+    overflow: hidden;
+}
+
+.setup-wizard-output .output-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 12px;
+    background: var(--bg-tertiary);
+    border-bottom: 1px solid var(--border-color);
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--text-secondary);
+}
+
+.setup-wizard-output pre {
+    margin: 0;
+    padding: 12px;
+    max-height: 300px;
+    overflow: auto;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: pre-wrap;
+    word-wrap: break-word;
+}
+
 .nginx-grid {
     grid-template-columns: repeat(2, 1fr);
 }

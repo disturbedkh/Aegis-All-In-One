@@ -15675,6 +15675,290 @@ def api_security_status():
     
     return jsonify(services)
 
+
+@app.route('/api/security/setup-status')
+def api_security_setup_status():
+    """Get setup wizard status for all security components"""
+    status = {}
+    
+    # Nginx
+    try:
+        result = subprocess.run(['which', 'nginx'], capture_output=True, text=True, timeout=5)
+        installed = result.returncode == 0
+        running = False
+        if installed:
+            run_check = subprocess.run(['systemctl', 'is-active', 'nginx'], capture_output=True, text=True, timeout=5)
+            running = run_check.stdout.strip() == 'active'
+        status['nginx'] = {'installed': installed, 'running': running}
+    except:
+        status['nginx'] = {'installed': False, 'running': False}
+    
+    # Certbot
+    try:
+        result = subprocess.run(['which', 'certbot'], capture_output=True, text=True, timeout=5)
+        installed = result.returncode == 0
+        # Check if timer is running
+        running = False
+        if installed:
+            timer_check = subprocess.run(['systemctl', 'is-active', 'certbot.timer'], capture_output=True, text=True, timeout=5)
+            running = timer_check.stdout.strip() == 'active'
+        status['certbot'] = {'installed': installed, 'running': running}
+    except:
+        status['certbot'] = {'installed': False, 'running': False}
+    
+    # Fail2Ban
+    try:
+        result = subprocess.run(['which', 'fail2ban-client'], capture_output=True, text=True, timeout=5)
+        installed = result.returncode == 0
+        running = False
+        if installed:
+            run_check = subprocess.run(['systemctl', 'is-active', 'fail2ban'], capture_output=True, text=True, timeout=5)
+            running = run_check.stdout.strip() == 'active'
+        status['fail2ban'] = {'installed': installed, 'running': running}
+    except:
+        status['fail2ban'] = {'installed': False, 'running': False}
+    
+    # UFW
+    try:
+        result = subprocess.run(['which', 'ufw'], capture_output=True, text=True, timeout=5)
+        installed = result.returncode == 0
+        running = False
+        if installed:
+            ufw_status = subprocess.run(['sudo', 'ufw', 'status'], capture_output=True, text=True, timeout=5)
+            running = 'Status: active' in ufw_status.stdout
+        status['ufw'] = {'installed': installed, 'running': running}
+    except:
+        status['ufw'] = {'installed': False, 'running': False}
+    
+    # Sites configured
+    try:
+        sites_enabled = len(os.listdir('/etc/nginx/sites-enabled')) if os.path.exists('/etc/nginx/sites-enabled') else 0
+        # Check for aegis-specific sites
+        aegis_sites = [f for f in os.listdir('/etc/nginx/sites-enabled') if 'aegis' in f.lower() or 'reactmap' in f.lower() or 'koji' in f.lower()] if os.path.exists('/etc/nginx/sites-enabled') else []
+        status['sites'] = {
+            'installed': sites_enabled > 0,
+            'running': len(aegis_sites) > 0,
+            'count': sites_enabled,
+            'aegis_sites': len(aegis_sites)
+        }
+    except:
+        status['sites'] = {'installed': False, 'running': False, 'count': 0}
+    
+    return jsonify(status)
+
+
+@app.route('/api/security/install/nginx', methods=['POST'])
+def api_install_nginx():
+    """Install Nginx web server"""
+    result = {'success': False, 'output': '', 'message': ''}
+    
+    try:
+        # Detect package manager and install
+        if os.path.exists('/usr/bin/apt-get'):
+            cmd = ['sudo', 'apt-get', 'update']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result['output'] += proc.stdout + proc.stderr
+            
+            cmd = ['sudo', 'apt-get', 'install', '-y', 'nginx']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+            
+        elif os.path.exists('/usr/bin/dnf'):
+            cmd = ['sudo', 'dnf', 'install', '-y', 'nginx']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+            
+        elif os.path.exists('/usr/bin/yum'):
+            cmd = ['sudo', 'yum', 'install', '-y', 'nginx']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+        else:
+            result['message'] = 'Package manager not detected. Please install nginx manually.'
+            return jsonify(result)
+        
+        # Start and enable nginx
+        subprocess.run(['sudo', 'systemctl', 'start', 'nginx'], capture_output=True, timeout=30)
+        subprocess.run(['sudo', 'systemctl', 'enable', 'nginx'], capture_output=True, timeout=30)
+        
+        result['success'] = True
+        result['message'] = 'Nginx installed and started successfully'
+        
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Installation timed out'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/security/install/certbot', methods=['POST'])
+def api_install_certbot():
+    """Install Certbot for SSL certificates"""
+    result = {'success': False, 'output': '', 'message': ''}
+    
+    try:
+        if os.path.exists('/usr/bin/apt-get'):
+            cmd = ['sudo', 'apt-get', 'update']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result['output'] += proc.stdout + proc.stderr
+            
+            cmd = ['sudo', 'apt-get', 'install', '-y', 'certbot', 'python3-certbot-nginx']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+            
+        elif os.path.exists('/usr/bin/dnf'):
+            cmd = ['sudo', 'dnf', 'install', '-y', 'certbot', 'python3-certbot-nginx']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+        else:
+            result['message'] = 'Package manager not detected. Please install certbot manually.'
+            return jsonify(result)
+        
+        # Enable certbot timer for auto-renewal
+        subprocess.run(['sudo', 'systemctl', 'enable', 'certbot.timer'], capture_output=True, timeout=30)
+        subprocess.run(['sudo', 'systemctl', 'start', 'certbot.timer'], capture_output=True, timeout=30)
+        
+        result['success'] = True
+        result['message'] = 'Certbot installed with auto-renewal enabled'
+        
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Installation timed out'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/security/install/fail2ban', methods=['POST'])
+def api_install_fail2ban():
+    """Install and configure Fail2Ban"""
+    result = {'success': False, 'output': '', 'message': ''}
+    
+    try:
+        if os.path.exists('/usr/bin/apt-get'):
+            cmd = ['sudo', 'apt-get', 'update']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+            result['output'] += proc.stdout + proc.stderr
+            
+            cmd = ['sudo', 'apt-get', 'install', '-y', 'fail2ban']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+            
+        elif os.path.exists('/usr/bin/dnf'):
+            cmd = ['sudo', 'dnf', 'install', '-y', 'fail2ban']
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+            result['output'] += proc.stdout + proc.stderr
+        else:
+            result['message'] = 'Package manager not detected. Please install fail2ban manually.'
+            return jsonify(result)
+        
+        # Create nginx jail configuration
+        jail_config = """[nginx-http-auth]
+enabled = true
+port = http,https
+filter = nginx-http-auth
+logpath = /var/log/nginx/error.log
+maxretry = 5
+bantime = 3600
+
+[nginx-botsearch]
+enabled = true
+port = http,https
+filter = nginx-botsearch
+logpath = /var/log/nginx/access.log
+maxretry = 2
+bantime = 86400
+
+[nginx-badbots]
+enabled = true
+port = http,https
+filter = nginx-badbots
+logpath = /var/log/nginx/access.log
+maxretry = 1
+bantime = 86400
+"""
+        
+        jail_path = '/etc/fail2ban/jail.d/nginx.local'
+        with open('/tmp/nginx-jail.local', 'w') as f:
+            f.write(jail_config)
+        subprocess.run(['sudo', 'mv', '/tmp/nginx-jail.local', jail_path], capture_output=True, timeout=10)
+        subprocess.run(['sudo', 'chmod', '644', jail_path], capture_output=True, timeout=10)
+        
+        result['output'] += '\nCreated nginx jail configuration at ' + jail_path
+        
+        # Start and enable fail2ban
+        subprocess.run(['sudo', 'systemctl', 'start', 'fail2ban'], capture_output=True, timeout=30)
+        subprocess.run(['sudo', 'systemctl', 'enable', 'fail2ban'], capture_output=True, timeout=30)
+        subprocess.run(['sudo', 'systemctl', 'restart', 'fail2ban'], capture_output=True, timeout=30)
+        
+        result['success'] = True
+        result['message'] = 'Fail2Ban installed and configured with nginx jails'
+        
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Installation timed out'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
+@app.route('/api/security/install/ufw', methods=['POST'])
+def api_install_ufw():
+    """Install and configure UFW firewall"""
+    result = {'success': False, 'output': '', 'message': ''}
+    
+    try:
+        # Check if UFW is installed
+        which_result = subprocess.run(['which', 'ufw'], capture_output=True, text=True, timeout=5)
+        
+        if which_result.returncode != 0:
+            # Install UFW
+            if os.path.exists('/usr/bin/apt-get'):
+                cmd = ['sudo', 'apt-get', 'install', '-y', 'ufw']
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                result['output'] += proc.stdout + proc.stderr
+            elif os.path.exists('/usr/bin/dnf'):
+                cmd = ['sudo', 'dnf', 'install', '-y', 'ufw']
+                proc = subprocess.run(cmd, capture_output=True, text=True, timeout=300)
+                result['output'] += proc.stdout + proc.stderr
+        
+        # Configure default rules
+        cmds = [
+            ['sudo', 'ufw', 'default', 'deny', 'incoming'],
+            ['sudo', 'ufw', 'default', 'allow', 'outgoing'],
+            ['sudo', 'ufw', 'allow', 'ssh'],
+            ['sudo', 'ufw', 'allow', '22/tcp'],
+            ['sudo', 'ufw', 'allow', '80/tcp'],
+            ['sudo', 'ufw', 'allow', '443/tcp'],
+            # Aegis AIO ports
+            ['sudo', 'ufw', 'allow', '5000/tcp'],  # Shellder
+            ['sudo', 'ufw', 'allow', '6001/tcp'],  # ReactMap
+            ['sudo', 'ufw', 'allow', '6002/tcp'],  # Dragonite Admin
+            ['sudo', 'ufw', 'allow', '6003/tcp'],  # Rotom Web
+            ['sudo', 'ufw', 'allow', '6004/tcp'],  # Koji
+            ['sudo', 'ufw', 'allow', '7070/tcp'],  # Rotom device socket
+            ['sudo', 'ufw', 'allow', '7272/tcp'],  # Dragonite API
+        ]
+        
+        for cmd in cmds:
+            proc = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+            result['output'] += f"\n{' '.join(cmd)}: {proc.stdout}"
+        
+        # Enable UFW
+        proc = subprocess.run(['sudo', 'ufw', '--force', 'enable'], capture_output=True, text=True, timeout=30)
+        result['output'] += f"\nUFW enabled: {proc.stdout}"
+        
+        result['success'] = True
+        result['message'] = 'UFW configured with Aegis AIO ports allowed'
+        
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Setup timed out'
+    except Exception as e:
+        result['message'] = str(e)
+    
+    return jsonify(result)
+
+
 @app.route('/api/security/ufw/status')
 def api_ufw_status():
     """Get detailed UFW status with rules"""
