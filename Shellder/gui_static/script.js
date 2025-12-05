@@ -404,6 +404,9 @@ async function loadDebugPage() {
     
     // Update stream commands with correct host/port
     updateStreamCommands();
+    
+    // Load AI debug configuration
+    loadAIDebugConfig();
 }
 
 function loadDebugClientLogs() {
@@ -643,6 +646,183 @@ function updateStreamCommands() {
     
     if (tailCmd) tailCmd.textContent = `curl -N http://${host}:${port}/api/debug/tail`;
     if (sseCmd) sseCmd.textContent = `curl -N http://${host}:${port}/api/debug/stream`;
+}
+
+// =============================================================================
+// AI DEBUG ACCESS CONTROLS
+// =============================================================================
+
+let aiDebugConfig = {};
+
+async function loadAIDebugConfig() {
+    try {
+        const response = await fetch('/api/ai-debug/config');
+        const data = await response.json();
+        aiDebugConfig = data.config || {};
+        
+        // Update port displays
+        const port = data.port || '5050';
+        document.getElementById('aiDebugPort').textContent = port;
+        document.querySelectorAll('.ai-port').forEach(el => el.textContent = port);
+        
+        // Update toggle states
+        for (const [key, value] of Object.entries(aiDebugConfig)) {
+            const toggle = document.getElementById(`aiToggle_${key}`);
+            if (toggle) toggle.checked = value;
+        }
+        
+        // Update AI instructions
+        updateAIInstructions(data);
+        
+    } catch (e) {
+        console.error('Failed to load AI debug config:', e);
+    }
+}
+
+async function updateAIDebugConfig() {
+    const config = {};
+    
+    // Collect all toggle states
+    const toggles = document.querySelectorAll('[id^="aiToggle_"]');
+    toggles.forEach(toggle => {
+        const key = toggle.id.replace('aiToggle_', '');
+        config[key] = toggle.checked;
+    });
+    
+    try {
+        await fetch('/api/ai-debug/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(config)
+        });
+        
+        aiDebugConfig = config;
+        showToast('AI debug settings updated', 'success');
+        
+        // Refresh instructions
+        loadAIDebugConfig();
+    } catch (e) {
+        showToast('Failed to update settings: ' + e.message, 'error');
+    }
+}
+
+function updateAIInstructions(data) {
+    const port = data.port || window.location.port || '5050';
+    const host = window.location.hostname;
+    
+    const instructions = `# Shellder AI Debug Access
+
+## Connection Info
+- **Host**: ${host}
+- **Port**: ${port}
+- **Base URL**: http://${host}:${port}
+
+## Quick Start
+\`\`\`bash
+# Get help and all available endpoints
+curl http://${host}:${port}/api/ai-debug/help
+
+# Run system diagnostics
+curl http://${host}:${port}/api/ai-debug/diagnose
+
+# Stream live logs (keep running)
+curl -N http://${host}:${port}/api/debug/tail
+\`\`\`
+
+## Available Endpoints
+
+### Read Files
+\`\`\`bash
+curl "http://${host}:${port}/api/ai-debug/file?path=.env"
+curl "http://${host}:${port}/api/ai-debug/file?path=docker-compose.yaml"
+\`\`\`
+
+### Execute Commands
+\`\`\`bash
+curl -X POST -H "Content-Type: application/json" \\
+  -d '{"cmd": "docker ps"}' \\
+  http://${host}:${port}/api/ai-debug/exec
+\`\`\`
+
+### Docker Operations
+\`\`\`bash
+curl "http://${host}:${port}/api/ai-debug/docker?cmd=ps"
+curl "http://${host}:${port}/api/ai-debug/docker?cmd=logs&container=rotom"
+\`\`\`
+
+### Database Queries
+\`\`\`bash
+curl -X POST -H "Content-Type: application/json" \\
+  -d '{"database": "golbat", "query": "SHOW TABLES"}' \\
+  http://${host}:${port}/api/ai-debug/sql
+\`\`\`
+
+### Get Logs
+\`\`\`bash
+curl "http://${host}:${port}/api/ai-debug/logs?type=shellder&lines=100"
+curl "http://${host}:${port}/api/ai-debug/logs?type=container&container=dragonite"
+\`\`\`
+
+## WebSocket Access
+Connect to: ws://${host}:${port}/socket.io/
+
+Events to emit:
+- \`ai_debug_exec\` - Execute commands
+- \`ai_debug_file\` - Read/write files
+- \`ai_debug_docker\` - Docker operations
+- \`ai_debug_diagnose\` - Run diagnostics
+
+Listen for: \`ai_debug_result\`
+
+## Tips
+1. Start with \`/api/ai-debug/diagnose\` to understand system state
+2. Use \`/api/debug/tail\` for live log streaming
+3. All file paths are relative to Aegis root
+4. SQL queries are read-only for safety`;
+
+    document.getElementById('aiInstructions').textContent = instructions;
+}
+
+function copyAIInstructions() {
+    const instructions = document.getElementById('aiInstructions').textContent;
+    navigator.clipboard.writeText(instructions).then(() => {
+        showToast('Instructions copied! Paste to your AI assistant.', 'success');
+    }).catch(() => {
+        // Fallback
+        const textarea = document.createElement('textarea');
+        textarea.value = instructions;
+        document.body.appendChild(textarea);
+        textarea.select();
+        document.execCommand('copy');
+        document.body.removeChild(textarea);
+        showToast('Instructions copied!', 'success');
+    });
+}
+
+function copyTestCommand(type) {
+    const port = window.location.port || '5050';
+    const host = window.location.hostname;
+    const cmd = `curl http://${host}:${port}/api/ai-debug/${type}`;
+    
+    navigator.clipboard.writeText(cmd).then(() => {
+        showToast('Command copied!', 'success');
+    });
+}
+
+async function runTestCommand(type) {
+    const container = document.getElementById('testResultContainer');
+    const result = document.getElementById('testResult');
+    
+    container.style.display = 'block';
+    result.textContent = 'Running...';
+    
+    try {
+        const response = await fetch(`/api/ai-debug/${type}`);
+        const data = await response.json();
+        result.textContent = JSON.stringify(data, null, 2);
+    } catch (e) {
+        result.textContent = 'Error: ' + e.message;
+    }
 }
 
 // View the server debug log (legacy, opens debug page)

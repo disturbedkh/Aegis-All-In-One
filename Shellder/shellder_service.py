@@ -6219,6 +6219,635 @@ def api_debug_clear():
     
     return jsonify({'success': True, 'message': 'Debug logs cleared'})
 
+# =============================================================================
+# AI DEBUG ACCESS - Comprehensive API for AI Assistants
+# =============================================================================
+
+# Feature flags - can be toggled from UI
+AI_DEBUG_CONFIG = {
+    'api_enabled': True,
+    'websocket_enabled': True,
+    'file_access': True,
+    'command_exec': True,
+    'docker_access': True,
+    'database_access': True,
+    'system_info': True
+}
+
+@app.route('/api/ai-debug/config')
+def api_ai_debug_config():
+    """Get AI debug access configuration"""
+    return jsonify({
+        'config': AI_DEBUG_CONFIG,
+        'endpoints': {
+            'file_read': '/api/ai-debug/file?path=<path>',
+            'file_write': '/api/ai-debug/file (POST)',
+            'exec': '/api/ai-debug/exec (POST)',
+            'docker': '/api/ai-debug/docker?cmd=<cmd>',
+            'sql': '/api/ai-debug/sql (POST)',
+            'logs': '/api/ai-debug/logs?type=<type>',
+            'diagnose': '/api/ai-debug/diagnose',
+            'system': '/api/ai-debug/system',
+            'websocket': f'ws://localhost:{SHELLDER_PORT}/ai-debug'
+        },
+        'port': SHELLDER_PORT,
+        'aegis_root': str(AEGIS_ROOT)
+    })
+
+@app.route('/api/ai-debug/config', methods=['POST'])
+def api_ai_debug_config_update():
+    """Update AI debug access configuration"""
+    global AI_DEBUG_CONFIG
+    data = request.get_json() or {}
+    
+    for key in data:
+        if key in AI_DEBUG_CONFIG:
+            AI_DEBUG_CONFIG[key] = bool(data[key])
+    
+    return jsonify({'success': True, 'config': AI_DEBUG_CONFIG})
+
+@app.route('/api/ai-debug/file')
+def api_ai_debug_file_read():
+    """
+    Read any file in the Aegis directory.
+    
+    Usage: GET /api/ai-debug/file?path=Shellder/shellder_service.py&lines=100
+    
+    Parameters:
+        path: Relative path from Aegis root
+        lines: Optional, limit to last N lines
+        offset: Optional, start from line N
+    """
+    if not AI_DEBUG_CONFIG.get('file_access'):
+        return jsonify({'error': 'File access disabled'}), 403
+    
+    path = request.args.get('path', '')
+    lines_limit = request.args.get('lines', type=int)
+    offset = request.args.get('offset', 0, type=int)
+    
+    if not path:
+        return jsonify({'error': 'Path required'}), 400
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security: must be within Aegis root
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'error': 'Access denied - path outside Aegis directory'}), 403
+    
+    if not full_path.exists():
+        return jsonify({'error': f'File not found: {path}'}), 404
+    
+    if full_path.is_dir():
+        # List directory
+        files = []
+        for f in full_path.iterdir():
+            files.append({
+                'name': f.name,
+                'type': 'dir' if f.is_dir() else 'file',
+                'size': f.stat().st_size if f.is_file() else None
+            })
+        return jsonify({'type': 'directory', 'path': path, 'files': files})
+    
+    try:
+        with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+            content = f.read()
+        
+        lines = content.split('\n')
+        total_lines = len(lines)
+        
+        if offset > 0:
+            lines = lines[offset:]
+        if lines_limit:
+            lines = lines[:lines_limit]
+        
+        return jsonify({
+            'type': 'file',
+            'path': path,
+            'total_lines': total_lines,
+            'returned_lines': len(lines),
+            'offset': offset,
+            'content': '\n'.join(lines),
+            'size_bytes': full_path.stat().st_size
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/file', methods=['POST'])
+def api_ai_debug_file_write():
+    """
+    Write to a file in the Aegis directory.
+    
+    Usage: POST /api/ai-debug/file
+    Body: {"path": "path/to/file", "content": "file content", "append": false}
+    """
+    if not AI_DEBUG_CONFIG.get('file_access'):
+        return jsonify({'error': 'File access disabled'}), 403
+    
+    data = request.get_json() or {}
+    path = data.get('path', '')
+    content = data.get('content', '')
+    append = data.get('append', False)
+    
+    if not path:
+        return jsonify({'error': 'Path required'}), 400
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    try:
+        mode = 'a' if append else 'w'
+        with open(full_path, mode, encoding='utf-8') as f:
+            f.write(content)
+        
+        # Fix ownership
+        try:
+            import pwd
+            real_user = os.environ.get('SUDO_USER')
+            if real_user:
+                user_info = pwd.getpwnam(real_user)
+                os.chown(full_path, user_info.pw_uid, user_info.pw_gid)
+        except:
+            pass
+        
+        return jsonify({'success': True, 'path': path, 'bytes_written': len(content)})
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/exec', methods=['POST'])
+def api_ai_debug_exec():
+    """
+    Execute a shell command.
+    
+    Usage: POST /api/ai-debug/exec
+    Body: {"cmd": "docker ps", "timeout": 30, "cwd": "optional/path"}
+    
+    Returns stdout, stderr, and return code.
+    """
+    if not AI_DEBUG_CONFIG.get('command_exec'):
+        return jsonify({'error': 'Command execution disabled'}), 403
+    
+    data = request.get_json() or {}
+    cmd = data.get('cmd', '')
+    timeout = data.get('timeout', 30)
+    cwd = data.get('cwd', str(AEGIS_ROOT))
+    
+    if not cmd:
+        return jsonify({'error': 'Command required'}), 400
+    
+    # Security: block dangerous commands
+    dangerous = ['rm -rf /', 'mkfs', 'dd if=', ':(){', 'chmod -R 777 /']
+    for d in dangerous:
+        if d in cmd:
+            return jsonify({'error': f'Blocked dangerous command pattern: {d}'}), 403
+    
+    try:
+        result = subprocess.run(
+            cmd,
+            shell=True,
+            capture_output=True,
+            text=True,
+            timeout=timeout,
+            cwd=cwd
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'command': cmd,
+            'returncode': result.returncode,
+            'stdout': result.stdout,
+            'stderr': result.stderr,
+            'cwd': cwd
+        })
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': f'Command timed out after {timeout}s'}), 408
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/docker')
+def api_ai_debug_docker():
+    """
+    Docker operations.
+    
+    Usage: GET /api/ai-debug/docker?cmd=ps
+    
+    Commands: ps, images, logs, inspect, stats
+    """
+    if not AI_DEBUG_CONFIG.get('docker_access'):
+        return jsonify({'error': 'Docker access disabled'}), 403
+    
+    cmd = request.args.get('cmd', 'ps')
+    container = request.args.get('container', '')
+    lines = request.args.get('lines', 100, type=int)
+    
+    try:
+        if cmd == 'ps':
+            result = subprocess.run(
+                ['docker', 'compose', 'ps', '--format', 'json'],
+                capture_output=True, text=True, cwd=str(AEGIS_ROOT), timeout=30
+            )
+            try:
+                containers = [json.loads(line) for line in result.stdout.strip().split('\n') if line]
+            except:
+                containers = result.stdout
+            return jsonify({'containers': containers})
+        
+        elif cmd == 'logs' and container:
+            result = subprocess.run(
+                ['docker', 'logs', '--tail', str(lines), container],
+                capture_output=True, text=True, timeout=30
+            )
+            return jsonify({
+                'container': container,
+                'logs': result.stdout + result.stderr,
+                'lines': lines
+            })
+        
+        elif cmd == 'inspect' and container:
+            result = subprocess.run(
+                ['docker', 'inspect', container],
+                capture_output=True, text=True, timeout=30
+            )
+            try:
+                data = json.loads(result.stdout)
+            except:
+                data = result.stdout
+            return jsonify({'container': container, 'inspect': data})
+        
+        elif cmd == 'stats':
+            result = subprocess.run(
+                ['docker', 'stats', '--no-stream', '--format', 
+                 '{"name":"{{.Name}}","cpu":"{{.CPUPerc}}","mem":"{{.MemUsage}}","net":"{{.NetIO}}"}'],
+                capture_output=True, text=True, timeout=30
+            )
+            try:
+                stats = [json.loads(line) for line in result.stdout.strip().split('\n') if line]
+            except:
+                stats = result.stdout
+            return jsonify({'stats': stats})
+        
+        elif cmd == 'images':
+            result = subprocess.run(
+                ['docker', 'images', '--format', '{{.Repository}}:{{.Tag}} {{.Size}}'],
+                capture_output=True, text=True, timeout=30
+            )
+            return jsonify({'images': result.stdout.strip().split('\n')})
+        
+        else:
+            return jsonify({'error': f'Unknown command: {cmd}. Use: ps, logs, inspect, stats, images'}), 400
+            
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/sql', methods=['POST'])
+def api_ai_debug_sql():
+    """
+    Execute SQL query on databases.
+    
+    Usage: POST /api/ai-debug/sql
+    Body: {"database": "golbat", "query": "SELECT * FROM pokemon LIMIT 10"}
+    
+    Databases: golbat, dragonite, reactmap, koji
+    """
+    if not AI_DEBUG_CONFIG.get('database_access'):
+        return jsonify({'error': 'Database access disabled'}), 403
+    
+    data = request.get_json() or {}
+    database = data.get('database', 'golbat')
+    query = data.get('query', '')
+    
+    if not query:
+        return jsonify({'error': 'Query required'}), 400
+    
+    # Block dangerous queries
+    dangerous = ['DROP ', 'DELETE ', 'TRUNCATE ', 'ALTER ', 'UPDATE ', 'INSERT ']
+    query_upper = query.upper()
+    for d in dangerous:
+        if d in query_upper and 'SELECT' not in query_upper:
+            return jsonify({'error': f'Blocked dangerous query: {d}'}), 403
+    
+    try:
+        # Read database credentials from .env
+        env_path = AEGIS_ROOT / '.env'
+        db_user = 'pokemon'
+        db_pass = ''
+        
+        if env_path.exists():
+            with open(env_path, 'r') as f:
+                for line in f:
+                    if line.startswith('MYSQL_USER='):
+                        db_user = line.split('=', 1)[1].strip().strip('"\'')
+                    elif line.startswith('MYSQL_PASSWORD='):
+                        db_pass = line.split('=', 1)[1].strip().strip('"\'')
+        
+        # Execute via mysql CLI
+        cmd = ['mysql', '-h', '127.0.0.1', '-u', db_user, f'-p{db_pass}', 
+               database, '-e', query, '--batch', '--silent']
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        
+        if result.returncode != 0:
+            return jsonify({'error': result.stderr, 'database': database}), 500
+        
+        # Parse results
+        lines = result.stdout.strip().split('\n')
+        if len(lines) > 0:
+            headers = lines[0].split('\t') if lines else []
+            rows = [dict(zip(headers, line.split('\t'))) for line in lines[1:]] if len(lines) > 1 else []
+            return jsonify({
+                'database': database,
+                'query': query,
+                'columns': headers,
+                'rows': rows,
+                'row_count': len(rows)
+            })
+        return jsonify({'database': database, 'query': query, 'rows': [], 'row_count': 0})
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Query timed out'}), 408
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/logs')
+def api_ai_debug_logs():
+    """
+    Get various system logs.
+    
+    Usage: GET /api/ai-debug/logs?type=shellder&lines=100
+    
+    Types: shellder, docker, nginx, system, auth, container
+    For container logs, add &container=<name>
+    """
+    if not AI_DEBUG_CONFIG.get('system_info'):
+        return jsonify({'error': 'System info access disabled'}), 403
+    
+    log_type = request.args.get('type', 'shellder')
+    lines = request.args.get('lines', 100, type=int)
+    container = request.args.get('container', '')
+    
+    try:
+        if log_type == 'shellder':
+            log_path = LOG_DIR / 'debuglog.txt'
+            if log_path.exists():
+                with open(log_path, 'r', errors='replace') as f:
+                    content = f.readlines()[-lines:]
+                return jsonify({'type': 'shellder', 'lines': content})
+        
+        elif log_type == 'docker':
+            result = subprocess.run(
+                ['journalctl', '-u', 'docker', '-n', str(lines), '--no-pager'],
+                capture_output=True, text=True, timeout=30
+            )
+            return jsonify({'type': 'docker', 'lines': result.stdout.split('\n')})
+        
+        elif log_type == 'nginx':
+            nginx_log = Path('/var/log/nginx/error.log')
+            if nginx_log.exists():
+                result = subprocess.run(['sudo', 'tail', '-n', str(lines), str(nginx_log)],
+                                       capture_output=True, text=True, timeout=10)
+                return jsonify({'type': 'nginx', 'lines': result.stdout.split('\n')})
+        
+        elif log_type == 'system':
+            result = subprocess.run(
+                ['journalctl', '-n', str(lines), '--no-pager', '-p', 'err'],
+                capture_output=True, text=True, timeout=30
+            )
+            return jsonify({'type': 'system', 'lines': result.stdout.split('\n')})
+        
+        elif log_type == 'container' and container:
+            result = subprocess.run(
+                ['docker', 'logs', '--tail', str(lines), container],
+                capture_output=True, text=True, timeout=30
+            )
+            return jsonify({
+                'type': 'container',
+                'container': container,
+                'lines': (result.stdout + result.stderr).split('\n')
+            })
+        
+        return jsonify({'error': f'Unknown log type: {log_type}'}), 400
+        
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+@app.route('/api/ai-debug/diagnose')
+def api_ai_debug_diagnose():
+    """
+    Run comprehensive system diagnostics.
+    
+    Usage: GET /api/ai-debug/diagnose
+    
+    Returns system state, container status, port availability, service health.
+    """
+    if not AI_DEBUG_CONFIG.get('system_info'):
+        return jsonify({'error': 'System info access disabled'}), 403
+    
+    diagnostics = {
+        'timestamp': datetime.now().isoformat(),
+        'system': {},
+        'containers': [],
+        'ports': {},
+        'services': {},
+        'databases': {},
+        'files': {}
+    }
+    
+    try:
+        # System info
+        import psutil
+        diagnostics['system'] = {
+            'cpu_percent': psutil.cpu_percent(),
+            'memory_percent': psutil.virtual_memory().percent,
+            'disk_percent': psutil.disk_usage('/').percent,
+            'uptime_seconds': time.time() - psutil.boot_time()
+        }
+    except:
+        pass
+    
+    try:
+        # Containers
+        result = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', 'json'],
+            capture_output=True, text=True, cwd=str(AEGIS_ROOT), timeout=30
+        )
+        for line in result.stdout.strip().split('\n'):
+            if line:
+                try:
+                    diagnostics['containers'].append(json.loads(line))
+                except:
+                    pass
+    except:
+        pass
+    
+    try:
+        # Key ports
+        import socket
+        for name, port in [('Shellder', SHELLDER_PORT), ('MariaDB', 3306), ('Rotom', 7070), ('Dragonite', 7272)]:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', port))
+            diagnostics['ports'][name] = {'port': port, 'open': result == 0}
+            sock.close()
+    except:
+        pass
+    
+    try:
+        # Key files
+        key_files = ['.env', 'docker-compose.yaml', 'unown/dragonite_config.toml', 'unown/golbat_config.toml']
+        for f in key_files:
+            path = AEGIS_ROOT / f
+            diagnostics['files'][f] = {
+                'exists': path.exists(),
+                'size': path.stat().st_size if path.exists() else 0
+            }
+    except:
+        pass
+    
+    return jsonify(diagnostics)
+
+@app.route('/api/ai-debug/system')
+def api_ai_debug_system():
+    """
+    Get detailed system information.
+    
+    Usage: GET /api/ai-debug/system
+    """
+    if not AI_DEBUG_CONFIG.get('system_info'):
+        return jsonify({'error': 'System info access disabled'}), 403
+    
+    info = {
+        'hostname': socket.gethostname(),
+        'platform': platform.platform(),
+        'python': platform.python_version(),
+        'aegis_root': str(AEGIS_ROOT),
+        'shellder_port': SHELLDER_PORT,
+        'cwd': os.getcwd()
+    }
+    
+    try:
+        import psutil
+        info['cpu'] = {
+            'count': psutil.cpu_count(),
+            'percent': psutil.cpu_percent(interval=0.1),
+            'freq': psutil.cpu_freq()._asdict() if psutil.cpu_freq() else None
+        }
+        info['memory'] = psutil.virtual_memory()._asdict()
+        info['disk'] = psutil.disk_usage('/')._asdict()
+    except:
+        pass
+    
+    try:
+        # Git info
+        result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'],
+                               capture_output=True, text=True, cwd=str(AEGIS_ROOT), timeout=5)
+        info['git_commit'] = result.stdout.strip() if result.returncode == 0 else None
+        
+        result = subprocess.run(['git', 'branch', '--show-current'],
+                               capture_output=True, text=True, cwd=str(AEGIS_ROOT), timeout=5)
+        info['git_branch'] = result.stdout.strip() if result.returncode == 0 else None
+    except:
+        pass
+    
+    return jsonify(info)
+
+@app.route('/api/ai-debug/help')
+def api_ai_debug_help():
+    """
+    Get help documentation for AI assistants.
+    
+    This endpoint provides complete documentation on how to use the AI debug API.
+    """
+    return jsonify({
+        'title': 'Shellder AI Debug API',
+        'description': 'Comprehensive API for AI assistants to debug Aegis AIO',
+        'base_url': f'http://localhost:{SHELLDER_PORT}',
+        'authentication': 'None required (local access only)',
+        'endpoints': [
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/config',
+                'description': 'Get current configuration and available endpoints'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/file?path=<path>',
+                'description': 'Read file contents. Add &lines=N to limit lines.',
+                'example': 'curl "http://localhost:5050/api/ai-debug/file?path=.env"'
+            },
+            {
+                'method': 'POST',
+                'path': '/api/ai-debug/file',
+                'description': 'Write to file. Body: {"path": "...", "content": "..."}',
+                'example': 'curl -X POST -H "Content-Type: application/json" -d \'{"path":"test.txt","content":"hello"}\' http://localhost:5050/api/ai-debug/file'
+            },
+            {
+                'method': 'POST',
+                'path': '/api/ai-debug/exec',
+                'description': 'Execute shell command. Body: {"cmd": "..."}',
+                'example': 'curl -X POST -H "Content-Type: application/json" -d \'{"cmd":"docker ps"}\' http://localhost:5050/api/ai-debug/exec'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/docker?cmd=<cmd>',
+                'description': 'Docker operations. Commands: ps, logs, inspect, stats, images',
+                'example': 'curl "http://localhost:5050/api/ai-debug/docker?cmd=ps"'
+            },
+            {
+                'method': 'POST',
+                'path': '/api/ai-debug/sql',
+                'description': 'Execute SQL query. Body: {"database": "golbat", "query": "SELECT..."}',
+                'example': 'curl -X POST -H "Content-Type: application/json" -d \'{"database":"golbat","query":"SHOW TABLES"}\' http://localhost:5050/api/ai-debug/sql'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/logs?type=<type>',
+                'description': 'Get logs. Types: shellder, docker, nginx, system, container',
+                'example': 'curl "http://localhost:5050/api/ai-debug/logs?type=shellder&lines=50"'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/diagnose',
+                'description': 'Run comprehensive system diagnostics',
+                'example': 'curl http://localhost:5050/api/ai-debug/diagnose'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/ai-debug/system',
+                'description': 'Get detailed system information',
+                'example': 'curl http://localhost:5050/api/ai-debug/system'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/debug/stream',
+                'description': 'SSE stream of live debug logs',
+                'example': 'curl -N http://localhost:5050/api/debug/stream'
+            },
+            {
+                'method': 'GET',
+                'path': '/api/debug/tail',
+                'description': 'Plain text stream of live logs',
+                'example': 'curl -N http://localhost:5050/api/debug/tail'
+            }
+        ],
+        'websocket': {
+            'url': f'ws://localhost:{SHELLDER_PORT}/socket.io/',
+            'namespace': '/ai-debug',
+            'events': ['execute', 'file_read', 'file_write', 'docker', 'sql', 'diagnose']
+        },
+        'tips': [
+            'Use /api/ai-debug/diagnose first to understand system state',
+            'Check /api/ai-debug/logs?type=shellder for recent errors',
+            'Use /api/debug/tail for live log streaming',
+            'All file paths are relative to Aegis root directory'
+        ]
+    })
+
 @app.route('/api/health')
 def health():
     """Health check endpoint"""
@@ -15221,6 +15850,106 @@ if SOCKETIO_AVAILABLE:
             emit('action_result', {'success': True, 'message': f'{name} {action}ed'})
         except Exception as e:
             emit('action_result', {'success': False, 'error': str(e)})
+
+    # =========================================================================
+    # AI DEBUG WEBSOCKET - Real-time AI debugging interface
+    # =========================================================================
+    
+    @socketio.on('ai_debug_exec')
+    def handle_ai_debug_exec(data):
+        """Execute command via WebSocket for AI debugging"""
+        if not AI_DEBUG_CONFIG.get('websocket_enabled') or not AI_DEBUG_CONFIG.get('command_exec'):
+            emit('ai_debug_result', {'error': 'Command execution disabled'})
+            return
+        
+        cmd = data.get('cmd', '')
+        timeout = data.get('timeout', 30)
+        
+        try:
+            result = subprocess.run(cmd, shell=True, capture_output=True, text=True, 
+                                   timeout=timeout, cwd=str(AEGIS_ROOT))
+            emit('ai_debug_result', {
+                'type': 'exec',
+                'command': cmd,
+                'returncode': result.returncode,
+                'stdout': result.stdout,
+                'stderr': result.stderr
+            })
+        except Exception as e:
+            emit('ai_debug_result', {'type': 'exec', 'error': str(e)})
+    
+    @socketio.on('ai_debug_file')
+    def handle_ai_debug_file(data):
+        """Read/write file via WebSocket for AI debugging"""
+        if not AI_DEBUG_CONFIG.get('websocket_enabled') or not AI_DEBUG_CONFIG.get('file_access'):
+            emit('ai_debug_result', {'error': 'File access disabled'})
+            return
+        
+        action = data.get('action', 'read')
+        path = data.get('path', '')
+        
+        try:
+            full_path = AEGIS_ROOT / path
+            full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+            
+            if action == 'read':
+                if full_path.exists():
+                    with open(full_path, 'r', encoding='utf-8', errors='replace') as f:
+                        content = f.read()
+                    emit('ai_debug_result', {'type': 'file', 'action': 'read', 'path': path, 'content': content})
+                else:
+                    emit('ai_debug_result', {'type': 'file', 'error': 'File not found'})
+            elif action == 'write':
+                content = data.get('content', '')
+                with open(full_path, 'w', encoding='utf-8') as f:
+                    f.write(content)
+                emit('ai_debug_result', {'type': 'file', 'action': 'write', 'path': path, 'success': True})
+        except Exception as e:
+            emit('ai_debug_result', {'type': 'file', 'error': str(e)})
+    
+    @socketio.on('ai_debug_docker')
+    def handle_ai_debug_docker(data):
+        """Docker operations via WebSocket for AI debugging"""
+        if not AI_DEBUG_CONFIG.get('websocket_enabled') or not AI_DEBUG_CONFIG.get('docker_access'):
+            emit('ai_debug_result', {'error': 'Docker access disabled'})
+            return
+        
+        cmd = data.get('cmd', 'ps')
+        container = data.get('container', '')
+        
+        try:
+            if cmd == 'ps':
+                result = subprocess.run(['docker', 'compose', 'ps', '--format', 'json'],
+                                       capture_output=True, text=True, cwd=str(AEGIS_ROOT), timeout=30)
+                containers = []
+                for line in result.stdout.strip().split('\n'):
+                    if line:
+                        try:
+                            containers.append(json.loads(line))
+                        except:
+                            pass
+                emit('ai_debug_result', {'type': 'docker', 'cmd': 'ps', 'containers': containers})
+            elif cmd == 'logs' and container:
+                result = subprocess.run(['docker', 'logs', '--tail', '100', container],
+                                       capture_output=True, text=True, timeout=30)
+                emit('ai_debug_result', {'type': 'docker', 'cmd': 'logs', 'container': container, 
+                                        'logs': result.stdout + result.stderr})
+            else:
+                emit('ai_debug_result', {'type': 'docker', 'error': f'Unknown command: {cmd}'})
+        except Exception as e:
+            emit('ai_debug_result', {'type': 'docker', 'error': str(e)})
+    
+    @socketio.on('ai_debug_diagnose')
+    def handle_ai_debug_diagnose(data):
+        """Run diagnostics via WebSocket for AI debugging"""
+        if not AI_DEBUG_CONFIG.get('websocket_enabled') or not AI_DEBUG_CONFIG.get('system_info'):
+            emit('ai_debug_result', {'error': 'System info disabled'})
+            return
+        
+        # Reuse the REST endpoint logic
+        with app.test_request_context():
+            result = api_ai_debug_diagnose()
+            emit('ai_debug_result', {'type': 'diagnose', 'data': result.get_json()})
 
 # =============================================================================
 # MAIN

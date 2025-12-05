@@ -1539,10 +1539,129 @@
                     </div>
                 </div>
                 
+                <!-- AI Debug Access Control -->
+                <div class="card" style="margin-top: 20px;">
+                    <div class="card-header">
+                        <h2>🤖 AI Debug Access</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="loadAIDebugConfig()">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <p class="section-desc">
+                            Enable programmatic access for AI assistants to debug your system.
+                            All access methods work on <strong>port <span id="aiDebugPort">5050</span></strong>.
+                        </p>
+                        
+                        <!-- Master Toggles -->
+                        <div class="ai-debug-toggles">
+                            <div class="toggle-section">
+                                <h4>🔌 Access Methods</h4>
+                                <div class="toggle-grid">
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_api_enabled" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>REST API</strong>
+                                            <small>HTTP endpoints for debugging</small>
+                                        </span>
+                                    </label>
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_websocket_enabled" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>WebSocket</strong>
+                                            <small>Real-time bidirectional debug</small>
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                            
+                            <div class="toggle-section">
+                                <h4>🔐 Permissions</h4>
+                                <div class="toggle-grid">
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_file_access" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>File Access</strong>
+                                            <small>Read/write files in Aegis directory</small>
+                                        </span>
+                                    </label>
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_command_exec" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>Command Execution</strong>
+                                            <small>Run shell commands</small>
+                                        </span>
+                                    </label>
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_docker_access" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>Docker Access</strong>
+                                            <small>Container operations and logs</small>
+                                        </span>
+                                    </label>
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_database_access" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>Database Access</strong>
+                                            <small>Run SQL queries (read-only)</small>
+                                        </span>
+                                    </label>
+                                    <label class="toggle-item">
+                                        <input type="checkbox" id="aiToggle_system_info" onchange="updateAIDebugConfig()">
+                                        <span class="toggle-info">
+                                            <strong>System Info</strong>
+                                            <small>CPU, memory, logs, diagnostics</small>
+                                        </span>
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        
+                        <!-- Instructions for AI -->
+                        <div class="ai-instructions" style="margin-top: 20px;">
+                            <h4>📋 Instructions for Your AI Assistant</h4>
+                            <p style="margin-bottom: 12px; color: var(--text-secondary);">
+                                Copy and paste these instructions to your AI (ChatGPT, Claude, etc.):
+                            </p>
+                            <div class="instruction-box" id="aiInstructionBox">
+                                <pre id="aiInstructions">Loading...</pre>
+                            </div>
+                            <button class="btn btn-primary" onclick="copyAIInstructions()" style="margin-top: 10px;">
+                                📋 Copy Instructions
+                            </button>
+                        </div>
+                        
+                        <!-- Quick Test -->
+                        <div class="ai-test-section" style="margin-top: 20px;">
+                            <h4>🧪 Quick Test</h4>
+                            <p style="color: var(--text-secondary); margin-bottom: 10px;">
+                                Test the AI debug API:
+                            </p>
+                            <div class="test-commands">
+                                <div class="test-cmd">
+                                    <code>curl http://localhost:<span class="ai-port">5050</span>/api/ai-debug/help</code>
+                                    <button class="btn btn-xs" onclick="copyTestCommand('help')">📋</button>
+                                    <button class="btn btn-xs btn-primary" onclick="runTestCommand('help')">▶️ Run</button>
+                                </div>
+                                <div class="test-cmd">
+                                    <code>curl http://localhost:<span class="ai-port">5050</span>/api/ai-debug/diagnose</code>
+                                    <button class="btn btn-xs" onclick="copyTestCommand('diagnose')">📋</button>
+                                    <button class="btn btn-xs btn-primary" onclick="runTestCommand('diagnose')">▶️ Run</button>
+                                </div>
+                            </div>
+                            <div id="testResultContainer" style="display: none; margin-top: 12px;">
+                                <div class="debug-log-viewer" style="max-height: 200px;">
+                                    <pre id="testResult"></pre>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- AI Debug Tips -->
                 <div class="card" style="margin-top: 20px;">
                     <div class="card-header">
-                        <h2>🤖 AI Debugging Tips</h2>
+                        <h2>📚 AI Debugging Reference</h2>
                     </div>
                     <div class="card-body">
                         <div class="debug-tips">
