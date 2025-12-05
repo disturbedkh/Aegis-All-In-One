@@ -30,6 +30,16 @@ from collections import deque
 _LOG_DIR = Path('/app/logs') if Path('/app/logs').exists() else Path(__file__).parent / 'logs'
 _LOG_DIR.mkdir(exist_ok=True, parents=True)
 DEBUG_LOG_PATH = _LOG_DIR / 'debuglog.txt'
+
+# Fix ownership of logs directory if running with sudo
+try:
+    import pwd
+    real_user = os.environ.get('SUDO_USER')
+    if real_user:
+        user_info = pwd.getpwnam(real_user)
+        os.chown(_LOG_DIR, user_info.pw_uid, user_info.pw_gid)
+except:
+    pass
 MAX_LOG_SIZE_MB = 50  # Rotate after this size
 MAX_LOG_LINES = 100000  # Keep last N lines on rotation
 ENABLED = True  # Always on for debugging phase
@@ -97,6 +107,19 @@ def _safe_repr(obj, max_len=None):
     except Exception as e:
         return f"<repr error: {e}>"
 
+def _fix_file_ownership(path):
+    """Fix file ownership to actual user (not root) if running with sudo"""
+    try:
+        import pwd
+        import grp
+        # Try SUDO_USER first
+        real_user = os.environ.get('SUDO_USER')
+        if real_user:
+            user_info = pwd.getpwnam(real_user)
+            os.chown(path, user_info.pw_uid, user_info.pw_gid)
+    except:
+        pass  # Silently ignore ownership errors
+
 def _write_log(entry):
     """Write log entry to file and buffer"""
     if not ENABLED:
@@ -110,8 +133,15 @@ def _write_log(entry):
             if DEBUG_LOG_PATH.exists() and DEBUG_LOG_PATH.stat().st_size > MAX_LOG_SIZE_MB * 1024 * 1024:
                 _rotate_log()
             
+            # Check if file needs to be created
+            file_existed = DEBUG_LOG_PATH.exists()
+            
             with open(DEBUG_LOG_PATH, 'a', encoding='utf-8') as f:
                 f.write(entry + '\n')
+            
+            # Fix ownership if we just created the file
+            if not file_existed:
+                _fix_file_ownership(DEBUG_LOG_PATH)
         except Exception as e:
             print(f"[DEBUG_LOGGER ERROR] Failed to write log: {e}", file=sys.stderr)
 

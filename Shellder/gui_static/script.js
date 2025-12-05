@@ -414,8 +414,11 @@ function loadDebugClientLogs() {
     }
     
     const logText = logs.map(log => {
-        const time = new Date(log.t).toLocaleTimeString();
-        return `[${time}] [${log.l}] ${log.c}: ${log.m}`;
+        const time = log.ts ? new Date(log.ts).toLocaleTimeString() : '??:??:??';
+        const level = log.level || 'INFO';
+        const cat = log.cat || 'UNKNOWN';
+        const msg = log.msg || JSON.stringify(log);
+        return `[${time}] [${level}] ${cat}: ${msg}`;
     }).join('\n');
     
     container.innerHTML = `<pre>${escapeHtml(logText)}</pre>`;

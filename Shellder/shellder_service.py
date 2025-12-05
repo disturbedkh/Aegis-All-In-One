@@ -5976,10 +5976,13 @@ def api_debug_debuglog():
     lines = request.args.get('lines', 500, type=int)
     format_type = request.args.get('format', 'text')  # 'text' or 'json'
     
-    debug_log = SHELLDER_DIR / 'debuglog.txt'
+    # Check both possible locations (logs/ subdirectory and root)
+    debug_log = SHELLDER_DIR / 'logs' / 'debuglog.txt'
+    if not debug_log.exists():
+        debug_log = SHELLDER_DIR / 'debuglog.txt'
     
     if not debug_log.exists():
-        return jsonify({'error': 'debuglog.txt not found', 'path': str(debug_log)}), 404
+        return jsonify({'error': 'debuglog.txt not found', 'path': str(debug_log), 'checked': [str(SHELLDER_DIR / 'logs' / 'debuglog.txt'), str(SHELLDER_DIR / 'debuglog.txt')]}), 404
     
     try:
         with open(debug_log, 'r', encoding='utf-8', errors='ignore') as f:
@@ -6008,14 +6011,19 @@ def api_debug_debuglog():
 @app.route('/api/debug/debuglog/download')
 def api_debug_debuglog_download():
     """Download the full debuglog.txt file"""
-    debug_log = SHELLDER_DIR / 'debuglog.txt'
+    # Check both possible locations
+    debug_log = SHELLDER_DIR / 'logs' / 'debuglog.txt'
+    log_dir = SHELLDER_DIR / 'logs'
+    if not debug_log.exists():
+        debug_log = SHELLDER_DIR / 'debuglog.txt'
+        log_dir = SHELLDER_DIR
     
     if not debug_log.exists():
         return jsonify({'error': 'debuglog.txt not found'}), 404
     
     info('API', 'Debug log download requested', {'client': request.remote_addr})
     return send_from_directory(
-        SHELLDER_DIR,
+        log_dir,
         'debuglog.txt',
         as_attachment=True,
         download_name=f'shellder-debug-{datetime.now().strftime("%Y%m%d-%H%M%S")}.txt'
