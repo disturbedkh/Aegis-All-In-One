@@ -1,0 +1,78 @@
+# Aegis AIO - Cursor Rules
+
+## AI Knowledge Base
+**Read the AI/ folder for comprehensive project documentation:**
+
+- `AI/CONTEXT.md` - Project overview, architecture, key information
+- `AI/RULES.md` - Guidelines and constraints for AI assistants
+- `AI/STRUCTURE.md` - Complete directory structure reference
+- `AI/CHANGELOG.md` - Recent changes and version history
+- `AI/MCP_SERVER.md` - MCP server documentation
+- `AI/AI_DEBUG_API.md` - REST API reference for AI access
+- `AI/DEEP_ANALYSIS.md` - System deep-dive analysis
+- `AI/STACK_SIMULATION.md` - Data flow simulation
+
+## Project Summary
+
+**Aegis AIO** is a Pokemon GO mapping infrastructure stack using Docker.
+
+### Key Components
+- **Shellder** - Control panel & web dashboard (port 5000)
+- **Dragonite** - Scanner backend (port 6002)
+- **Golbat** - Data processor
+- **Rotom** - Device manager (ports 6003, 7070)
+- **ReactMap** - Map frontend (port 6001)
+- **Koji** - Geofence manager (port 6004)
+- **Xilriws** - Auth proxy (port 5090)
+- **MariaDB** - Database (internal port 3306)
+
+### Databases
+- `golbat` - Pokemon, gyms, stops
+- `dragonite` - Accounts, workers, scan config
+- `reactmap` - Map settings
+- `koji` - Geofences
+
+### Key Directories
+- `AI/` - AI documentation (read first!)
+- `Shellder/` - Management scripts & service
+- `unown/` - Scanner configs
+- `reactmap/` - ReactMap config
+- `wiki/` - GitHub wiki docs
+
+## Before Making Changes
+
+1. **Check container status:** `docker compose ps`
+2. **Read relevant configs** before modifying
+3. **Use Shellder scripts** when available (`shellder.sh`)
+4. **Never modify:** `mysql_data/`, `*.db` files, `*-default.*` templates
+
+## MCP Server
+
+Shellder MCP server available at `Shellder/mcp-server/`
+- Provides: diagnose, docker, sql, logs, exec, file read/write
+- Connects to Shellder service at http://localhost:5050
+- See `AI/MCP_SERVER.md` for full documentation
+
+## Common Commands
+
+```bash
+# Stack management
+docker compose up -d          # Start all
+docker compose down           # Stop all
+./shellder.sh --status        # Check status
+
+# Logs
+docker compose logs -f <service>
+bash Shellder/logs.sh
+
+# Validation
+bash Shellder/check.sh
+```
+
+## Coding Conventions
+
+- Shell scripts use bash
+- Python uses Flask + eventlet
+- Configs are TOML or JSON
+- Docker Compose for orchestration
+- Use existing patterns from codebase

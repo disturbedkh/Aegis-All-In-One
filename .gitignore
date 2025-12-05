@@ -14,3 +14,7 @@ Shellder/.gui_pid
 Shellder/gui_server.log
 Shellder/shellder.db
 Shellder/shellder.log
+
+# MCP Server
+Shellder/mcp-server/node_modules/
+Shellder/mcp-server/package-lock.json
