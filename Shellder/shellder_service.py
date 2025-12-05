@@ -14416,6 +14416,363 @@ def api_file_content():
     except Exception as e:
         return jsonify({'error': str(e)})
 
+
+@app.route('/api/files/info')
+def api_file_info():
+    """Get detailed file information including permissions and ownership"""
+    path = request.args.get('path', '')
+    full_path = AEGIS_ROOT / path
+    
+    if not full_path.exists():
+        return jsonify({'error': 'Path not found'})
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'error': 'Access denied'})
+    
+    try:
+        stat_info = full_path.stat()
+        import pwd
+        import grp
+        
+        # Get owner and group names
+        try:
+            owner = pwd.getpwuid(stat_info.st_uid).pw_name
+        except:
+            owner = str(stat_info.st_uid)
+        
+        try:
+            group = grp.getgrgid(stat_info.st_gid).gr_name
+        except:
+            group = str(stat_info.st_gid)
+        
+        # Format permissions
+        mode = stat_info.st_mode
+        perms = oct(mode)[-3:]
+        
+        return jsonify({
+            'path': path,
+            'name': full_path.name,
+            'type': 'directory' if full_path.is_dir() else 'file',
+            'size': stat_info.st_size,
+            'owner': owner,
+            'group': group,
+            'uid': stat_info.st_uid,
+            'gid': stat_info.st_gid,
+            'permissions': perms,
+            'permissions_octal': oct(mode),
+            'modified': datetime.fromtimestamp(stat_info.st_mtime).isoformat(),
+            'created': datetime.fromtimestamp(stat_info.st_ctime).isoformat(),
+            'readable': os.access(full_path, os.R_OK),
+            'writable': os.access(full_path, os.W_OK),
+            'executable': os.access(full_path, os.X_OK)
+        })
+    except Exception as e:
+        return jsonify({'error': str(e)})
+
+
+@app.route('/api/files/save', methods=['POST'])
+def api_file_save():
+    """Save file content"""
+    data = request.json or {}
+    path = data.get('path', '')
+    content = data.get('content', '')
+    
+    if not path:
+        return jsonify({'success': False, 'error': 'Path is required'})
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    try:
+        success, error = safe_write_file(str(full_path), content)
+        if success:
+            return jsonify({'success': True, 'message': f'Saved {path}'})
+        else:
+            return jsonify({'success': False, 'error': error})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/create', methods=['POST'])
+def api_file_create():
+    """Create a new file (touch)"""
+    data = request.json or {}
+    path = data.get('path', '')
+    filename = data.get('filename', '')
+    
+    if not filename:
+        return jsonify({'success': False, 'error': 'Filename is required'})
+    
+    full_path = AEGIS_ROOT / path / filename
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if full_path.exists():
+        return jsonify({'success': False, 'error': 'File already exists'})
+    
+    try:
+        full_path.touch()
+        # Fix ownership
+        result = subprocess.run(['sudo', 'chown', f'{os.getuid()}:{os.getgid()}', str(full_path)],
+                               capture_output=True, timeout=5)
+        return jsonify({'success': True, 'message': f'Created {filename}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/mkdir', methods=['POST'])
+def api_file_mkdir():
+    """Create a new directory"""
+    data = request.json or {}
+    path = data.get('path', '')
+    dirname = data.get('dirname', '')
+    
+    if not dirname:
+        return jsonify({'success': False, 'error': 'Directory name is required'})
+    
+    full_path = AEGIS_ROOT / path / dirname
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if full_path.exists():
+        return jsonify({'success': False, 'error': 'Directory already exists'})
+    
+    try:
+        full_path.mkdir(parents=True)
+        return jsonify({'success': True, 'message': f'Created directory {dirname}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/delete', methods=['POST'])
+def api_file_delete():
+    """Delete a file or directory"""
+    data = request.json or {}
+    path = data.get('path', '')
+    
+    if not path:
+        return jsonify({'success': False, 'error': 'Path is required'})
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not full_path.exists():
+        return jsonify({'success': False, 'error': 'Path not found'})
+    
+    # Prevent deleting critical files
+    protected = ['.env', 'docker-compose.yaml', 'docker-compose.yml', 'Shellder']
+    if full_path.name in protected or str(path) in protected:
+        return jsonify({'success': False, 'error': 'Cannot delete protected file/directory'})
+    
+    try:
+        if full_path.is_dir():
+            import shutil
+            shutil.rmtree(full_path)
+            return jsonify({'success': True, 'message': f'Deleted directory {path}'})
+        else:
+            full_path.unlink()
+            return jsonify({'success': True, 'message': f'Deleted {path}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/rename', methods=['POST'])
+def api_file_rename():
+    """Rename a file or directory"""
+    data = request.json or {}
+    path = data.get('path', '')
+    new_name = data.get('new_name', '')
+    
+    if not path or not new_name:
+        return jsonify({'success': False, 'error': 'Path and new name are required'})
+    
+    full_path = AEGIS_ROOT / path
+    new_path = full_path.parent / new_name
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+        new_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not full_path.exists():
+        return jsonify({'success': False, 'error': 'Path not found'})
+    
+    if new_path.exists():
+        return jsonify({'success': False, 'error': 'Target already exists'})
+    
+    try:
+        full_path.rename(new_path)
+        return jsonify({'success': True, 'message': f'Renamed to {new_name}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/chown', methods=['POST'])
+def api_file_chown():
+    """Change file ownership"""
+    data = request.json or {}
+    path = data.get('path', '')
+    owner = data.get('owner', '')
+    recursive = data.get('recursive', False)
+    
+    if not path:
+        return jsonify({'success': False, 'error': 'Path is required'})
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not full_path.exists():
+        return jsonify({'success': False, 'error': 'Path not found'})
+    
+    # Default to current user if no owner specified
+    if not owner:
+        import pwd
+        owner = pwd.getpwuid(os.getuid()).pw_name
+    
+    try:
+        cmd = ['sudo', 'chown']
+        if recursive and full_path.is_dir():
+            cmd.append('-R')
+        cmd.extend([owner, str(full_path)])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return jsonify({'success': True, 'message': f'Changed ownership to {owner}'})
+        else:
+            return jsonify({'success': False, 'error': result.stderr or 'Failed to change ownership'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/chmod', methods=['POST'])
+def api_file_chmod():
+    """Change file permissions"""
+    data = request.json or {}
+    path = data.get('path', '')
+    mode = data.get('mode', '')  # e.g., '755', '644'
+    recursive = data.get('recursive', False)
+    
+    if not path or not mode:
+        return jsonify({'success': False, 'error': 'Path and mode are required'})
+    
+    # Validate mode
+    if not mode.isdigit() or len(mode) != 3:
+        return jsonify({'success': False, 'error': 'Invalid mode format (use 3 digits like 755)'})
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not full_path.exists():
+        return jsonify({'success': False, 'error': 'Path not found'})
+    
+    try:
+        cmd = ['sudo', 'chmod']
+        if recursive and full_path.is_dir():
+            cmd.append('-R')
+        cmd.extend([mode, str(full_path)])
+        
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        if result.returncode == 0:
+            return jsonify({'success': True, 'message': f'Changed permissions to {mode}'})
+        else:
+            return jsonify({'success': False, 'error': result.stderr or 'Failed to change permissions'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/copy', methods=['POST'])
+def api_file_copy():
+    """Copy a file or directory"""
+    data = request.json or {}
+    source = data.get('source', '')
+    dest = data.get('dest', '')
+    
+    if not source or not dest:
+        return jsonify({'success': False, 'error': 'Source and destination are required'})
+    
+    source_path = AEGIS_ROOT / source
+    dest_path = AEGIS_ROOT / dest
+    
+    # Security check
+    try:
+        source_path.resolve().relative_to(AEGIS_ROOT.resolve())
+        dest_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'success': False, 'error': 'Access denied'})
+    
+    if not source_path.exists():
+        return jsonify({'success': False, 'error': 'Source not found'})
+    
+    try:
+        import shutil
+        if source_path.is_dir():
+            shutil.copytree(source_path, dest_path)
+        else:
+            shutil.copy2(source_path, dest_path)
+        return jsonify({'success': True, 'message': f'Copied to {dest}'})
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
+
+@app.route('/api/files/download')
+def api_file_download():
+    """Download a file"""
+    path = request.args.get('path', '')
+    
+    if not path:
+        return jsonify({'error': 'Path is required'}), 400
+    
+    full_path = AEGIS_ROOT / path
+    
+    # Security check
+    try:
+        full_path.resolve().relative_to(AEGIS_ROOT.resolve())
+    except ValueError:
+        return jsonify({'error': 'Access denied'}), 403
+    
+    if not full_path.exists() or not full_path.is_file():
+        return jsonify({'error': 'File not found'}), 404
+    
+    try:
+        from flask import send_file
+        return send_file(full_path, as_attachment=True, download_name=full_path.name)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
 @app.route('/api/stats/live')
 def api_stats_live():
     """Get all live statistics"""

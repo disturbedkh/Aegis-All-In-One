@@ -683,6 +683,8 @@ function navigateTo(page) {
         loadContainerDetails();
     } else if (page === 'fletchling') {
         loadFletchlingStatus();
+    } else if (page === 'files') {
+        navigateToPath(''); // Start at Aegis root
     }
 }
 
@@ -3167,9 +3169,14 @@ function formatDuration(seconds) {
 
 let currentFilePath = '';
 
+// Current file being edited or selected
+let selectedFilePath = null;
+
 async function navigateToPath(path) {
-    currentFilePath = path;
-    document.getElementById('currentPath').textContent = '/' + path || '/';
+    currentFilePath = path || '';
+    
+    // Update breadcrumb
+    updateBreadcrumb(path);
     
     const container = document.getElementById('fileList');
     container.innerHTML = '<div class="loading">Loading...</div>';
@@ -3182,35 +3189,430 @@ async function navigateToPath(path) {
             return;
         }
         
+        // Update file count
+        const countEl = document.getElementById('fileCount');
+        if (countEl) {
+            countEl.textContent = `${data.files?.length || 0} items`;
+        }
+        
         if (!data.files || data.files.length === 0) {
-            container.innerHTML = '<div class="text-muted">Empty directory</div>';
+            container.innerHTML = '<div class="text-muted" style="padding: 20px; text-align: center;">📂 Empty directory</div>';
             return;
         }
         
         container.innerHTML = data.files.map(f => {
             const icon = f.type === 'directory' ? '📁' : getFileIcon(f.name);
-            const sizeStr = f.type === 'file' ? formatBytes(f.size) : '';
-            const clickAction = f.type === 'directory' 
-                ? `navigateToPath('${path ? path + '/' : ''}${f.name}')`
-                : `viewFile('${path ? path + '/' : ''}${f.name}')`;
+            const sizeStr = f.type === 'file' ? formatBytes(f.size) : '-';
+            const fullPath = path ? `${path}/${f.name}` : f.name;
+            const modifiedDate = f.modified ? new Date(f.modified).toLocaleString() : '-';
             
             return `
-                <div class="file-item ${f.type}" onclick="${clickAction}">
+                <div class="file-item ${f.type}" data-path="${escapeHtml(fullPath)}" data-type="${f.type}">
                     <span class="file-icon">${icon}</span>
-                    <span class="file-name">${escapeHtml(f.name)}</span>
+                    <span class="file-name" onclick="${f.type === 'directory' ? `navigateToPath('${fullPath}')` : `editFile('${fullPath}')`}">${escapeHtml(f.name)}</span>
                     <span class="file-size">${sizeStr}</span>
+                    <span class="file-modified">${modifiedDate}</span>
+                    <div class="file-actions">
+                        ${f.type === 'file' ? `
+                            <button class="btn btn-xs" onclick="editFile('${fullPath}')" title="Edit">✏️</button>
+                            <button class="btn btn-xs" onclick="downloadFile('${fullPath}')" title="Download">⬇️</button>
+                        ` : ''}
+                        <button class="btn btn-xs" onclick="showFileInfo('${fullPath}')" title="Properties">ℹ️</button>
+                        <button class="btn btn-xs" onclick="showRenameModal('${fullPath}', '${f.name}')" title="Rename">✏️</button>
+                        <button class="btn btn-xs btn-danger" onclick="deleteFile('${fullPath}', '${f.type}')" title="Delete">🗑️</button>
+                    </div>
                 </div>
             `;
         }).join('');
     } catch (error) {
         container.innerHTML = '<div class="text-danger">Failed to load files</div>';
+        console.error('File list error:', error);
     }
+}
+
+function updateBreadcrumb(path) {
+    const breadcrumb = document.getElementById('pathBreadcrumb');
+    if (!breadcrumb) return;
+    
+    let html = '<span class="breadcrumb-item" onclick="navigateToPath(\'\')">Aegis-All-In-One</span>';
+    
+    if (path) {
+        const parts = path.split('/').filter(p => p);
+        let cumPath = '';
+        
+        for (const part of parts) {
+            cumPath += (cumPath ? '/' : '') + part;
+            html += `<span class="breadcrumb-separator">/</span>`;
+            html += `<span class="breadcrumb-item" onclick="navigateToPath('${cumPath}')">${escapeHtml(part)}</span>`;
+        }
+    }
+    
+    breadcrumb.innerHTML = html;
 }
 
 function navigateUp() {
     const parts = currentFilePath.split('/').filter(p => p);
     parts.pop();
     navigateToPath(parts.join('/'));
+}
+
+function refreshFiles() {
+    navigateToPath(currentFilePath);
+}
+
+// Edit file in text editor
+async function editFile(path) {
+    selectedFilePath = path;
+    
+    try {
+        const data = await fetchAPI(`/api/file?path=${encodeURIComponent(path)}`);
+        
+        if (data.error) {
+            showToast(data.error, 'error');
+            return;
+        }
+        
+        document.getElementById('editorFileName').textContent = `📝 ${path.split('/').pop()}`;
+        document.getElementById('fileEditorContent').value = data.content || '';
+        document.getElementById('editorFileInfo').textContent = `Path: ${path}`;
+        document.getElementById('fileEditorModal').style.display = 'flex';
+    } catch (e) {
+        showToast('Failed to load file: ' + e.message, 'error');
+    }
+}
+
+function closeFileEditor() {
+    document.getElementById('fileEditorModal').style.display = 'none';
+    selectedFilePath = null;
+}
+
+async function saveFileContent() {
+    if (!selectedFilePath) return;
+    
+    const content = document.getElementById('fileEditorContent').value;
+    
+    try {
+        const result = await fetchAPI('/api/files/save', {
+            method: 'POST',
+            body: JSON.stringify({ path: selectedFilePath, content })
+        });
+        
+        if (result.success) {
+            showToast('File saved successfully', 'success');
+            closeFileEditor();
+        } else {
+            showToast(result.error || 'Failed to save file', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Create new file
+function showCreateFileModal() {
+    document.getElementById('newFileName').value = '';
+    document.getElementById('createFileModal').style.display = 'flex';
+    document.getElementById('newFileName').focus();
+}
+
+function closeCreateFileModal() {
+    document.getElementById('createFileModal').style.display = 'none';
+}
+
+async function createNewFile() {
+    const filename = document.getElementById('newFileName').value.trim();
+    if (!filename) {
+        showToast('Please enter a filename', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/files/create', {
+            method: 'POST',
+            body: JSON.stringify({ path: currentFilePath, filename })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            closeCreateFileModal();
+            refreshFiles();
+            // Open for editing
+            const fullPath = currentFilePath ? `${currentFilePath}/${filename}` : filename;
+            editFile(fullPath);
+        } else {
+            showToast(result.error || 'Failed to create file', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Create new folder
+function showCreateFolderModal() {
+    document.getElementById('newFolderName').value = '';
+    document.getElementById('createFolderModal').style.display = 'flex';
+    document.getElementById('newFolderName').focus();
+}
+
+function closeCreateFolderModal() {
+    document.getElementById('createFolderModal').style.display = 'none';
+}
+
+async function createNewFolder() {
+    const dirname = document.getElementById('newFolderName').value.trim();
+    if (!dirname) {
+        showToast('Please enter a folder name', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/files/mkdir', {
+            method: 'POST',
+            body: JSON.stringify({ path: currentFilePath, dirname })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            closeCreateFolderModal();
+            refreshFiles();
+        } else {
+            showToast(result.error || 'Failed to create folder', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Delete file/folder
+async function deleteFile(path, type) {
+    const name = path.split('/').pop();
+    const typeLabel = type === 'directory' ? 'folder' : 'file';
+    
+    if (!confirm(`Are you sure you want to delete ${typeLabel} "${name}"?\n\nThis action cannot be undone.`)) {
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/files/delete', {
+            method: 'POST',
+            body: JSON.stringify({ path })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            refreshFiles();
+        } else {
+            showToast(result.error || 'Failed to delete', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Rename file/folder
+function showRenameModal(path, currentName) {
+    selectedFilePath = path;
+    document.getElementById('renameInput').value = currentName;
+    document.getElementById('renameModal').style.display = 'flex';
+    document.getElementById('renameInput').focus();
+    document.getElementById('renameInput').select();
+}
+
+function closeRenameModal() {
+    document.getElementById('renameModal').style.display = 'none';
+    selectedFilePath = null;
+}
+
+async function confirmRename() {
+    if (!selectedFilePath) return;
+    
+    const newName = document.getElementById('renameInput').value.trim();
+    if (!newName) {
+        showToast('Please enter a new name', 'warning');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/files/rename', {
+            method: 'POST',
+            body: JSON.stringify({ path: selectedFilePath, new_name: newName })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            closeRenameModal();
+            refreshFiles();
+        } else {
+            showToast(result.error || 'Failed to rename', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// File info/properties
+async function showFileInfo(path) {
+    selectedFilePath = path;
+    
+    try {
+        const data = await fetchAPI(`/api/files/info?path=${encodeURIComponent(path)}`);
+        
+        if (data.error) {
+            showToast(data.error, 'error');
+            return;
+        }
+        
+        const content = document.getElementById('fileInfoContent');
+        content.innerHTML = `
+            <div class="file-info-row">
+                <span class="file-info-label">Name</span>
+                <span class="file-info-value">${escapeHtml(data.name)}</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Type</span>
+                <span class="file-info-value">${data.type}</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Size</span>
+                <span class="file-info-value">${formatBytes(data.size)}</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Owner</span>
+                <span class="file-info-value">${data.owner}:${data.group}</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Permissions</span>
+                <span class="file-info-value">${data.permissions} (${data.permissions_octal})</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Modified</span>
+                <span class="file-info-value">${new Date(data.modified).toLocaleString()}</span>
+            </div>
+            <div class="file-info-row">
+                <span class="file-info-label">Access</span>
+                <span class="file-info-value">
+                    ${data.readable ? '✅ Read' : '❌ Read'} 
+                    ${data.writable ? '✅ Write' : '❌ Write'} 
+                    ${data.executable ? '✅ Exec' : '❌ Exec'}
+                </span>
+            </div>
+        `;
+        
+        document.getElementById('fileInfoPanel').style.display = 'block';
+    } catch (e) {
+        showToast('Failed to get file info: ' + e.message, 'error');
+    }
+}
+
+function closeFileInfo() {
+    document.getElementById('fileInfoPanel').style.display = 'none';
+}
+
+// Change ownership
+function changeOwnership() {
+    document.getElementById('chownInput').value = '';
+    document.getElementById('chownRecursive').checked = false;
+    document.getElementById('chownModal').style.display = 'flex';
+}
+
+function closeChownModal() {
+    document.getElementById('chownModal').style.display = 'none';
+}
+
+async function applyChown() {
+    if (!selectedFilePath) return;
+    
+    const owner = document.getElementById('chownInput').value.trim();
+    const recursive = document.getElementById('chownRecursive').checked;
+    
+    try {
+        const result = await fetchAPI('/api/files/chown', {
+            method: 'POST',
+            body: JSON.stringify({ path: selectedFilePath, owner, recursive })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            closeChownModal();
+            showFileInfo(selectedFilePath); // Refresh info
+        } else {
+            showToast(result.error || 'Failed to change ownership', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Change permissions
+function changePermissions() {
+    // Parse current permissions and set checkboxes
+    document.getElementById('chmod-owner-r').checked = true;
+    document.getElementById('chmod-owner-w').checked = true;
+    document.getElementById('chmod-owner-x').checked = true;
+    document.getElementById('chmod-group-r').checked = true;
+    document.getElementById('chmod-group-x').checked = true;
+    document.getElementById('chmod-other-r').checked = true;
+    document.getElementById('chmod-other-x').checked = true;
+    document.getElementById('chmodRecursive').checked = false;
+    
+    updateChmodPreview();
+    document.getElementById('chmodModal').style.display = 'flex';
+    
+    // Add event listeners to update preview
+    document.querySelectorAll('#chmodModal input[type="checkbox"]').forEach(cb => {
+        cb.onchange = updateChmodPreview;
+    });
+}
+
+function updateChmodPreview() {
+    let owner = 0, group = 0, other = 0;
+    
+    if (document.getElementById('chmod-owner-r').checked) owner += 4;
+    if (document.getElementById('chmod-owner-w').checked) owner += 2;
+    if (document.getElementById('chmod-owner-x').checked) owner += 1;
+    
+    if (document.getElementById('chmod-group-r').checked) group += 4;
+    if (document.getElementById('chmod-group-w').checked) group += 2;
+    if (document.getElementById('chmod-group-x').checked) group += 1;
+    
+    if (document.getElementById('chmod-other-r').checked) other += 4;
+    if (document.getElementById('chmod-other-w').checked) other += 2;
+    if (document.getElementById('chmod-other-x').checked) other += 1;
+    
+    document.getElementById('chmodPreview').textContent = `${owner}${group}${other}`;
+}
+
+function closeChmodModal() {
+    document.getElementById('chmodModal').style.display = 'none';
+}
+
+async function applyChmod() {
+    if (!selectedFilePath) return;
+    
+    const mode = document.getElementById('chmodPreview').textContent;
+    const recursive = document.getElementById('chmodRecursive').checked;
+    
+    try {
+        const result = await fetchAPI('/api/files/chmod', {
+            method: 'POST',
+            body: JSON.stringify({ path: selectedFilePath, mode, recursive })
+        });
+        
+        if (result.success) {
+            showToast(result.message, 'success');
+            closeChmodModal();
+            showFileInfo(selectedFilePath); // Refresh info
+        } else {
+            showToast(result.error || 'Failed to change permissions', 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Download file
+function downloadFile(path) {
+    window.open(`/api/files/download?path=${encodeURIComponent(path)}`, '_blank');
 }
 
 function getFileIcon(filename) {

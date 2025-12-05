@@ -2256,34 +2256,199 @@
                 </div>
             </div>
             
-            <!-- Files Page -->
+            <!-- Files Page - Comprehensive File Manager -->
             <div id="page-files" class="page">
-                <div class="card full-height">
+                <div class="card full-height file-manager-card">
                     <div class="card-header">
-                        <h2>File Browser</h2>
+                        <h2>📁 File Manager</h2>
                         <div class="card-actions">
-                            <button class="btn btn-sm" onclick="navigateToPath('')">🏠 Root</button>
-                            <button class="btn btn-sm" onclick="navigateUp()">⬆️ Up</button>
+                            <button class="btn btn-sm" onclick="navigateToPath('')" title="Go to Aegis root">🏠 Root</button>
+                            <button class="btn btn-sm" onclick="navigateUp()" title="Go up one level">⬆️ Up</button>
+                            <button class="btn btn-sm" onclick="refreshFiles()" title="Refresh">🔄</button>
                         </div>
                     </div>
                     <div class="card-body">
-                        <div class="file-path-bar">
-                            <span class="path-label">Path:</span>
-                            <span id="currentPath" class="current-path">/</span>
+                        <!-- File Toolbar -->
+                        <div class="file-toolbar">
+                            <div class="toolbar-left">
+                                <button class="btn btn-sm btn-primary" onclick="showCreateFileModal()" title="Create new file">
+                                    📄 New File
+                                </button>
+                                <button class="btn btn-sm btn-primary" onclick="showCreateFolderModal()" title="Create new folder">
+                                    📁 New Folder
+                                </button>
+                            </div>
+                            <div class="toolbar-right">
+                                <span class="file-count" id="fileCount">0 items</span>
+                            </div>
                         </div>
-                        <div id="fileList" class="file-list">
+                        
+                        <!-- Path Bar -->
+                        <div class="file-path-bar">
+                            <span class="path-label">📂</span>
+                            <div class="breadcrumb" id="pathBreadcrumb">
+                                <span class="breadcrumb-item" onclick="navigateToPath('')">Aegis-All-In-One</span>
+                            </div>
+                        </div>
+                        
+                        <!-- File List -->
+                        <div id="fileList" class="file-list enhanced">
                             <div class="loading">Loading files...</div>
                         </div>
                     </div>
                 </div>
                 
-                <!-- File Viewer Modal Content -->
-                <div id="fileViewer" class="file-viewer" style="display: none;">
-                    <div class="file-viewer-header">
-                        <span id="fileViewerName">filename.txt</span>
-                        <button class="btn btn-sm" onclick="closeFileViewer()">✕ Close</button>
+                <!-- File Editor Modal -->
+                <div id="fileEditorModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-large">
+                        <div class="modal-header">
+                            <h3 id="editorFileName">📝 Edit File</h3>
+                            <button class="btn btn-sm" onclick="closeFileEditor()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <textarea id="fileEditorContent" class="file-editor-textarea" spellcheck="false"></textarea>
+                        </div>
+                        <div class="modal-footer">
+                            <div class="editor-info">
+                                <span id="editorFileInfo">-</span>
+                            </div>
+                            <div class="editor-actions">
+                                <button class="btn btn-secondary" onclick="closeFileEditor()">Cancel</button>
+                                <button class="btn btn-primary" onclick="saveFileContent()">💾 Save</button>
+                            </div>
+                        </div>
                     </div>
-                    <pre id="fileViewerContent" class="file-content"></pre>
+                </div>
+                
+                <!-- File Info Panel -->
+                <div id="fileInfoPanel" class="file-info-panel" style="display: none;">
+                    <div class="panel-header">
+                        <h4>📋 File Properties</h4>
+                        <button class="btn btn-sm" onclick="closeFileInfo()">✕</button>
+                    </div>
+                    <div class="panel-body" id="fileInfoContent">
+                        Loading...
+                    </div>
+                    <div class="panel-footer">
+                        <button class="btn btn-sm btn-primary" onclick="changeOwnership()">👤 Change Owner</button>
+                        <button class="btn btn-sm btn-primary" onclick="changePermissions()">🔒 Chmod</button>
+                    </div>
+                </div>
+                
+                <!-- Create File Modal -->
+                <div id="createFileModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>📄 Create New File</h3>
+                            <button class="btn btn-sm" onclick="closeCreateFileModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="text" id="newFileName" class="form-input" placeholder="Enter filename (e.g., config.json)">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeCreateFileModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="createNewFile()">Create</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Create Folder Modal -->
+                <div id="createFolderModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>📁 Create New Folder</h3>
+                            <button class="btn btn-sm" onclick="closeCreateFolderModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="text" id="newFolderName" class="form-input" placeholder="Enter folder name">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeCreateFolderModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="createNewFolder()">Create</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Rename Modal -->
+                <div id="renameModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>✏️ Rename</h3>
+                            <button class="btn btn-sm" onclick="closeRenameModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="text" id="renameInput" class="form-input" placeholder="New name">
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeRenameModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="confirmRename()">Rename</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chmod Modal -->
+                <div id="chmodModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>🔒 Change Permissions</h3>
+                            <button class="btn btn-sm" onclick="closeChmodModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <div class="chmod-grid">
+                                <div class="chmod-section">
+                                    <label>Owner</label>
+                                    <div class="chmod-checkboxes">
+                                        <label><input type="checkbox" id="chmod-owner-r"> Read</label>
+                                        <label><input type="checkbox" id="chmod-owner-w"> Write</label>
+                                        <label><input type="checkbox" id="chmod-owner-x"> Execute</label>
+                                    </div>
+                                </div>
+                                <div class="chmod-section">
+                                    <label>Group</label>
+                                    <div class="chmod-checkboxes">
+                                        <label><input type="checkbox" id="chmod-group-r"> Read</label>
+                                        <label><input type="checkbox" id="chmod-group-w"> Write</label>
+                                        <label><input type="checkbox" id="chmod-group-x"> Execute</label>
+                                    </div>
+                                </div>
+                                <div class="chmod-section">
+                                    <label>Others</label>
+                                    <div class="chmod-checkboxes">
+                                        <label><input type="checkbox" id="chmod-other-r"> Read</label>
+                                        <label><input type="checkbox" id="chmod-other-w"> Write</label>
+                                        <label><input type="checkbox" id="chmod-other-x"> Execute</label>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="chmod-preview">
+                                Mode: <code id="chmodPreview">755</code>
+                            </div>
+                            <label><input type="checkbox" id="chmodRecursive"> Apply recursively (for directories)</label>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeChmodModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="applyChmod()">Apply</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Chown Modal -->
+                <div id="chownModal" class="modal" style="display: none;">
+                    <div class="modal-content modal-small">
+                        <div class="modal-header">
+                            <h3>👤 Change Ownership</h3>
+                            <button class="btn btn-sm" onclick="closeChownModal()">✕</button>
+                        </div>
+                        <div class="modal-body">
+                            <input type="text" id="chownInput" class="form-input" placeholder="owner:group (e.g., pokemap:pokemap)">
+                            <div class="form-hint">Leave empty to use current user</div>
+                            <label><input type="checkbox" id="chownRecursive"> Apply recursively (for directories)</label>
+                        </div>
+                        <div class="modal-footer">
+                            <button class="btn btn-secondary" onclick="closeChownModal()">Cancel</button>
+                            <button class="btn btn-primary" onclick="applyChown()">Apply</button>
+                        </div>
+                    </div>
                 </div>
             </div>
         </main>
