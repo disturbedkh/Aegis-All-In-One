@@ -3626,21 +3626,24 @@ async function navigateToPath(path) {
             const sizeStr = f.type === 'file' ? formatBytes(f.size) : '-';
             const fullPath = path ? `${path}/${f.name}` : f.name;
             const modifiedDate = f.modified ? new Date(f.modified).toLocaleString() : '-';
+            // Escape for use in data attributes and onclick - use base64 to avoid all escaping issues
+            const pathB64 = btoa(unescape(encodeURIComponent(fullPath)));
+            const nameB64 = btoa(unescape(encodeURIComponent(f.name)));
             
             return `
                 <div class="file-item ${f.type}" data-path="${escapeHtml(fullPath)}" data-type="${f.type}">
                     <span class="file-icon">${icon}</span>
-                    <span class="file-name" onclick="${f.type === 'directory' ? `navigateToPath('${fullPath}')` : `editFile('${fullPath}')`}">${escapeHtml(f.name)}</span>
+                    <span class="file-name" onclick="handleFileClick('${pathB64}', '${f.type}')">${escapeHtml(f.name)}</span>
                     <span class="file-size">${sizeStr}</span>
                     <span class="file-modified">${modifiedDate}</span>
                     <div class="file-actions">
                         ${f.type === 'file' ? `
-                            <button class="btn btn-xs" onclick="editFile('${fullPath}')" title="Edit">✏️</button>
-                            <button class="btn btn-xs" onclick="downloadFile('${fullPath}')" title="Download">⬇️</button>
+                            <button class="btn btn-xs" onclick="handleFileEdit('${pathB64}')" title="Edit">✏️</button>
+                            <button class="btn btn-xs" onclick="handleFileDownload('${pathB64}')" title="Download">⬇️</button>
                         ` : ''}
-                        <button class="btn btn-xs" onclick="showFileInfo('${fullPath}')" title="Properties">ℹ️</button>
-                        <button class="btn btn-xs" onclick="showRenameModal('${fullPath}', '${f.name}')" title="Rename">✏️</button>
-                        <button class="btn btn-xs btn-danger" onclick="deleteFile('${fullPath}', '${f.type}')" title="Delete">🗑️</button>
+                        <button class="btn btn-xs" onclick="handleFileInfo('${pathB64}')" title="Properties">ℹ️</button>
+                        <button class="btn btn-xs" onclick="handleFileRename('${pathB64}', '${nameB64}')" title="Rename">✏️</button>
+                        <button class="btn btn-xs btn-danger" onclick="handleFileDelete('${pathB64}', '${f.type}')" title="Delete">🗑️</button>
                     </div>
                 </div>
             `;
@@ -3679,6 +3682,48 @@ function navigateUp() {
 
 function refreshFiles() {
     navigateToPath(currentFilePath);
+}
+
+// Base64 decode helper for file paths
+function decodeFilePath(b64) {
+    try {
+        return decodeURIComponent(escape(atob(b64)));
+    } catch (e) {
+        console.error('Failed to decode path:', e);
+        return '';
+    }
+}
+
+// Handler functions that decode base64 paths
+function handleFileClick(pathB64, type) {
+    const path = decodeFilePath(pathB64);
+    if (type === 'directory') {
+        navigateToPath(path);
+    } else {
+        editFile(path);
+    }
+}
+
+function handleFileEdit(pathB64) {
+    editFile(decodeFilePath(pathB64));
+}
+
+function handleFileDownload(pathB64) {
+    downloadFile(decodeFilePath(pathB64));
+}
+
+function handleFileInfo(pathB64) {
+    showFileInfo(decodeFilePath(pathB64));
+}
+
+function handleFileRename(pathB64, nameB64) {
+    const path = decodeFilePath(pathB64);
+    const name = decodeFilePath(nameB64);
+    showRenameModal(path, name);
+}
+
+function handleFileDelete(pathB64, type) {
+    deleteFile(decodeFilePath(pathB64), type);
 }
 
 // Edit file in text editor
