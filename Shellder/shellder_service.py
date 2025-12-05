@@ -9955,17 +9955,17 @@ SHARED_VARIABLE_PATHS = {
         '.env': 'MYSQL_USER',
         'unown/dragonite_config.toml': 'db.dragonite.user',
         'unown/golbat_config.toml': 'database.user',
-        'reactmap/local.json': 'database.username',
+        'reactmap/local.json': 'database.schemas.1.username',  # schemas[1] has DB config
         'unown/rotom_config.json': None,  # Rotom doesn't use DB directly
-        'Poracle/config/local.json': 'database.client',
+        'Poracle/config/local.json': 'database.client.user',
         'init/01.sql': None  # Special handling via template
     },
     'MYSQL_PASSWORD': {
         '.env': 'MYSQL_PASSWORD',
         'unown/dragonite_config.toml': 'db.dragonite.password',
         'unown/golbat_config.toml': 'database.password',
-        'reactmap/local.json': 'database.password',
-        'Poracle/config/local.json': 'database.password',
+        'reactmap/local.json': 'database.schemas.1.password',  # schemas[1] has DB config
+        'Poracle/config/local.json': 'database.client.password',
         'init/01.sql': None  # Special handling via template
     },
     'KOJI_SECRET': {
@@ -12536,7 +12536,12 @@ def is_default_placeholder(value):
 
 
 def parse_config_value(aegis_root, config_file, field_path):
-    """Parse a value from a config file given the field path"""
+    """Parse a value from a config file given the field path
+    
+    Supports:
+    - Dot notation for nested objects: 'db.dragonite.user'
+    - Numeric indices for arrays: 'database.schemas.1.username'
+    """
     full_path = os.path.join(aegis_root, config_file)
     
     if not os.path.exists(full_path):
@@ -12544,7 +12549,7 @@ def parse_config_value(aegis_root, config_file, field_path):
     
     try:
         if config_file.endswith('.toml'):
-            data = _parse_toml_simple(full_path)
+            data = parse_simple_toml(full_path)
             if not data:
                 return None, 'parse_error'
         elif config_file.endswith('.json'):
@@ -12557,7 +12562,14 @@ def parse_config_value(aegis_root, config_file, field_path):
         parts = field_path.split('.')
         current = data
         for part in parts:
-            if isinstance(current, dict) and part in current:
+            # Handle array indices (numeric parts)
+            if part.isdigit():
+                idx = int(part)
+                if isinstance(current, list) and idx < len(current):
+                    current = current[idx]
+                else:
+                    return None, 'index_out_of_bounds'
+            elif isinstance(current, dict) and part in current:
                 current = current[part]
             else:
                 return None, 'field_missing'
