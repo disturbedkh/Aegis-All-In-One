@@ -3516,31 +3516,8 @@ function formatBytes(bytes) {
 let xilriwsLiveStream = null;
 let xilriwsAutoScroll = true;
 
-function updateXilriwsPage(data) {
-    if (!data) return;
-    
-    // Update stats with null checks
-    const rate = data.success_rate || 0;
-    const rateEl = document.getElementById('xilSuccessRate');
-    if (rateEl) {
-        rateEl.textContent = rate.toFixed(1) + '%';
-        rateEl.className = 'stat-value ' + 
-            (rate > 80 ? 'text-success' : rate > 50 ? 'text-warning' : 'text-danger');
-    }
-    
-    setElementText('xilSuccessful', data.successful || 0);
-    setElementText('xilFailed', data.failed || 0);
-    setElementText('xilTotal', data.total_requests || 0);
-    
-    // Update error breakdown
-    setElementText('xilAuthBanned', data.auth_banned || 0);
-    setElementText('xilCode15', data.code_15 || 0);
-    setElementText('xilRateLimited', data.rate_limited || 0);
-    setElementText('xilInvalidCreds', data.invalid_credentials || 0);
-    setElementText('xilTunnelErrors', data.tunneling_errors || 0);
-    setElementText('xilTimeouts', data.timeouts || 0);
-    setElementText('xilConnRefused', data.connection_refused || 0);
-}
+// NOTE: updateXilriwsPage is defined earlier in the file (around line 1913)
+// Do not duplicate it here - the earlier version uses the correct field names
 
 async function loadProxyInfo() {
     const container = document.getElementById('proxyInfo');
