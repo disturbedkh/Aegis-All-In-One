@@ -11904,6 +11904,15 @@ def api_secrets_list():
             except:
                 pass
         
+        # Also check if it's a default placeholder value
+        default_placeholder = secret_info.get('default_placeholder', '')
+        if current_value and default_placeholder:
+            if current_value == default_placeholder or current_value in DEFAULT_PLACEHOLDERS:
+                is_default = True
+        
+        # Get target file names
+        target_files = [t['file'] for t in secret_info['targets']]
+        
         secrets_status[secret_key] = {
             'label': secret_info['label'],
             'desc': secret_info['desc'],
@@ -11911,7 +11920,9 @@ def api_secrets_list():
             'color': secret_info['color'],
             'is_default': is_default,
             'has_value': current_value is not None and current_value != '',
+            'current_value': current_value if current_value else '',
             'target_count': len(secret_info['targets']),
+            'target_files': target_files,
             'generate_length': secret_info.get('generate_length', 32)
         }
     

@@ -8982,22 +8982,41 @@ function renderSecretsPanel(data) {
         for (const info of fields) {
             const key = info.key;
             const hasGoodValue = info.has_value && !info.is_default;
+            const currentValue = info.current_value || '';
             
-            // Initialize choice
+            // Initialize choice - store current value for editing
             secretFieldChoices[key] = {
                 mode: hasGoodValue ? 'keep' : 'generate',
                 custom: '',
+                currentValue: currentValue,
                 length: info.generate_length || 32
             };
             
             const statusIcon = hasGoodValue ? '✅' : info.has_value ? '⚠️' : '❌';
+            const maskedValue = currentValue ? '•'.repeat(Math.min(currentValue.length, 20)) : '';
+            
+            // Build target files display
+            const targetFiles = info.target_files || [];
+            const targetNames = targetFiles.map(f => {
+                // Convert file path to friendly name
+                if (f.includes('dragonite')) return 'Dragonite';
+                if (f.includes('golbat')) return 'Golbat';
+                if (f.includes('rotom')) return 'Rotom';
+                if (f.includes('reactmap')) return 'ReactMap';
+                if (f.includes('koji')) return 'Koji';
+                if (f.includes('poracle')) return 'Poracle';
+                if (f === '.env') return '.env';
+                return f.split('/').pop();
+            });
+            const targetDisplay = targetNames.join(', ');
+            const targetTooltip = targetFiles.join('\\n');
             
             html += `
                 <div class="password-field-item" id="pwd-row-${key}" style="border-left: 3px solid ${info.color}">
                     <div class="field-info">
                         <div class="field-label">${info.label}</div>
                         <small class="field-desc" title="${info.desc}">${info.desc}</small>
-                        <small class="target-count" title="Syncs to ${info.target_count} config files">📄 ${info.target_count} files</small>
+                        <small class="target-count" title="${targetTooltip}">📄 ${targetDisplay}</small>
                     </div>
                     <div class="field-controls">
                         <select id="pwd-mode-${key}" onchange="onSecretModeChange('${key}')">
@@ -9005,9 +9024,16 @@ function renderSecretsPanel(data) {
                             <option value="generate" ${!hasGoodValue ? 'selected' : ''}>Generate</option>
                             <option value="custom">Custom</option>
                         </select>
+                        ${hasGoodValue ? `
+                        <span class="current-value-display" id="pwd-display-${key}" onclick="editCurrentSecret('${key}')" title="Click to edit">
+                            <span class="masked-value" id="pwd-masked-${key}">${maskedValue}</span>
+                            <button type="button" class="btn btn-xs show-btn" onclick="event.stopPropagation(); toggleSecretVisibility('${key}')" title="Show/Hide">👁</button>
+                        </span>
+                        ` : ''}
                         <input type="text" 
                                id="pwd-input-${key}" 
-                               placeholder="${hasGoodValue ? '(current value hidden)' : 'Auto-generate'}"
+                               placeholder="${hasGoodValue ? '' : 'Auto-generate'}"
+                               ${hasGoodValue ? 'style="display:none;"' : ''}
                                ${secretFieldChoices[key].mode !== 'custom' ? 'disabled' : ''}
                                class="secret-input ${hasGoodValue ? 'has-value' : info.is_default ? 'is-weak' : ''}"
                                oninput="onSecretInput('${key}')"
@@ -9032,23 +9058,62 @@ function renderSecretsPanel(data) {
 function onSecretModeChange(key) {
     const mode = document.getElementById(`pwd-mode-${key}`).value;
     const input = document.getElementById(`pwd-input-${key}`);
+    const display = document.getElementById(`pwd-display-${key}`);
     
     secretFieldChoices[key].mode = mode;
     
     if (mode === 'custom') {
         input.disabled = false;
+        input.style.display = '';
         input.value = secretFieldChoices[key].custom || '';
         input.placeholder = 'Enter value...';
         input.focus();
+        if (display) display.style.display = 'none';
     } else if (mode === 'keep') {
         input.disabled = true;
+        input.style.display = 'none';
         input.value = '';
-        input.placeholder = '••••••••';
+        if (display) display.style.display = '';
     } else { // generate
         input.disabled = true;
+        input.style.display = '';
         input.value = '';
         input.placeholder = 'Auto-generate';
+        if (display) display.style.display = 'none';
     }
+}
+
+function toggleSecretVisibility(key) {
+    const masked = document.getElementById(`pwd-masked-${key}`);
+    const currentValue = secretFieldChoices[key]?.currentValue || '';
+    
+    if (masked.dataset.visible === 'true') {
+        masked.textContent = '•'.repeat(Math.min(currentValue.length, 20));
+        masked.dataset.visible = 'false';
+    } else {
+        masked.textContent = currentValue;
+        masked.dataset.visible = 'true';
+    }
+}
+
+function editCurrentSecret(key) {
+    const select = document.getElementById(`pwd-mode-${key}`);
+    const input = document.getElementById(`pwd-input-${key}`);
+    const display = document.getElementById(`pwd-display-${key}`);
+    const currentValue = secretFieldChoices[key]?.currentValue || '';
+    
+    // Switch to custom mode with current value
+    select.value = 'custom';
+    secretFieldChoices[key].mode = 'custom';
+    secretFieldChoices[key].custom = currentValue;
+    
+    input.disabled = false;
+    input.style.display = '';
+    input.value = currentValue;
+    input.focus();
+    input.select();
+    
+    if (display) display.style.display = 'none';
 }
 
 function onSecretInput(key) {

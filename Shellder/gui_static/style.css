@@ -3131,6 +3131,52 @@ select:focus {
     text-align: center;
 }
 
+.password-field-item .current-value-display {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--bg-tertiary);
+    padding: 6px 10px;
+    border-radius: var(--radius-sm);
+    cursor: pointer;
+    border: 1px solid var(--border-color);
+    transition: all 0.2s;
+    min-width: 150px;
+    max-width: 220px;
+}
+
+.password-field-item .current-value-display:hover {
+    border-color: var(--primary);
+    background: var(--bg-secondary);
+}
+
+.password-field-item .masked-value {
+    font-family: var(--font-mono);
+    font-size: 12px;
+    color: var(--text-secondary);
+    flex: 1;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.password-field-item .show-btn {
+    padding: 2px 6px !important;
+    font-size: 10px !important;
+    opacity: 0.7;
+    flex-shrink: 0;
+}
+
+.password-field-item .show-btn:hover {
+    opacity: 1;
+}
+
+.password-field-item .target-count {
+    max-width: 180px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
 /* Responsive layout for smaller screens */
 @media (max-width: 768px) {
     .password-field-item {
