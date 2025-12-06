@@ -245,8 +245,9 @@ REST API at `http://localhost:5000/api/ai-debug/*`
 ### Remote Access
 When connecting from a different machine (e.g., Cursor on Windows to a Linux server):
 - Use the server's IP instead of `localhost`
-- Example: `http://77.237.241.111:5000/api/ai-debug/diagnose`
-- Ensure port 5000 is accessible through firewall
+- Example: `http://<your-server-ip>:5000/api/ai-debug/diagnose`
+- Ensure port 5000 is open in firewall (`sudo ufw allow 5000`)
+- Forward port through router if behind NAT
 
 ---
 

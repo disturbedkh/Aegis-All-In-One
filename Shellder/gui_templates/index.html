@@ -874,10 +874,10 @@
                     </div>
                 </div>
                 
-                <!-- AI Debug Access Section -->
+                <!-- Developer Mode Section -->
                 <div class="card ai-debug-master-card">
                     <div class="card-header">
-                        <h2>🤖 AI Debug Access</h2>
+                        <h2>🛠️ Developer Mode</h2>
                         <div class="header-actions">
                             <div class="toggle-switch-container">
                                 <label class="toggle-switch">
@@ -894,7 +894,7 @@
                             <div class="warning-icon">⚠️</div>
                             <div class="warning-content">
                                 <strong>SECURITY WARNING</strong>
-                                <p>Enabling AI Debug Access allows <strong>external systems to read/write files, execute commands, 
+                                <p>Enabling Developer Mode allows <strong>external systems to read/write files, execute commands, 
                                 and access databases</strong> on this machine through the REST API and MCP server.</p>
                                 <p><strong>Only enable this if:</strong></p>
                                 <ul>
@@ -902,15 +902,17 @@
                                     <li>You have been instructed to do so by a Pokemod or Unown# developer for debugging</li>
                                     <li>You understand that this gives complete control over your Aegis AIO stack</li>
                                 </ul>
-                                <p class="warning-note">When disabled, all AI debug API endpoints return "403 Forbidden" and external 
+                                <p class="warning-note">When disabled, all API endpoints return "403 Forbidden" and external 
                                 access is blocked. The toggle state does not persist across restarts (defaults to OFF).</p>
+                                <p class="warning-note"><strong>🌐 Network Requirements:</strong> For external AI access, ensure port 
+                                <strong id="shellderPortNote">5000</strong> is open in your firewall and forwarded through your router if behind NAT.</p>
                             </div>
                         </div>
                         
                         <!-- Status Display -->
                         <div class="ai-debug-status" id="aiDebugStatusPanel">
                             <div class="status-row">
-                                <span class="status-label">Current Status:</span>
+                                <span class="status-label">Developer Mode:</span>
                                 <span class="status-badge" id="aiDebugStatusBadge">
                                     <span class="status-dot off"></span>
                                     <span class="status-text">Secured</span>
@@ -918,10 +920,10 @@
                             </div>
                             <div class="status-row">
                                 <span class="status-label">API Endpoint:</span>
-                                <code id="aiDebugEndpoint">http://localhost:5000/api/ai-debug/*</code>
+                                <code id="aiDebugEndpoint">Loading...</code>
                             </div>
                             <div class="status-row">
-                                <span class="status-label">MCP Server:</span>
+                                <span class="status-label">External Access:</span>
                                 <span id="aiDebugMcpStatus">Disabled</span>
                             </div>
                         </div>
@@ -2686,54 +2688,28 @@
                                 Copy this entire block and paste it to your AI assistant (Claude, ChatGPT, etc.):
                             </p>
                             <div class="code-block mcp-config" style="position: relative;">
-                                <pre id="aiInstructionsBlock">## Shellder Debug API Access
-
-Shellder API URL: http://77.237.241.111:5000
-
-Use the fetch MCP tool to access these endpoints:
-
-### System Diagnostics
-GET http://77.237.241.111:5000/api/ai-debug/diagnose
-
-### Read Files  
-GET http://77.237.241.111:5000/api/ai-debug/file?path=.env
-GET http://77.237.241.111:5000/api/ai-debug/file?path=docker-compose.yaml
-
-### Execute Commands
-POST http://77.237.241.111:5000/api/ai-debug/exec
-Body: {"cmd": "docker ps"}
-
-### Docker Operations
-GET http://77.237.241.111:5000/api/ai-debug/docker?cmd=ps
-GET http://77.237.241.111:5000/api/ai-debug/docker?cmd=logs&container=dragonite&lines=50
-
-### Database Queries
-POST http://77.237.241.111:5000/api/ai-debug/sql
-Body: {"database": "golbat", "query": "SHOW TABLES"}
-
-### Get Logs
-GET http://77.237.241.111:5000/api/ai-debug/logs?type=shellder&lines=100
-
-### System Info
-GET http://77.237.241.111:5000/api/ai-debug/system</pre>
+                                <pre id="aiInstructionsBlock">Loading API instructions...</pre>
                                 <button class="btn btn-primary" onclick="copyAIInstructionsBlock()" style="position: absolute; top: 10px; right: 10px;">
                                     📋 Copy All
                                 </button>
                             </div>
                         </div>
                         
-                        <!-- Remote Access (if needed) -->
-                        <div class="remote-access-section" style="margin-top: 20px;">
-                            <h4>🌐 Remote Access (Windows → Linux)</h4>
-                            <p style="font-size: 12px; color: var(--text-secondary); margin-bottom: 10px;">
-                                If Cursor is on Windows and Shellder is on Linux, use SSH port forwarding:
+                        <!-- Network Requirements -->
+                        <div class="network-requirements-section" style="margin-top: 20px; padding: 12px; background: var(--bg-tertiary); border-radius: var(--radius-md); border: 1px solid var(--border-color);">
+                            <h4>🌐 Network Requirements for External AI Access</h4>
+                            <p style="font-size: 12px; color: var(--text-secondary); margin: 10px 0;">
+                                For AI tools (like Cursor) on another machine to connect:
                             </p>
-                            <div class="code-block">
-                                <code id="sshTunnelCmd">ssh -L 5000:localhost:5000 pokemap@77.237.241.111</code>
-                                <button class="btn btn-xs" onclick="copySSHTunnel()">📋</button>
-                            </div>
-                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 8px;">
-                                Run this in a terminal and keep it open. Then localhost:5050 will reach your Linux machine.
+                            <ul style="font-size: 12px; color: var(--text-secondary); margin-left: 20px;">
+                                <li><strong>Firewall:</strong> Open port <code id="firewallPort">5000</code> (e.g., <code>sudo ufw allow 5000</code>)</li>
+                                <li><strong>Router:</strong> Forward port <code>5000</code> to this machine's local IP if behind NAT</li>
+                                <li><strong>Alternative:</strong> Use SSH tunnel: <code id="sshTunnelCmd">ssh -L 5000:localhost:5000 user@your-server-ip</code>
+                                    <button class="btn btn-xs" onclick="copySSHTunnel()" style="margin-left: 8px;">📋</button>
+                                </li>
+                            </ul>
+                            <p style="font-size: 11px; color: var(--text-muted); margin-top: 10px;">
+                                Your detected URL: <code id="detectedApiUrl">detecting...</code>
                             </p>
                             
                             <div class="form-group" style="margin-top: 12px;">

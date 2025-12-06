@@ -410,6 +410,62 @@ async function loadDebugPage() {
     
     // Check MCP status
     checkMCPStatus();
+    
+    // Generate dynamic AI instructions with auto-detected URL
+    generateAIInstructions();
+}
+
+// Generate AI instructions with auto-detected URL
+function generateAIInstructions() {
+    const baseUrl = `http://${window.location.hostname}:${window.location.port || 5000}`;
+    const port = window.location.port || '5000';
+    
+    // Update AI instructions block
+    const instructionsBlock = document.getElementById('aiInstructionsBlock');
+    if (instructionsBlock) {
+        instructionsBlock.textContent = `## Shellder Developer Mode API
+
+Shellder API URL: ${baseUrl}
+
+Use the fetch MCP tool to access these endpoints:
+
+### System Diagnostics
+GET ${baseUrl}/api/ai-debug/diagnose
+
+### Read Files  
+GET ${baseUrl}/api/ai-debug/file?path=.env
+GET ${baseUrl}/api/ai-debug/file?path=docker-compose.yaml
+
+### Execute Commands
+POST ${baseUrl}/api/ai-debug/exec
+Body: {"cmd": "docker ps"}
+
+### Docker Operations
+GET ${baseUrl}/api/ai-debug/docker?cmd=ps
+GET ${baseUrl}/api/ai-debug/docker?cmd=logs&container=dragonite&lines=50
+
+### Database Queries
+POST ${baseUrl}/api/ai-debug/sql
+Body: {"database": "golbat", "query": "SHOW TABLES"}
+
+### Get Logs
+GET ${baseUrl}/api/ai-debug/logs?type=shellder&lines=100
+
+### System Info
+GET ${baseUrl}/api/ai-debug/system`;
+    }
+    
+    // Update firewall port
+    const firewallPort = document.getElementById('firewallPort');
+    if (firewallPort) firewallPort.textContent = port;
+    
+    // Update SSH tunnel command
+    const sshCmd = document.getElementById('sshTunnelCmd');
+    if (sshCmd) sshCmd.textContent = `ssh -L ${port}:localhost:${port} user@your-server-ip`;
+    
+    // Update detected URL
+    const detectedUrl = document.getElementById('detectedApiUrl');
+    if (detectedUrl) detectedUrl.textContent = baseUrl;
 }
 
 function loadDebugClientLogs() {

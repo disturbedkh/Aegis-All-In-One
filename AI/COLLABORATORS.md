@@ -155,7 +155,8 @@ Types:
 - **Port is 5000** (same as web dashboard), NOT 5050
 - Requires Node.js 18+
 - Cursor needs restart after MCP config changes
-- For remote servers, use actual IP: `http://77.237.241.111:5000`
+- For remote servers, use actual IP: `http://<your-server-ip>:5000`
+- The Shellder UI auto-detects and displays the correct URL
 
 ### Docker Log Parsing (CRITICAL)
 - **ANSI codes break regex!** Docker logs contain color codes like `[36m`, `[0m`

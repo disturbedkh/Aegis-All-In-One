@@ -99,7 +99,7 @@ node index.js
       "command": "node",
       "args": ["C:\\Users\\khutt\\Aegis-All-In-One\\Shellder\\mcp-server\\index.js"],
       "env": {
-        "SHELLDER_URL": "http://77.237.241.111:5000"
+        "SHELLDER_URL": "http://<your-server-ip>:5000"
       }
     }
   }

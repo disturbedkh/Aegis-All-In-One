@@ -5,7 +5,9 @@
 **Base URL:** `http://localhost:5000` (same as web dashboard)  
 **Content-Type:** `application/json`
 
-**Remote Access:** Replace `localhost` with server IP (e.g., `http://77.237.241.111:5000`)
+**Remote Access:** Replace `localhost` with server IP (e.g., `http://<your-server-ip>:5000`)
+
+**Network Requirements:** Port 5000 must be open in firewall and forwarded through router if behind NAT.
 
 ---
 

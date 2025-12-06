@@ -579,11 +579,11 @@ conn.execute("PRAGMA journal_mode = WAL")
 ### Using AI Debug API from Remote Machine
 
 ```bash
-# From Windows Cursor to Linux server at 77.237.241.111
-curl http://77.237.241.111:5000/api/ai-debug/diagnose
+# From Windows Cursor to Linux server (replace with your server's IP)
+curl http://<your-server-ip>:5000/api/ai-debug/diagnose
 
 # PowerShell example
-$response = Invoke-WebRequest -Uri "http://77.237.241.111:5000/api/ai-debug/diagnose"
+$response = Invoke-WebRequest -Uri "http://<your-server-ip>:5000/api/ai-debug/diagnose"
 $response.Content | ConvertFrom-Json
 ```
 

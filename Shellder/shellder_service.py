@@ -6643,7 +6643,7 @@ def api_debug_clear():
 
 # Feature flags - can be toggled from UI
 # Master toggle controls all AI debug access
-AI_DEBUG_ENABLED = False  # OFF by default for security
+AI_DEBUG_ENABLED = True  # ON by default during development - TODO: change to False before release
 
 AI_DEBUG_CONFIG = {
     'api_enabled': True,
