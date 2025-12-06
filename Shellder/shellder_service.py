@@ -701,26 +701,60 @@ class StackDB:
             return
         
         params = {}
+        env_vars = {}
         try:
             with open(env_file, 'r') as f:
                 for line in f:
                     line = line.strip()
                     if line and not line.startswith('#') and '=' in line:
                         key, value = line.split('=', 1)
-                        value = value.strip('"\'')
-                        if key == 'POKEMON_DB_HOST':
-                            params['host'] = value
-                        elif key == 'POKEMON_DB_PORT':
-                            params['port'] = int(value) if value else 3306
-                        elif key == 'POKEMON_DB_USER':
-                            params['user'] = value
-                        elif key == 'POKEMON_DB_PASS':
-                            params['password'] = value
-                        elif key == 'POKEMON_DB_NAME':
-                            params['database'] = value
+                        env_vars[key] = value.strip('"\'')
             
-            if params.get('host') and params.get('user'):
+            # Priority 1: POKEMON_DB_* variables (explicit config)
+            if 'POKEMON_DB_HOST' in env_vars:
+                params['host'] = env_vars['POKEMON_DB_HOST']
+            if 'POKEMON_DB_PORT' in env_vars:
+                params['port'] = int(env_vars['POKEMON_DB_PORT']) if env_vars['POKEMON_DB_PORT'] else 3306
+            if 'POKEMON_DB_USER' in env_vars:
+                params['user'] = env_vars['POKEMON_DB_USER']
+            if 'POKEMON_DB_PASS' in env_vars:
+                params['password'] = env_vars['POKEMON_DB_PASS']
+            if 'POKEMON_DB_NAME' in env_vars:
+                params['database'] = env_vars['POKEMON_DB_NAME']
+            
+            # Priority 2: MYSQL_* variables (Docker compose default)
+            # Use these if POKEMON_DB_* not set
+            if not params.get('port'):
+                params['port'] = 3306
+            if not params.get('user') and 'MYSQL_USER' in env_vars:
+                params['user'] = env_vars['MYSQL_USER']
+            if not params.get('password') and 'MYSQL_PASSWORD' in env_vars:
+                params['password'] = env_vars['MYSQL_PASSWORD']
+            
+            # Priority 3: Get database container IP if no host specified
+            # Shellder runs on host, so we need to get the container's IP
+            if not params.get('host'):
+                try:
+                    import subprocess
+                    result = subprocess.run(
+                        ['docker', 'inspect', 'database', '--format', '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if result.returncode == 0 and result.stdout.strip():
+                        params['host'] = result.stdout.strip()
+                        print(f"StackDB: Auto-detected database container IP: {params['host']}")
+                except Exception as e:
+                    print(f"StackDB: Could not get database container IP: {e}")
+            
+            if params.get('host') and params.get('user') and params.get('password'):
                 self.connection_params = params
+                print(f"StackDB: Loaded connection params - host={params['host']}, user={params['user']}")
+            else:
+                missing = []
+                if not params.get('host'): missing.append('host')
+                if not params.get('user'): missing.append('user')
+                if not params.get('password'): missing.append('password')
+                print(f"StackDB: Missing required params: {missing}")
         except Exception as e:
             print(f"Error loading MariaDB params: {e}")
     
