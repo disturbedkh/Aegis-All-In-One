@@ -12827,10 +12827,16 @@ async function loadShellderConfig() {
         const local = data.components.filter(c => c.enabled && c.local).length;
         const remote = data.components.filter(c => c.enabled && !c.local).length;
         
-        updateElement('shellderConfigStatus', data.config_loaded ? '✓ Loaded' : '✗ Not Loaded');
-        updateElement('shellderComponentsEnabled', `${enabled}/${data.components.length}`);
-        updateElement('shellderLocalComponents', local.toString());
-        updateElement('shellderRemoteComponents', remote.toString());
+        // Helper to safely update element text
+        const setElementText = (id, text) => {
+            const el = document.getElementById(id);
+            if (el) el.textContent = text;
+        };
+        
+        setElementText('shellderConfigStatus', data.config_loaded ? '✓ Loaded' : '✗ Not Loaded');
+        setElementText('shellderComponentsEnabled', `${enabled}/${data.components.length}`);
+        setElementText('shellderLocalComponents', local.toString());
+        setElementText('shellderRemoteComponents', remote.toString());
         
         // Render components grid
         renderShellderComponents(data.components);
