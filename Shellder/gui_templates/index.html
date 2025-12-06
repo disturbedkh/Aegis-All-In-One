@@ -2926,9 +2926,23 @@
                                 </div>
                             </div>
                             
-                            <div class="wizard-step" id="step-ufw" data-step="ufw">
+                            <div class="wizard-step" id="step-auth" data-step="auth">
                                 <div class="step-indicator">
                                     <span class="step-number">5</span>
+                                    <span class="step-status checking">⏳</span>
+                                </div>
+                                <div class="step-content">
+                                    <div class="step-title">Authentication</div>
+                                    <div class="step-desc">Protect sites with login (optional)</div>
+                                </div>
+                                <div class="step-action">
+                                    <button class="btn btn-sm btn-primary" onclick="showAuthSetupModal()">Configure</button>
+                                </div>
+                            </div>
+                            
+                            <div class="wizard-step" id="step-ufw" data-step="ufw">
+                                <div class="step-indicator">
+                                    <span class="step-number">6</span>
                                     <span class="step-status checking">⏳</span>
                                 </div>
                                 <div class="step-content">
@@ -4043,6 +4057,173 @@
                 </div>
             </div>
         </main>
+    </div>
+    
+    <!-- Authentication Setup Modal -->
+    <div id="authSetupModal" class="modal" style="display: none;">
+        <div class="modal-content modal-lg">
+            <div class="modal-header">
+                <h3>🔐 Authentication Setup</h3>
+                <button class="btn btn-sm" onclick="closeAuthSetupModal()">✕</button>
+            </div>
+            <div class="modal-body">
+                <div class="auth-choice-section">
+                    <p class="info-text">Choose how to protect your sites with authentication. You can use either option or both.</p>
+                    
+                    <div class="auth-options-grid">
+                        <!-- Basic Auth Option -->
+                        <div class="auth-option-card" id="basicAuthCard">
+                            <div class="auth-option-header">
+                                <span class="auth-icon">🔑</span>
+                                <h4>Basic Auth (Simple)</h4>
+                                <span class="auth-status" id="basicAuthStatus">Not Configured</span>
+                            </div>
+                            <div class="auth-option-desc">
+                                <p>Simple username/password protection using nginx's built-in basic authentication.</p>
+                                <ul class="pros-cons">
+                                    <li class="pro">✅ Easy to set up</li>
+                                    <li class="pro">✅ No extra containers</li>
+                                    <li class="pro">✅ Works immediately</li>
+                                    <li class="con">⚠️ Basic browser popup login</li>
+                                    <li class="con">⚠️ No 2FA support</li>
+                                </ul>
+                            </div>
+                            <div class="auth-option-actions">
+                                <button class="btn btn-primary" onclick="showBasicAuthSetup()">Configure Basic Auth</button>
+                            </div>
+                        </div>
+                        
+                        <!-- Authelia Option -->
+                        <div class="auth-option-card" id="autheliaCard">
+                            <div class="auth-option-header">
+                                <span class="auth-icon">🛡️</span>
+                                <h4>Authelia (Advanced)</h4>
+                                <span class="auth-status" id="autheliaStatus">Not Installed</span>
+                            </div>
+                            <div class="auth-option-desc">
+                                <p>Full-featured authentication portal with modern login page and advanced security.</p>
+                                <ul class="pros-cons">
+                                    <li class="pro">✅ Beautiful login page</li>
+                                    <li class="pro">✅ 2FA/MFA support</li>
+                                    <li class="pro">✅ Single sign-on</li>
+                                    <li class="pro">✅ Session management</li>
+                                    <li class="con">⚠️ Requires Docker container</li>
+                                    <li class="con">⚠️ More complex setup</li>
+                                </ul>
+                            </div>
+                            <div class="auth-option-actions">
+                                <button class="btn btn-primary" onclick="showAutheliaSetup()">Configure Authelia</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- Basic Auth Setup Panel (hidden by default) -->
+                <div id="basicAuthSetupPanel" class="auth-setup-panel" style="display: none;">
+                    <div class="panel-header">
+                        <button class="btn btn-sm" onclick="hideBasicAuthSetup()">← Back</button>
+                        <h4>🔑 Basic Auth Setup</h4>
+                    </div>
+                    
+                    <div class="current-users-section">
+                        <h5>Current Users</h5>
+                        <div id="basicAuthUsersList" class="users-list">
+                            <div class="loading">Loading users...</div>
+                        </div>
+                    </div>
+                    
+                    <div class="add-user-section">
+                        <h5>Add/Update User</h5>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>Username:</label>
+                                <input type="text" id="basicAuthUsername" class="form-input" placeholder="admin">
+                            </div>
+                            <div class="form-group">
+                                <label>Password:</label>
+                                <input type="password" id="basicAuthPassword" class="form-input" placeholder="••••••••">
+                            </div>
+                            <div class="form-group">
+                                <button class="btn btn-primary" onclick="addBasicAuthUser()">Add User</button>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="nginx-config-section">
+                        <h5>Enable on Sites</h5>
+                        <p class="info-text">To protect a site with Basic Auth, add this to the nginx site config inside the location block:</p>
+                        <pre class="code-block">auth_basic "Restricted Access";
+auth_basic_user_file /etc/nginx/.htpasswd;</pre>
+                        <button class="btn btn-sm" onclick="copyBasicAuthConfig()">📋 Copy to Clipboard</button>
+                    </div>
+                </div>
+                
+                <!-- Authelia Setup Panel (hidden by default) -->
+                <div id="autheliaSetupPanel" class="auth-setup-panel" style="display: none;">
+                    <div class="panel-header">
+                        <button class="btn btn-sm" onclick="hideAutheliaSetup()">← Back</button>
+                        <h4>🛡️ Authelia Setup</h4>
+                    </div>
+                    
+                    <div class="authelia-status-section">
+                        <h5>Container Status</h5>
+                        <div id="autheliaContainerStatus" class="status-display">
+                            <div class="loading">Checking status...</div>
+                        </div>
+                        <div class="authelia-actions">
+                            <button class="btn btn-sm btn-success" onclick="autheliaAction('start')" id="autheliaStartBtn">▶ Start</button>
+                            <button class="btn btn-sm btn-warning" onclick="autheliaAction('restart')" id="autheliaRestartBtn">🔄 Restart</button>
+                            <button class="btn btn-sm btn-danger" onclick="autheliaAction('stop')" id="autheliaStopBtn">⏹ Stop</button>
+                        </div>
+                    </div>
+                    
+                    <div class="authelia-install-section" id="autheliaInstallSection" style="display: none;">
+                        <h5>Install Authelia</h5>
+                        <p class="info-text">Authelia is not installed. To enable it:</p>
+                        <ol class="setup-steps">
+                            <li>Uncomment the <code>authelia</code> service in <code>docker-compose.yaml</code></li>
+                            <li>Create the configuration directory: <code>mkdir -p Authelia</code></li>
+                            <li>Copy the example config: <code>cp Authelia/configuration.example.yml Authelia/configuration.yml</code></li>
+                            <li>Edit <code>Authelia/configuration.yml</code> with your settings</li>
+                            <li>Start the container: <code>docker compose up -d authelia</code></li>
+                        </ol>
+                        <button class="btn btn-primary" onclick="installAuthelia()">🔧 Auto-Install Authelia</button>
+                    </div>
+                    
+                    <div class="authelia-config-section" id="autheliaConfigSection" style="display: none;">
+                        <h5>Quick Configuration</h5>
+                        <div class="form-group">
+                            <label>Domain for Authelia Portal:</label>
+                            <input type="text" id="autheliaPortalDomain" class="form-input" placeholder="auth.example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Default User Email:</label>
+                            <input type="email" id="autheliaUserEmail" class="form-input" placeholder="admin@example.com">
+                        </div>
+                        <div class="form-group">
+                            <label>Default User Password:</label>
+                            <input type="password" id="autheliaUserPassword" class="form-input" placeholder="••••••••">
+                        </div>
+                        <button class="btn btn-primary" onclick="configureAuthelia()">💾 Save Configuration</button>
+                    </div>
+                    
+                    <div class="nginx-config-section">
+                        <h5>Enable on Sites</h5>
+                        <p class="info-text">To protect a site with Authelia, add this to the nginx site config:</p>
+                        <pre class="code-block"># Inside server block, before location blocks:
+include /etc/nginx/snippets/authelia-location.conf;
+
+# Inside each location block you want to protect:
+include /etc/nginx/snippets/authelia-authrequest.conf;</pre>
+                        <button class="btn btn-sm" onclick="copyAutheliaConfig()">📋 Copy to Clipboard</button>
+                    </div>
+                </div>
+                
+                <div id="authSetupOutput" class="setup-output" style="display: none;">
+                    <pre></pre>
+                </div>
+            </div>
+        </div>
     </div>
     
     <!-- Modal -->

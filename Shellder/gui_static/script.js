@@ -7100,17 +7100,26 @@ async function updateSetupWizardStatus() {
                     statusEl.className = 'step-status warning';
                     if (actionBtn) actionBtn.textContent = 'Start';
                 } else {
-                    statusEl.textContent = '❌';
-                    statusEl.className = 'step-status error';
-                    if (actionBtn) actionBtn.textContent = 'Install';
-                    if (actionBtn) actionBtn.disabled = false;
+                    statusEl.textContent = '⏳';
+                    statusEl.className = 'step-status';
                 }
             }
         });
+        
+        // Check auth status separately
+        try {
+            const basicAuthData = await fetchAPI('/api/security/basicauth/users');
+            const autheliaData = await fetchAPI('/api/security/authelia/status');
+            updateAuthWizardStep(basicAuthData, autheliaData);
+        } catch (e) {
+            console.log('Could not load auth status:', e);
+        }
+        
     } catch (e) {
-        console.error('Failed to update setup wizard status:', e);
+        console.error('Error updating wizard status:', e);
     }
 }
+
 
 // Install Nginx
 async function installNginx() {
@@ -7204,6 +7213,345 @@ function showSiteSetupModal() {
         quickSetup.style.boxShadow = '0 0 20px var(--accent-primary)';
         setTimeout(() => { quickSetup.style.boxShadow = ''; }, 2000);
     }
+}
+
+// ============================================
+// Authentication Setup Functions
+// ============================================
+
+// Show authentication setup modal
+async function showAuthSetupModal() {
+    document.getElementById('authSetupModal').style.display = 'flex';
+    
+    // Hide both setup panels, show choice
+    document.getElementById('basicAuthSetupPanel').style.display = 'none';
+    document.getElementById('autheliaSetupPanel').style.display = 'none';
+    document.querySelector('.auth-choice-section').style.display = 'block';
+    
+    // Load current status
+    await loadAuthStatus();
+}
+
+// Close auth setup modal
+function closeAuthSetupModal() {
+    document.getElementById('authSetupModal').style.display = 'none';
+}
+
+// Load authentication status for both options
+async function loadAuthStatus() {
+    try {
+        // Load Basic Auth status
+        const basicAuthData = await fetchAPI('/api/security/basicauth/users');
+        const basicAuthStatus = document.getElementById('basicAuthStatus');
+        if (basicAuthData.users && basicAuthData.users.length > 0) {
+            basicAuthStatus.textContent = `${basicAuthData.users.length} user(s)`;
+            basicAuthStatus.className = 'auth-status configured';
+        } else {
+            basicAuthStatus.textContent = 'Not Configured';
+            basicAuthStatus.className = 'auth-status';
+        }
+        
+        // Load Authelia status
+        const autheliaData = await fetchAPI('/api/security/authelia/status');
+        const autheliaStatus = document.getElementById('autheliaStatus');
+        if (autheliaData.installed) {
+            if (autheliaData.running) {
+                autheliaStatus.textContent = 'Running';
+                autheliaStatus.className = 'auth-status running';
+            } else {
+                autheliaStatus.textContent = 'Stopped';
+                autheliaStatus.className = 'auth-status stopped';
+            }
+        } else {
+            autheliaStatus.textContent = 'Not Installed';
+            autheliaStatus.className = 'auth-status';
+        }
+        
+        // Update the wizard step status as well
+        updateAuthWizardStep(basicAuthData, autheliaData);
+        
+    } catch (e) {
+        console.error('Error loading auth status:', e);
+    }
+}
+
+// Update auth wizard step status
+function updateAuthWizardStep(basicAuthData, autheliaData) {
+    const stepEl = document.getElementById('step-auth');
+    if (!stepEl) return;
+    
+    const statusEl = stepEl.querySelector('.step-status');
+    const actionBtn = stepEl.querySelector('.step-action button');
+    
+    const hasBasicAuth = basicAuthData && basicAuthData.users && basicAuthData.users.length > 0;
+    const hasAuthelia = autheliaData && autheliaData.installed && autheliaData.running;
+    
+    if (hasBasicAuth || hasAuthelia) {
+        statusEl.textContent = '✅';
+        statusEl.className = 'step-status success';
+        if (actionBtn) actionBtn.textContent = 'Configured ✓';
+    } else {
+        statusEl.textContent = '⏳';
+        statusEl.className = 'step-status';
+        if (actionBtn) actionBtn.textContent = 'Configure';
+    }
+}
+
+// Show Basic Auth setup panel
+async function showBasicAuthSetup() {
+    document.querySelector('.auth-choice-section').style.display = 'none';
+    document.getElementById('autheliaSetupPanel').style.display = 'none';
+    document.getElementById('basicAuthSetupPanel').style.display = 'block';
+    
+    await loadBasicAuthUsers();
+}
+
+// Hide Basic Auth setup panel
+function hideBasicAuthSetup() {
+    document.getElementById('basicAuthSetupPanel').style.display = 'none';
+    document.querySelector('.auth-choice-section').style.display = 'block';
+}
+
+// Load basic auth users
+async function loadBasicAuthUsers() {
+    const usersList = document.getElementById('basicAuthUsersList');
+    usersList.innerHTML = '<div class="loading">Loading users...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/security/basicauth/users');
+        
+        if (data.users && data.users.length > 0) {
+            usersList.innerHTML = data.users.map(user => `
+                <div class="user-tag">
+                    <span>👤 ${user}</span>
+                    <span class="delete-user" onclick="deleteBasicAuthUser('${user}')" title="Delete user">✕</span>
+                </div>
+            `).join('');
+        } else {
+            usersList.innerHTML = '<div class="text-muted">No users configured. Add a user below.</div>';
+        }
+    } catch (e) {
+        usersList.innerHTML = '<div class="text-error">Error loading users: ' + e.message + '</div>';
+    }
+}
+
+// Add basic auth user
+async function addBasicAuthUser() {
+    const username = document.getElementById('basicAuthUsername').value.trim();
+    const password = document.getElementById('basicAuthPassword').value;
+    
+    if (!username || !password) {
+        showToast('Please enter both username and password', 'error');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/security/basicauth/user', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ username, password })
+        });
+        
+        if (result.success) {
+            showToast(`User '${username}' added successfully`, 'success');
+            document.getElementById('basicAuthUsername').value = '';
+            document.getElementById('basicAuthPassword').value = '';
+            await loadBasicAuthUsers();
+            await loadAuthStatus();
+        } else {
+            showToast('Failed to add user: ' + (result.error || result.output), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Delete basic auth user
+async function deleteBasicAuthUser(username) {
+    if (!confirm(`Delete user '${username}'?`)) return;
+    
+    try {
+        const result = await fetchAPI(`/api/security/basicauth/user/${encodeURIComponent(username)}`, {
+            method: 'DELETE'
+        });
+        
+        if (result.success) {
+            showToast(`User '${username}' deleted`, 'success');
+            await loadBasicAuthUsers();
+            await loadAuthStatus();
+        } else {
+            showToast('Failed to delete user: ' + (result.error || result.output), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Copy basic auth nginx config
+function copyBasicAuthConfig() {
+    const config = `auth_basic "Restricted Access";
+auth_basic_user_file /etc/nginx/.htpasswd;`;
+    
+    navigator.clipboard.writeText(config).then(() => {
+        showToast('Copied to clipboard!', 'success');
+    }).catch(() => {
+        showToast('Failed to copy', 'error');
+    });
+}
+
+// Show Authelia setup panel
+async function showAutheliaSetup() {
+    document.querySelector('.auth-choice-section').style.display = 'none';
+    document.getElementById('basicAuthSetupPanel').style.display = 'none';
+    document.getElementById('autheliaSetupPanel').style.display = 'block';
+    
+    await loadAutheliaStatus();
+}
+
+// Hide Authelia setup panel
+function hideAutheliaSetup() {
+    document.getElementById('autheliaSetupPanel').style.display = 'none';
+    document.querySelector('.auth-choice-section').style.display = 'block';
+}
+
+// Load Authelia status
+async function loadAutheliaStatus() {
+    const statusDisplay = document.getElementById('autheliaContainerStatus');
+    const installSection = document.getElementById('autheliaInstallSection');
+    const configSection = document.getElementById('autheliaConfigSection');
+    
+    statusDisplay.innerHTML = '<div class="loading">Checking status...</div>';
+    
+    try {
+        const data = await fetchAPI('/api/security/authelia/status');
+        
+        if (data.installed) {
+            installSection.style.display = 'none';
+            configSection.style.display = 'block';
+            
+            statusDisplay.innerHTML = `
+                <div class="status-row">
+                    <span class="status-label">Status:</span>
+                    <span class="status-value ${data.running ? 'running' : 'stopped'}">${data.status || 'Unknown'}</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Health:</span>
+                    <span class="status-value">${data.health || 'N/A'}</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Image:</span>
+                    <span class="status-value">${data.image || 'Unknown'}</span>
+                </div>
+                <div class="status-row">
+                    <span class="status-label">Config:</span>
+                    <span class="status-value">${data.config_path || 'Not found'}</span>
+                </div>
+            `;
+            
+            // Enable/disable action buttons
+            document.getElementById('autheliaStartBtn').disabled = data.running;
+            document.getElementById('autheliaStopBtn').disabled = !data.running;
+        } else {
+            installSection.style.display = 'block';
+            configSection.style.display = 'none';
+            statusDisplay.innerHTML = '<div class="text-muted">Authelia is not installed.</div>';
+        }
+    } catch (e) {
+        statusDisplay.innerHTML = '<div class="text-error">Error: ' + e.message + '</div>';
+        installSection.style.display = 'block';
+        configSection.style.display = 'none';
+    }
+}
+
+// Authelia container action
+async function autheliaAction(action) {
+    showToast(`${action.charAt(0).toUpperCase() + action.slice(1)}ing Authelia...`, 'info');
+    
+    try {
+        const result = await fetchAPI(`/api/security/authelia/${action}`, { method: 'POST' });
+        
+        if (result.success) {
+            showToast(`Authelia ${action}ed successfully`, 'success');
+            await loadAutheliaStatus();
+            await loadAuthStatus();
+        } else {
+            showToast(`Failed to ${action} Authelia: ${result.error || result.output}`, 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Install Authelia
+async function installAuthelia() {
+    if (!confirm('Auto-install Authelia?\n\nThis will:\n- Enable authelia in docker-compose.yaml\n- Create default configuration\n- Start the Authelia container\n\nYou will need to customize the configuration afterwards.')) return;
+    
+    showToast('Installing Authelia...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/security/authelia/install', { method: 'POST' });
+        
+        if (result.success) {
+            showToast('Authelia installed successfully', 'success');
+            await loadAutheliaStatus();
+            await loadAuthStatus();
+        } else {
+            showToast('Failed to install: ' + (result.error || result.message), 'error');
+            
+            // Show output if available
+            if (result.output) {
+                const outputEl = document.getElementById('authSetupOutput');
+                outputEl.style.display = 'block';
+                outputEl.querySelector('pre').textContent = result.output;
+            }
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Configure Authelia
+async function configureAuthelia() {
+    const domain = document.getElementById('autheliaPortalDomain').value.trim();
+    const email = document.getElementById('autheliaUserEmail').value.trim();
+    const password = document.getElementById('autheliaUserPassword').value;
+    
+    if (!domain || !email || !password) {
+        showToast('Please fill in all fields', 'error');
+        return;
+    }
+    
+    try {
+        const result = await fetchAPI('/api/security/authelia/configure', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ domain, email, password })
+        });
+        
+        if (result.success) {
+            showToast('Authelia configured! Restarting...', 'success');
+            await autheliaAction('restart');
+        } else {
+            showToast('Failed to configure: ' + (result.error || result.message), 'error');
+        }
+    } catch (e) {
+        showToast('Error: ' + e.message, 'error');
+    }
+}
+
+// Copy Authelia nginx config
+function copyAutheliaConfig() {
+    const config = `# Inside server block, before location blocks:
+include /etc/nginx/snippets/authelia-location.conf;
+
+# Inside each location block you want to protect:
+include /etc/nginx/snippets/authelia-authrequest.conf;`;
+    
+    navigator.clipboard.writeText(config).then(() => {
+        showToast('Copied to clipboard!', 'success');
+    }).catch(() => {
+        showToast('Failed to copy', 'error');
+    });
 }
 
 // Run full nginx-setup.sh script

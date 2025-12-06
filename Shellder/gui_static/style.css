@@ -7982,6 +7982,257 @@ select:focus {
     color: #6bceff;
 }
 
+/* ============================================= */
+/* Authentication Setup Styles */
+/* ============================================= */
+
+.auth-choice-section {
+    padding: 0 0 20px 0;
+}
+
+.auth-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
+    gap: 20px;
+    margin-top: 16px;
+}
+
+.auth-option-card {
+    background: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    border-radius: var(--radius-md);
+    padding: 20px;
+    transition: all 0.2s ease;
+}
+
+.auth-option-card:hover {
+    border-color: var(--accent-primary);
+    transform: translateY(-2px);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+}
+
+.auth-option-header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    margin-bottom: 16px;
+    flex-wrap: wrap;
+}
+
+.auth-option-header .auth-icon {
+    font-size: 32px;
+}
+
+.auth-option-header h4 {
+    flex: 1;
+    margin: 0;
+    font-size: 18px;
+    color: var(--text-primary);
+}
+
+.auth-option-header .auth-status {
+    font-size: 12px;
+    padding: 4px 8px;
+    border-radius: 4px;
+    background: var(--bg-secondary);
+    color: var(--text-secondary);
+}
+
+.auth-option-header .auth-status.configured {
+    background: rgba(46, 204, 113, 0.15);
+    color: var(--success);
+}
+
+.auth-option-header .auth-status.running {
+    background: rgba(46, 204, 113, 0.15);
+    color: var(--success);
+}
+
+.auth-option-header .auth-status.stopped {
+    background: rgba(231, 76, 60, 0.15);
+    color: var(--danger);
+}
+
+.auth-option-desc {
+    color: var(--text-secondary);
+    font-size: 14px;
+    line-height: 1.5;
+}
+
+.auth-option-desc p {
+    margin: 0 0 12px 0;
+}
+
+.pros-cons {
+    list-style: none;
+    padding: 0;
+    margin: 0;
+    display: grid;
+    gap: 6px;
+}
+
+.pros-cons li {
+    font-size: 13px;
+    padding: 4px 0;
+}
+
+.pros-cons li.pro {
+    color: var(--success);
+}
+
+.pros-cons li.con {
+    color: var(--warning);
+}
+
+.auth-option-actions {
+    margin-top: 16px;
+    padding-top: 16px;
+    border-top: 1px solid var(--border-color);
+}
+
+.auth-setup-panel {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 20px;
+}
+
+.auth-setup-panel .panel-header {
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    margin-bottom: 20px;
+    padding-bottom: 16px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.auth-setup-panel .panel-header h4 {
+    margin: 0;
+    flex: 1;
+}
+
+.current-users-section,
+.add-user-section,
+.nginx-config-section,
+.authelia-status-section,
+.authelia-install-section,
+.authelia-config-section {
+    margin-bottom: 24px;
+}
+
+.current-users-section h5,
+.add-user-section h5,
+.nginx-config-section h5,
+.authelia-status-section h5,
+.authelia-install-section h5,
+.authelia-config-section h5 {
+    margin: 0 0 12px 0;
+    font-size: 14px;
+    color: var(--text-primary);
+}
+
+.users-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+}
+
+.user-tag {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 6px 12px;
+    background: var(--bg-secondary);
+    border-radius: 4px;
+    font-size: 13px;
+}
+
+.user-tag .delete-user {
+    color: var(--danger);
+    cursor: pointer;
+    font-size: 16px;
+    line-height: 1;
+}
+
+.user-tag .delete-user:hover {
+    opacity: 0.7;
+}
+
+.form-row {
+    display: flex;
+    gap: 12px;
+    align-items: flex-end;
+    flex-wrap: wrap;
+}
+
+.form-row .form-group {
+    flex: 1;
+    min-width: 150px;
+}
+
+.code-block {
+    background: #1a1a2e;
+    color: #00ff88;
+    padding: 16px;
+    border-radius: var(--radius-sm);
+    font-family: var(--font-mono);
+    font-size: 12px;
+    overflow-x: auto;
+    margin-bottom: 12px;
+    white-space: pre-wrap;
+}
+
+.setup-steps {
+    padding-left: 20px;
+    margin: 12px 0;
+    color: var(--text-secondary);
+}
+
+.setup-steps li {
+    margin-bottom: 8px;
+    line-height: 1.5;
+}
+
+.setup-steps code {
+    background: var(--bg-secondary);
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 12px;
+}
+
+.authelia-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 12px;
+}
+
+.status-display {
+    padding: 12px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-sm);
+}
+
+.status-display .status-row {
+    display: flex;
+    justify-content: space-between;
+    padding: 6px 0;
+}
+
+.status-display .status-label {
+    color: var(--text-secondary);
+}
+
+.status-display .status-value {
+    font-weight: 600;
+}
+
+.status-display .status-value.running {
+    color: var(--success);
+}
+
+.status-display .status-value.stopped {
+    color: var(--danger);
+}
+
 .wizard-output-code {
     color: #c8a2fa;
     background: rgba(200, 162, 250, 0.1);
