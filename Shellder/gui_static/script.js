@@ -3943,24 +3943,25 @@ function extractTimestamp(line) {
 }
 
 // Parse log timestamp string to Date object
-// Handles multiple formats and timezones correctly
+// Docker containers default to UTC unless TZ is explicitly configured
 function parseLogTimestamp(timestampStr) {
     if (!timestampStr) return null;
     
     try {
-        // 1. ISO format with Z suffix (UTC) - already correct
+        // 1. ISO format with Z suffix (UTC) - koji, rotom, victoriametrics, vmagent
         if (timestampStr.endsWith('Z')) {
             const dateStr = timestampStr.replace(/(\.\d{3})\d*Z$/, '$1Z');
             return new Date(dateStr);
         }
         
-        // 2. ISO format with explicit offset (e.g., -05:00)
+        // 2. ISO format with explicit offset (e.g., -05:00) - grafana
         if (/[+-]\d{2}:\d{2}$/.test(timestampStr)) {
+            // Truncate excessive fractional seconds for JS Date compatibility
             const dateStr = timestampStr.replace(/(\.\d{3})\d*([+-])/, '$1$2');
             return new Date(dateStr);
         }
         
-        // 3. Apache CLF format: 06/Dec/2025:06:14:48 +0000
+        // 3. Apache CLF format: 06/Dec/2025:06:14:48 +0000 - pma
         const clfMatch = timestampStr.match(/(\d{2})\/(\w{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2}) ([+-]\d{4})/);
         if (clfMatch) {
             const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
@@ -3974,45 +3975,45 @@ function parseLogTimestamp(timestampStr) {
             return date;
         }
         
-        // 4. ISO format without timezone - treat as server local time
+        // 4. ISO format without timezone - Docker containers use UTC by default
         if (timestampStr.includes('T')) {
             const dateStr = timestampStr.replace(/(\.\d{3})\d*$/, '$1');
-            // Parse as local, then adjust for server timezone
             const parts = dateStr.split(/[T:.-]/);
+            // Treat as UTC (Docker default)
             const date = new Date(Date.UTC(
                 parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]),
-                parseInt(parts[3]) - serverTimezoneOffsetHours,
+                parseInt(parts[3]),
                 parseInt(parts[4]),
                 parseInt(parts[5] || 0)
             ));
             return date;
         }
         
-        // 5. Space-separated format (server local time): 2025-12-05 15:08:06
+        // 5. Space-separated format: 2025-12-05 15:08:06 - dragonite, golbat, admin, database, reactmap
+        // Docker containers use UTC by default
         if (timestampStr.includes(' ') && timestampStr.includes('-')) {
             const [datePart, timePart] = timestampStr.split(' ');
             const [year, month, day] = datePart.split('-').map(Number);
             const [hour, minute, second] = timePart.split(':').map(s => parseFloat(s));
-            // Convert server local time to UTC
+            // Treat as UTC (Docker default)
             const date = new Date(Date.UTC(
                 year, month - 1, day,
-                Math.floor(hour) - serverTimezoneOffsetHours,
+                Math.floor(hour),
                 Math.floor(minute),
                 Math.floor(second || 0)
             ));
             return date;
         }
         
-        // 6. Time only (server local, no date) - use today's date in server timezone
+        // 6. Time only (no date): 05:43:39.17 - xilriws uses server local time
         if (/^\d{2}:\d{2}:\d{2}/.test(timestampStr)) {
             const now = new Date();
             const [hours, minutes, seconds] = timestampStr.split(':').map(s => parseFloat(s));
-            // Get server's current date (adjust for server timezone)
-            const serverNow = new Date(now.getTime() + (serverTimezoneOffsetHours * 60 * 60 * 1000));
+            // Xilriws outputs in server local time, convert to UTC
             const date = new Date(Date.UTC(
-                serverNow.getUTCFullYear(),
-                serverNow.getUTCMonth(),
-                serverNow.getUTCDate(),
+                now.getUTCFullYear(),
+                now.getUTCMonth(),
+                now.getUTCDate(),
                 Math.floor(hours) - serverTimezoneOffsetHours,
                 Math.floor(minutes),
                 Math.floor(seconds || 0)
