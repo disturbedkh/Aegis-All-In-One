@@ -16736,6 +16736,34 @@ def api_fail2ban_status():
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+def ensure_asynchat_available():
+    """
+    Check if asynchat module is available, install if needed.
+    Required for Fail2Ban on Python 3.12+
+    Returns (success, message)
+    """
+    # Check if asynchat is available
+    check = subprocess.run(['python3', '-c', 'import asynchat'], capture_output=True, text=True, timeout=10)
+    if check.returncode == 0:
+        return True, 'asynchat available'
+    
+    # Try to install pyasynchat
+    install_cmds = [
+        ['sudo', 'pip3', 'install', 'pyasynchat', '--break-system-packages'],
+        ['sudo', 'apt-get', 'install', '-y', 'python3-pyasynchat'],
+        ['sudo', 'pip3', 'install', 'legacy-cgi', '--break-system-packages'],
+    ]
+    
+    for cmd in install_cmds:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=120)
+        if result.returncode == 0:
+            # Verify it worked
+            verify = subprocess.run(['python3', '-c', 'import asynchat'], capture_output=True, text=True, timeout=10)
+            if verify.returncode == 0:
+                return True, f'Installed asynchat via: {" ".join(cmd)}'
+    
+    return False, 'Could not install asynchat module. Run: sudo pip3 install pyasynchat --break-system-packages'
+
 @app.route('/api/security/fail2ban/<action>', methods=['POST'])
 def api_fail2ban_action(action):
     """Control fail2ban service with proper verification"""
@@ -16755,13 +16783,26 @@ def api_fail2ban_action(action):
                 'installed': False
             })
         
+        output = ''
+        
+        # For start/restart, ensure asynchat is available (Python 3.12+ fix)
+        if action in ['start', 'restart']:
+            asynchat_ok, asynchat_msg = ensure_asynchat_available()
+            if not asynchat_ok:
+                return jsonify({
+                    'success': False,
+                    'error': f'Python asynchat module required but missing.\n{asynchat_msg}',
+                    'fix_command': 'sudo pip3 install pyasynchat --break-system-packages'
+                })
+            output += f'✓ {asynchat_msg}\n'
+        
         # Execute the action
         cmd_result = subprocess.run(
             ['sudo', 'systemctl', action, 'fail2ban'],
             capture_output=True, text=True, timeout=30
         )
         
-        output = cmd_result.stdout + cmd_result.stderr
+        output += cmd_result.stdout + cmd_result.stderr
         
         # Wait a moment for the action to take effect
         time.sleep(2)
