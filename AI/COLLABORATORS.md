@@ -28,6 +28,19 @@ When starting work on a new machine:
 
 > Add dated entries when making significant changes
 
+### 2025-12-06 (Windows - New Session)
+- **MCP Server Connection to Remote Shellder** - Full setup and verification
+  - Cloned repository to local machine
+  - Added Git to PATH
+  - Installed MCP server dependencies via `npm install`
+  - Created Cursor MCP config at `%APPDATA%\Cursor\User\globalStorage\cursor.mcp\mcp.json`
+  - Configured SHELLDER_URL to point to production server (IP stored locally only)
+  - Verified API connectivity - all 12 containers running
+- **AI Brain Full Incorporation**
+  - Read all AI/ documentation files
+  - Incorporated knowledge from previous Cursor sessions
+  - Ready for cross-session, multi-collaborator development
+
 ### 2024-12-05 (Windows - Primary Development)
 - **AI folder restructure** - Created comprehensive AI/ documentation
   - Added: MCP_SERVER.md, AI_DEBUG_API.md, STRUCTURE.md, CHANGELOG.md
@@ -87,9 +100,9 @@ When starting a significant work session, add:
 > Track tasks across sessions
 
 ### High Priority
-- [ ] Test MCP server connection to remote Shellder
-- [ ] Verify AI Debug API endpoints work
-- [ ] Document remote server MCP setup
+- [x] Test MCP server connection to remote Shellder ✅ (2025-12-06)
+- [x] Verify AI Debug API endpoints work ✅ (2025-12-06)
+- [x] Document remote server MCP setup ✅ (2025-12-06)
 
 ### Medium Priority
 - [ ] Add more troubleshooting scenarios to DEEP_ANALYSIS.md
@@ -236,9 +249,10 @@ Types:
 - Path separators: Use `/`
 
 ### Remote Server
-- SHELLDER_URL should point to server IP/hostname
-- May need SSH tunnel for local MCP to remote Shellder
-- Firewall must allow port 5050 if accessing remotely
+- SHELLDER_URL should point to server IP/hostname (e.g., `http://<your-server-ip>:5000`)
+- No SSH tunnel needed - direct HTTP access works
+- Firewall must allow port **5000** (not 5050) if accessing remotely
+- Store server IP in local MCP config only - NEVER commit to repo
 
 ---
 
