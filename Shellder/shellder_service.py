@@ -16309,6 +16309,63 @@ def api_install_fail2ban():
         
         result['steps'][-1]['status'] = 'completed'
         
+        # Step 1b: Fix Python 3.12+ asynchat issue
+        # Fail2Ban 1.0.x requires asynchat which was removed in Python 3.12
+        result['steps'].append({'name': 'Checking Python compatibility', 'status': 'running'})
+        
+        # Check Python version
+        python_check = subprocess.run(['python3', '--version'], capture_output=True, text=True, timeout=10)
+        python_version = python_check.stdout.strip()
+        result['output'] += f'\nPython version: {python_version}\n'
+        
+        # Check if asynchat module exists
+        asynchat_check = subprocess.run(
+            ['python3', '-c', 'import asynchat'],
+            capture_output=True, text=True, timeout=10
+        )
+        
+        if asynchat_check.returncode != 0:
+            result['output'] += 'asynchat module missing (Python 3.12+ issue). Installing fix...\n'
+            
+            # Try installing pyasynchat via pip
+            pip_install = subprocess.run(
+                ['sudo', 'pip3', 'install', 'pyasynchat', '--break-system-packages'],
+                capture_output=True, text=True, timeout=120
+            )
+            result['output'] += pip_install.stdout + pip_install.stderr
+            
+            if pip_install.returncode != 0:
+                # Try alternative: install via apt if available
+                apt_install = subprocess.run(
+                    ['sudo', 'apt-get', 'install', '-y', 'python3-pyasynchat'],
+                    capture_output=True, text=True, timeout=120
+                )
+                result['output'] += apt_install.stdout + apt_install.stderr
+                
+                if apt_install.returncode != 0:
+                    # Last resort: try legacy-cgi package
+                    legacy_install = subprocess.run(
+                        ['sudo', 'pip3', 'install', 'legacy-cgi', '--break-system-packages'],
+                        capture_output=True, text=True, timeout=120
+                    )
+                    result['output'] += legacy_install.stdout + legacy_install.stderr
+            
+            # Verify fix worked
+            asynchat_verify = subprocess.run(
+                ['python3', '-c', 'import asynchat'],
+                capture_output=True, text=True, timeout=10
+            )
+            if asynchat_verify.returncode == 0:
+                result['output'] += '✓ asynchat module now available\n'
+                result['steps'][-1]['status'] = 'completed'
+            else:
+                result['output'] += '⚠ Could not install asynchat. Fail2Ban may not work.\n'
+                result['output'] += 'Manual fix: sudo pip3 install pyasynchat --break-system-packages\n'
+                result['steps'][-1]['status'] = 'warning'
+        else:
+            result['output'] += '✓ asynchat module already available\n'
+            result['steps'][-1]['status'] = 'completed'
+        
         # Step 2: Check if nginx logs exist before creating jails that reference them
         result['steps'].append({'name': 'Checking nginx log paths', 'status': 'running'})
         
