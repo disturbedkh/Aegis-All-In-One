@@ -8801,31 +8801,138 @@ def api_container_logs_stream(name):
     
     return Response(generate(), mimetype='text/event-stream')
 
+# Container dependency order - stop dependents first, start dependencies first
+CONTAINER_DEPENDENCIES = {
+    'database': [],  # Database has no dependencies
+    'golbat': ['database'],
+    'dragonite': ['golbat', 'database'],
+    'admin': ['dragonite'],
+    'reactmap': ['golbat', 'database'],
+    'koji': ['database'],
+    'rotom': [],
+    'xilriws': [],
+    'grafana': ['victoriametrics'],
+    'victoriametrics': [],
+    'vmagent': ['victoriametrics'],
+    'pma': ['database'],
+    'poracle': ['database', 'golbat'],
+    'fletchling': ['database', 'golbat'],
+}
+
+# Containers that depend on this one (reverse dependencies)
+def get_dependents(container_name):
+    """Get containers that depend on the given container"""
+    dependents = []
+    for name, deps in CONTAINER_DEPENDENCIES.items():
+        if container_name in deps:
+            dependents.append(name)
+    return dependents
+
+def stop_container_gracefully(name, timeout=30):
+    """Stop a container gracefully with proper timeout"""
+    try:
+        # Use docker compose stop for graceful shutdown
+        result = subprocess.run(
+            ['docker', 'compose', 'stop', '-t', str(timeout), name],
+            capture_output=True, text=True, timeout=timeout + 10,
+            cwd=str(AEGIS_ROOT)
+        )
+        return result.returncode == 0, result.stdout + result.stderr
+    except Exception as e:
+        return False, str(e)
+
+def start_container_with_deps(name):
+    """Start a container and its dependencies"""
+    try:
+        # docker compose up -d handles dependencies automatically
+        result = subprocess.run(
+            ['docker', 'compose', 'up', '-d', name],
+            capture_output=True, text=True, timeout=120,
+            cwd=str(AEGIS_ROOT)
+        )
+        return result.returncode == 0, result.stdout + result.stderr
+    except Exception as e:
+        return False, str(e)
+
 @app.route('/api/container/<name>/<action>', methods=['POST'])
 def api_container_action(name, action):
-    """Perform action on container"""
+    """Perform action on container with dependency awareness"""
     if action not in ['start', 'stop', 'restart']:
         return jsonify({'success': False, 'error': 'Invalid action'})
     
-    if docker_client:
-        try:
-            container = docker_client.containers.get(name)
-            getattr(container, action)()
-            return jsonify({'success': True, 'message': f'{name} {action}ed'})
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
-    else:
-        try:
-            result = subprocess.run(
-                ["docker", action, name],
-                capture_output=True, text=True, timeout=60
-            )
+    messages = []
+    
+    try:
+        # Special handling for database - it needs extra care
+        if name == 'database' and action in ['stop', 'restart']:
+            # Stop dependents first to prevent data corruption
+            dependents = get_dependents('database')
+            running_dependents = []
+            
+            # Check which dependents are running
+            for dep in dependents:
+                try:
+                    check = subprocess.run(
+                        ['docker', 'inspect', '-f', '{{.State.Running}}', dep],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if check.stdout.strip() == 'true':
+                        running_dependents.append(dep)
+                except:
+                    pass
+            
+            if running_dependents:
+                messages.append(f"Stopping dependents first: {', '.join(running_dependents)}")
+                for dep in running_dependents:
+                    success, output = stop_container_gracefully(dep, timeout=15)
+                    if not success:
+                        messages.append(f"Warning: Failed to stop {dep}: {output}")
+            
+            # Give dependents time to flush their connections
+            import time
+            time.sleep(2)
+            
+            # Stop database with longer timeout for graceful shutdown
+            messages.append("Stopping database with graceful shutdown...")
+            success, output = stop_container_gracefully('database', timeout=30)
+            
+            if action == 'restart' and success:
+                # Start database first
+                messages.append("Starting database...")
+                success, output = start_container_with_deps('database')
+                if success:
+                    # Wait for database to be ready
+                    time.sleep(3)
+                    # Restart the dependents that were running
+                    for dep in running_dependents:
+                        messages.append(f"Starting {dep}...")
+                        start_container_with_deps(dep)
+            
             return jsonify({
-                'success': result.returncode == 0,
-                'output': result.stdout + result.stderr
+                'success': success,
+                'message': f'{name} {action}ed',
+                'details': messages,
+                'output': output
             })
-        except Exception as e:
-            return jsonify({'success': False, 'error': str(e)})
+        
+        # For other containers, use standard handling but with compose for better control
+        if action == 'stop':
+            success, output = stop_container_gracefully(name, timeout=15)
+        elif action == 'start':
+            success, output = start_container_with_deps(name)
+        else:  # restart
+            success, output = stop_container_gracefully(name, timeout=15)
+            if success:
+                success, output = start_container_with_deps(name)
+        
+        return jsonify({
+            'success': success,
+            'message': f'{name} {action}ed',
+            'output': output
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e), 'details': messages})
 
 @app.route('/api/docker/<action>', methods=['POST'])
 def api_docker_action(action):
@@ -8884,9 +8991,48 @@ def api_docker_action(action):
             
             # Start only stopped services
             cmd = ['docker', 'compose', 'up', '-d', '--no-recreate'] + list(services_to_start)
+        elif action == 'down':
+            # Graceful shutdown: stop in reverse dependency order
+            # First stop services that depend on database, then database
+            messages = []
+            
+            # Stop application services first (they depend on database)
+            app_services = ['admin', 'dragonite', 'reactmap', 'koji', 'golbat', 'poracle', 'fletchling', 'pma']
+            messages.append("Stopping application services...")
+            subprocess.run(
+                ['docker', 'compose', 'stop', '-t', '15'] + app_services,
+                capture_output=True, text=True, timeout=120, cwd=aegis_root
+            )
+            
+            # Then stop infrastructure services
+            infra_services = ['grafana', 'vmagent', 'victoriametrics', 'xilriws', 'rotom', 'authelia']
+            messages.append("Stopping infrastructure services...")
+            subprocess.run(
+                ['docker', 'compose', 'stop', '-t', '10'] + infra_services,
+                capture_output=True, text=True, timeout=60, cwd=aegis_root
+            )
+            
+            # Finally stop database with longer timeout
+            messages.append("Stopping database (graceful shutdown)...")
+            subprocess.run(
+                ['docker', 'compose', 'stop', '-t', '30', 'database'],
+                capture_output=True, text=True, timeout=60, cwd=aegis_root
+            )
+            
+            # Now bring everything down
+            messages.append("Removing containers...")
+            result = subprocess.run(
+                ['docker', 'compose', 'down'],
+                capture_output=True, text=True, timeout=120, cwd=aegis_root
+            )
+            
+            return jsonify({
+                'success': result.returncode == 0,
+                'output': result.stdout + result.stderr,
+                'details': messages
+            })
         else:
             cmd_map = {
-                'down': ['docker', 'compose', 'down'],
                 'restart': ['docker', 'compose', 'restart'],
                 'pull': ['docker', 'compose', 'pull']
             }
