@@ -42,7 +42,7 @@ fi
 
 # Install requirements
 echo -e "${CYAN}[...]${NC} Checking dependencies..."
-if ! $PYTHON -c "import flask, flask_socketio, docker, psutil" 2>/dev/null; then
+if ! $PYTHON -c "import flask, flask_socketio, docker, psutil, pymysql" 2>/dev/null; then
     echo -e "${YELLOW}[!]${NC} Installing required packages..."
     $PYTHON -m pip install -q -r requirements.txt
     echo -e "${GREEN}[✓]${NC} Dependencies installed"
