@@ -6642,6 +6642,9 @@ def api_debug_clear():
 # =============================================================================
 
 # Feature flags - can be toggled from UI
+# Master toggle controls all AI debug access
+AI_DEBUG_ENABLED = False  # OFF by default for security
+
 AI_DEBUG_CONFIG = {
     'api_enabled': True,
     'websocket_enabled': True,
@@ -6652,10 +6655,39 @@ AI_DEBUG_CONFIG = {
     'system_info': True
 }
 
+def is_ai_debug_allowed():
+    """Check if AI debug access is allowed (master toggle must be on)"""
+    return AI_DEBUG_ENABLED
+
+@app.route('/api/ai-debug/master-toggle')
+def api_ai_debug_master_toggle_get():
+    """Get AI debug master toggle status"""
+    return jsonify({
+        'enabled': AI_DEBUG_ENABLED,
+        'warning': 'Enabling AI Debug Access allows external systems to read/write files, execute commands, and access databases on this machine. Only enable if you trust the connecting AI system or have been instructed to do so by a Pokemod or Unown# developer for debugging purposes.'
+    })
+
+@app.route('/api/ai-debug/master-toggle', methods=['POST'])
+def api_ai_debug_master_toggle_set():
+    """Enable or disable AI debug master toggle"""
+    global AI_DEBUG_ENABLED
+    data = request.get_json() or {}
+    
+    if 'enabled' in data:
+        AI_DEBUG_ENABLED = bool(data['enabled'])
+        debug_log('AI_DEBUG', f"AI Debug Access {'ENABLED' if AI_DEBUG_ENABLED else 'DISABLED'}", 'warning' if AI_DEBUG_ENABLED else 'info')
+    
+    return jsonify({
+        'success': True, 
+        'enabled': AI_DEBUG_ENABLED,
+        'message': f"AI Debug Access {'enabled - external access is now allowed' if AI_DEBUG_ENABLED else 'disabled - instance secured'}"
+    })
+
 @app.route('/api/ai-debug/config')
 def api_ai_debug_config():
     """Get AI debug access configuration"""
     return jsonify({
+        'master_enabled': AI_DEBUG_ENABLED,
         'config': AI_DEBUG_CONFIG,
         'endpoints': {
             'file_read': '/api/ai-debug/file?path=<path>',
@@ -6696,6 +6728,8 @@ def api_ai_debug_file_read():
         lines: Optional, limit to last N lines
         offset: Optional, start from line N
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('file_access'):
         return jsonify({'error': 'File access disabled'}), 403
     
@@ -6760,6 +6794,8 @@ def api_ai_debug_file_write():
     Usage: POST /api/ai-debug/file
     Body: {"path": "path/to/file", "content": "file content", "append": false}
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('file_access'):
         return jsonify({'error': 'File access disabled'}), 403
     
@@ -6801,6 +6837,8 @@ def api_ai_debug_exec():
     
     Returns stdout, stderr, and return code.
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('command_exec'):
         return jsonify({'error': 'Command execution disabled'}), 403
     
@@ -6850,6 +6888,8 @@ def api_ai_debug_docker():
     
     Commands: ps, images, logs, inspect, stats
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('docker_access'):
         return jsonify({'error': 'Docker access disabled'}), 403
     
@@ -6926,6 +6966,8 @@ def api_ai_debug_sql():
     
     Databases: golbat, dragonite, reactmap, koji
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('database_access'):
         return jsonify({'error': 'Database access disabled'}), 403
     
@@ -6995,6 +7037,8 @@ def api_ai_debug_logs():
     Types: shellder, docker, nginx, system, auth, container
     For container logs, add &container=<name>
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('system_info'):
         return jsonify({'error': 'System info access disabled'}), 403
     
@@ -7056,6 +7100,8 @@ def api_ai_debug_diagnose():
     
     Returns system state, container status, port availability, service health.
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('system_info'):
         return jsonify({'error': 'System info access disabled'}), 403
     
@@ -7129,6 +7175,8 @@ def api_ai_debug_system():
     
     Usage: GET /api/ai-debug/system
     """
+    if not AI_DEBUG_ENABLED:
+        return jsonify({'error': 'AI Debug Access is disabled. Enable it in Shellder Settings to allow external access.'}), 403
     if not AI_DEBUG_CONFIG.get('system_info'):
         return jsonify({'error': 'System info access disabled'}), 403
     

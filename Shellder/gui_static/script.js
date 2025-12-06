@@ -12844,6 +12844,9 @@ async function loadShellderConfig() {
         // Load general settings
         loadShellderGeneralSettings();
         
+        // Load AI Debug toggle status
+        loadAIDebugMasterToggle();
+        
     } catch (error) {
         console.error('Error loading Shellder config:', error);
         showToast('Failed to load configuration', 'error');
@@ -13114,3 +13117,179 @@ async function saveRawShellderConfig() {
 }
 
 // Note: Shellder config page loading is now handled directly in navigateTo()
+
+// =============================================================================
+// AI DEBUG MASTER TOGGLE
+// =============================================================================
+
+async function loadAIDebugMasterToggle() {
+    try {
+        const response = await fetchAPI('/api/ai-debug/master-toggle');
+        updateAIDebugUI(response.enabled);
+        
+        // Also load the config options
+        const configResponse = await fetchAPI('/api/ai-debug/config');
+        if (configResponse.config) {
+            document.getElementById('aiOptFileAccess').checked = configResponse.config.file_access;
+            document.getElementById('aiOptCommandExec').checked = configResponse.config.command_exec;
+            document.getElementById('aiOptDockerAccess').checked = configResponse.config.docker_access;
+            document.getElementById('aiOptDatabaseAccess').checked = configResponse.config.database_access;
+            document.getElementById('aiOptSystemInfo').checked = configResponse.config.system_info;
+        }
+        
+        // Update endpoint URL with actual host
+        const baseUrl = `http://${window.location.hostname}:${window.location.port || 5000}`;
+        const endpointEl = document.getElementById('aiDebugEndpoint');
+        const baseUrlEl = document.getElementById('aiDebugBaseUrl');
+        if (endpointEl) endpointEl.textContent = `${baseUrl}/api/ai-debug/*`;
+        if (baseUrlEl) baseUrlEl.textContent = baseUrl;
+        
+    } catch (error) {
+        console.error('Error loading AI Debug toggle:', error);
+    }
+}
+
+async function toggleAIDebugAccess(enabled) {
+    // Show confirmation dialog for enabling
+    if (enabled) {
+        const confirmed = confirm(
+            '⚠️ SECURITY WARNING ⚠️\n\n' +
+            'Enabling AI Debug Access allows external systems to:\n' +
+            '• Read and write files on this machine\n' +
+            '• Execute shell commands\n' +
+            '• Access and modify databases\n' +
+            '• Control Docker containers\n\n' +
+            'Only enable this if:\n' +
+            '• You trust the connecting AI system\n' +
+            '• You have been instructed by a Pokemod/Unown# developer\n\n' +
+            'Do you want to enable AI Debug Access?'
+        );
+        
+        if (!confirmed) {
+            document.getElementById('aiDebugMasterToggle').checked = false;
+            return;
+        }
+    }
+    
+    try {
+        const response = await fetchAPI('/api/ai-debug/master-toggle', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ enabled })
+        });
+        
+        if (response.success) {
+            updateAIDebugUI(response.enabled);
+            showToast(response.message, response.enabled ? 'warning' : 'success');
+        } else {
+            showToast('Failed to update AI Debug Access', 'error');
+            document.getElementById('aiDebugMasterToggle').checked = !enabled;
+        }
+    } catch (error) {
+        console.error('Error toggling AI Debug Access:', error);
+        showToast('Failed to update AI Debug Access', 'error');
+        document.getElementById('aiDebugMasterToggle').checked = !enabled;
+    }
+}
+
+function updateAIDebugUI(enabled) {
+    // Update toggle
+    const toggle = document.getElementById('aiDebugMasterToggle');
+    if (toggle) toggle.checked = enabled;
+    
+    // Update label
+    const label = document.getElementById('aiDebugToggleLabel');
+    if (label) {
+        label.textContent = enabled ? 'ENABLED' : 'Disabled';
+        label.classList.toggle('enabled', enabled);
+    }
+    
+    // Update card border
+    const card = document.querySelector('.ai-debug-master-card');
+    if (card) {
+        card.classList.toggle('enabled', enabled);
+    }
+    
+    // Update status badge
+    const badge = document.getElementById('aiDebugStatusBadge');
+    if (badge) {
+        badge.className = `status-badge ${enabled ? 'enabled' : 'secured'}`;
+        badge.innerHTML = `
+            <span class="status-dot ${enabled ? 'on' : 'off'}"></span>
+            <span class="status-text">${enabled ? 'ACTIVE - External Access Allowed' : 'Secured'}</span>
+        `;
+    }
+    
+    // Update MCP status
+    const mcpStatus = document.getElementById('aiDebugMcpStatus');
+    if (mcpStatus) {
+        mcpStatus.textContent = enabled ? 'Active - Accepting Connections' : 'Disabled';
+        mcpStatus.style.color = enabled ? 'var(--warning)' : 'var(--text-muted)';
+    }
+    
+    // Show/hide expanded options
+    const expandedOptions = document.getElementById('aiDebugExpandedOptions');
+    if (expandedOptions) {
+        expandedOptions.style.display = enabled ? 'block' : 'none';
+    }
+}
+
+async function updateAIDebugOption(option, enabled) {
+    try {
+        const data = {};
+        data[option] = enabled;
+        
+        const response = await fetchAPI('/api/ai-debug/config', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(data)
+        });
+        
+        if (response.success) {
+            showToast(`${option.replace('_', ' ')} ${enabled ? 'enabled' : 'disabled'}`, 'info');
+        }
+    } catch (error) {
+        console.error('Error updating AI debug option:', error);
+    }
+}
+
+function copyAIInstructions() {
+    const baseUrl = `http://${window.location.hostname}:${window.location.port || 5000}`;
+    const instructions = `# AI Debug Access Instructions
+
+## Base URL
+${baseUrl}
+
+## Quick Start
+1. Documentation: GET ${baseUrl}/api/ai-debug/help
+2. Diagnostics: GET ${baseUrl}/api/ai-debug/diagnose
+3. System Info: GET ${baseUrl}/api/ai-debug/system
+
+## Available Endpoints
+- Read files: GET ${baseUrl}/api/ai-debug/file?path=<path>
+- Write files: POST ${baseUrl}/api/ai-debug/file
+- Execute commands: POST ${baseUrl}/api/ai-debug/exec
+- Docker operations: GET ${baseUrl}/api/ai-debug/docker?cmd=<cmd>
+- SQL queries: POST ${baseUrl}/api/ai-debug/sql
+- View logs: GET ${baseUrl}/api/ai-debug/logs?type=<type>
+
+## MCP Server (for Cursor)
+Add to Cursor settings (mcpServers):
+{
+  "shellder": {
+    "command": "npx",
+    "args": ["@anthropic-ai/mcp-server-fetch"],
+    "env": {
+      "SHELLDER_URL": "${baseUrl}"
+    }
+  }
+}
+`;
+    
+    navigator.clipboard.writeText(instructions).then(() => {
+        showToast('AI instructions copied to clipboard!', 'success');
+    }).catch(err => {
+        console.error('Failed to copy:', err);
+        showToast('Failed to copy instructions', 'error');
+    });
+}

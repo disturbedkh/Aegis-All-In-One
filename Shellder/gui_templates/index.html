@@ -96,10 +96,6 @@
                         <span class="nav-icon">🔄</span>
                         <span>Updates</span>
                     </a>
-                    <a href="#" class="nav-item" data-page="debug" onclick="navigateTo('debug'); return false;">
-                        <span class="nav-icon">🔧</span>
-                        <span>Debug</span>
-                    </a>
                 </div>
             </div>
             
@@ -873,6 +869,119 @@
                         <div class="card-body">
                             <div class="info-list" id="shellderRemoteSettings">
                                 <div class="loading">Loading...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <!-- AI Debug Access Section -->
+                <div class="card ai-debug-master-card">
+                    <div class="card-header">
+                        <h2>🤖 AI Debug Access</h2>
+                        <div class="header-actions">
+                            <div class="toggle-switch-container">
+                                <label class="toggle-switch">
+                                    <input type="checkbox" id="aiDebugMasterToggle" onchange="toggleAIDebugAccess(this.checked)">
+                                    <span class="toggle-slider"></span>
+                                </label>
+                                <span id="aiDebugToggleLabel" class="toggle-label">Disabled</span>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <!-- Warning Banner -->
+                        <div class="warning-banner critical" id="aiDebugWarning">
+                            <div class="warning-icon">⚠️</div>
+                            <div class="warning-content">
+                                <strong>SECURITY WARNING</strong>
+                                <p>Enabling AI Debug Access allows <strong>external systems to read/write files, execute commands, 
+                                and access databases</strong> on this machine through the REST API and MCP server.</p>
+                                <p><strong>Only enable this if:</strong></p>
+                                <ul>
+                                    <li>You trust the connecting AI system (like Cursor, Claude, or similar)</li>
+                                    <li>You have been instructed to do so by a Pokemod or Unown# developer for debugging</li>
+                                    <li>You understand that this gives complete control over your Aegis AIO stack</li>
+                                </ul>
+                                <p class="warning-note">When disabled, all AI debug API endpoints return "403 Forbidden" and external 
+                                access is blocked. The toggle state does not persist across restarts (defaults to OFF).</p>
+                            </div>
+                        </div>
+                        
+                        <!-- Status Display -->
+                        <div class="ai-debug-status" id="aiDebugStatusPanel">
+                            <div class="status-row">
+                                <span class="status-label">Current Status:</span>
+                                <span class="status-badge" id="aiDebugStatusBadge">
+                                    <span class="status-dot off"></span>
+                                    <span class="status-text">Secured</span>
+                                </span>
+                            </div>
+                            <div class="status-row">
+                                <span class="status-label">API Endpoint:</span>
+                                <code id="aiDebugEndpoint">http://localhost:5000/api/ai-debug/*</code>
+                            </div>
+                            <div class="status-row">
+                                <span class="status-label">MCP Server:</span>
+                                <span id="aiDebugMcpStatus">Disabled</span>
+                            </div>
+                        </div>
+                        
+                        <!-- Expanded Options (shown when enabled) -->
+                        <div id="aiDebugExpandedOptions" style="display: none;">
+                            <hr style="margin: 20px 0; border-color: var(--border);">
+                            <h3 style="margin-bottom: 15px;">🔧 Access Controls</h3>
+                            <p class="text-muted" style="margin-bottom: 15px;">Fine-tune which capabilities are available to AI assistants:</p>
+                            
+                            <div class="ai-debug-options-grid">
+                                <label class="toggle-option">
+                                    <input type="checkbox" id="aiOptFileAccess" checked onchange="updateAIDebugOption('file_access', this.checked)">
+                                    <span class="option-info">
+                                        <span class="option-icon">📁</span>
+                                        <span class="option-name">File Access</span>
+                                        <span class="option-desc">Read/write files in Aegis directory</span>
+                                    </span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="checkbox" id="aiOptCommandExec" checked onchange="updateAIDebugOption('command_exec', this.checked)">
+                                    <span class="option-info">
+                                        <span class="option-icon">💻</span>
+                                        <span class="option-name">Command Execution</span>
+                                        <span class="option-desc">Run shell commands on system</span>
+                                    </span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="checkbox" id="aiOptDockerAccess" checked onchange="updateAIDebugOption('docker_access', this.checked)">
+                                    <span class="option-info">
+                                        <span class="option-icon">🐳</span>
+                                        <span class="option-name">Docker Access</span>
+                                        <span class="option-desc">Control containers, view logs</span>
+                                    </span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="checkbox" id="aiOptDatabaseAccess" checked onchange="updateAIDebugOption('database_access', this.checked)">
+                                    <span class="option-info">
+                                        <span class="option-icon">🗄️</span>
+                                        <span class="option-name">Database Access</span>
+                                        <span class="option-desc">Execute SQL queries</span>
+                                    </span>
+                                </label>
+                                <label class="toggle-option">
+                                    <input type="checkbox" id="aiOptSystemInfo" checked onchange="updateAIDebugOption('system_info', this.checked)">
+                                    <span class="option-info">
+                                        <span class="option-icon">📊</span>
+                                        <span class="option-name">System Info</span>
+                                        <span class="option-desc">View logs, diagnostics, resources</span>
+                                    </span>
+                                </label>
+                            </div>
+                            
+                            <hr style="margin: 20px 0; border-color: var(--border);">
+                            <h3 style="margin-bottom: 15px;">📋 For AI Assistants</h3>
+                            <div class="ai-instructions-box">
+                                <p><strong>Base URL:</strong> <code id="aiDebugBaseUrl">http://localhost:5000</code></p>
+                                <p><strong>Documentation:</strong> <code>GET /api/ai-debug/help</code></p>
+                                <p><strong>Diagnostics:</strong> <code>GET /api/ai-debug/diagnose</code></p>
+                                <button class="btn btn-sm" onclick="copyAIInstructions()">📋 Copy Instructions for AI</button>
                             </div>
                         </div>
                     </div>

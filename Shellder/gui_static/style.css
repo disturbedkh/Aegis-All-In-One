@@ -4699,6 +4699,293 @@ select:focus {
 }
 
 /* =============================================================================
+   AI DEBUG MASTER TOGGLE
+   ============================================================================= */
+
+.ai-debug-master-card {
+    border: 2px solid var(--border-color);
+    transition: all var(--transition-normal);
+}
+
+.ai-debug-master-card.enabled {
+    border-color: var(--warning);
+    box-shadow: 0 0 20px var(--warning-glow);
+}
+
+/* Toggle Switch */
+.toggle-switch-container {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.toggle-switch {
+    position: relative;
+    display: inline-block;
+    width: 52px;
+    height: 28px;
+}
+
+.toggle-switch input {
+    opacity: 0;
+    width: 0;
+    height: 0;
+}
+
+.toggle-slider {
+    position: absolute;
+    cursor: pointer;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background-color: var(--bg-tertiary);
+    border: 2px solid var(--border-color);
+    transition: all var(--transition-normal);
+    border-radius: 28px;
+}
+
+.toggle-slider:before {
+    position: absolute;
+    content: "";
+    height: 20px;
+    width: 20px;
+    left: 2px;
+    bottom: 2px;
+    background-color: var(--text-muted);
+    transition: all var(--transition-normal);
+    border-radius: 50%;
+}
+
+.toggle-switch input:checked + .toggle-slider {
+    background-color: var(--warning);
+    border-color: var(--warning);
+}
+
+.toggle-switch input:checked + .toggle-slider:before {
+    transform: translateX(24px);
+    background-color: var(--bg-primary);
+}
+
+.toggle-switch input:focus + .toggle-slider {
+    box-shadow: 0 0 4px var(--accent-primary);
+}
+
+.toggle-label {
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+}
+
+.toggle-label.enabled {
+    color: var(--warning);
+}
+
+/* Warning Banner */
+.warning-banner {
+    display: flex;
+    gap: 16px;
+    padding: 16px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+}
+
+.warning-banner.critical {
+    background: linear-gradient(135deg, rgba(239, 68, 68, 0.15) 0%, rgba(245, 158, 11, 0.1) 100%);
+    border: 2px solid var(--danger);
+}
+
+.warning-icon {
+    font-size: 32px;
+    line-height: 1;
+    flex-shrink: 0;
+}
+
+.warning-content {
+    flex: 1;
+}
+
+.warning-content strong {
+    color: var(--danger);
+    font-size: 14px;
+    display: block;
+    margin-bottom: 8px;
+}
+
+.warning-content p {
+    color: var(--text-secondary);
+    font-size: 13px;
+    margin: 8px 0;
+    line-height: 1.5;
+}
+
+.warning-content ul {
+    margin: 8px 0;
+    padding-left: 20px;
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.warning-content ul li {
+    margin: 4px 0;
+}
+
+.warning-content .warning-note {
+    font-size: 12px;
+    color: var(--text-muted);
+    font-style: italic;
+    margin-top: 12px;
+}
+
+/* AI Debug Status Panel */
+.ai-debug-status {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+}
+
+.status-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 0;
+    border-bottom: 1px solid var(--border-color);
+}
+
+.status-row:last-child {
+    border-bottom: none;
+}
+
+.status-label {
+    color: var(--text-secondary);
+    font-size: 13px;
+}
+
+.status-badge {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 12px;
+    border-radius: 20px;
+    background: var(--bg-primary);
+    font-size: 12px;
+    font-weight: 600;
+}
+
+.status-dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--text-muted);
+}
+
+.status-dot.off {
+    background: var(--text-muted);
+}
+
+.status-dot.on {
+    background: var(--warning);
+    box-shadow: 0 0 8px var(--warning);
+    animation: pulse-dot 1.5s infinite;
+}
+
+@keyframes pulse-dot {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.5; }
+}
+
+.status-badge.secured .status-text {
+    color: var(--success);
+}
+
+.status-badge.enabled .status-text {
+    color: var(--warning);
+}
+
+/* AI Debug Options Grid */
+.ai-debug-options-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+    gap: 12px;
+}
+
+.toggle-option {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+    cursor: pointer;
+    transition: all var(--transition-fast);
+}
+
+.toggle-option:hover {
+    border-color: var(--accent-primary);
+    background: var(--bg-hover);
+}
+
+.toggle-option input[type="checkbox"] {
+    width: 18px;
+    height: 18px;
+    cursor: pointer;
+    accent-color: var(--warning);
+}
+
+.option-info {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.option-icon {
+    font-size: 16px;
+    margin-bottom: 2px;
+}
+
+.option-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 13px;
+}
+
+.option-desc {
+    color: var(--text-muted);
+    font-size: 11px;
+}
+
+/* AI Instructions Box */
+.ai-instructions-box {
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+    border: 1px solid var(--border-color);
+}
+
+.ai-instructions-box p {
+    margin: 8px 0;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.ai-instructions-box code {
+    background: var(--bg-primary);
+    padding: 2px 6px;
+    border-radius: 4px;
+    font-family: var(--font-mono);
+    font-size: 12px;
+}
+
+.ai-instructions-box .btn {
+    margin-top: 12px;
+}
+
+/* =============================================================================
    SYSTEM RESOURCES PANEL (Combined Disk + Memory)
    ============================================================================= */
 
