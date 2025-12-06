@@ -130,6 +130,20 @@ Use these exact names with docker compose:
 - `xilriws`, `reactmap`, `koji`, `pma`, `shellder`
 - `grafana`, `victoriametrics`, `vmagent`
 
+### Graceful Shutdown Order
+
+When stopping the stack, use proper dependency order:
+1. **Stop apps first** - dragonite, golbat, admin, reactmap, koji
+2. **Stop infrastructure** - rotom, xilriws, pma, grafana
+3. **Stop database last** - database
+
+This prevents:
+- Database restart loops from improper shutdown
+- Corrupted transactions from apps killed mid-write
+- Container dependency issues
+
+**Note:** The Shellder GUI's Start/Stop buttons automatically handle this order.
+
 ---
 
 ## Database Operations
@@ -211,6 +225,14 @@ TRUNCATE TABLE accounts;
 - Enable fail2ban for SSH
 - Use SSL certificates via Let's Encrypt
 - Firewall all ports except needed (7070, 80, 443)
+
+### Fail2Ban Notes (Ubuntu 23.10+)
+
+When installing Fail2Ban on Python 3.12+ systems:
+- `asynchat` module was removed from stdlib
+- Shellder auto-installs `pyasynchat` package
+- nginx-badbots filter has regex compatibility issue → auto-fixed
+- If manual install, run: `pip3 install pyasynchat --break-system-packages`
 
 ---
 

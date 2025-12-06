@@ -112,6 +112,24 @@
   - grafana/, victoriametrics/, vmagent/, mysql_data/
   - Shellder/data/, Shellder/logs/, unown/logs/
 
+### Fail2Ban Python 3.11+ Compatibility (NEW)
+- **asynchat Fix** - Python 3.12 removed `asynchat` from stdlib
+  - `ensure_asynchat_available()` - Auto-installs pyasynchat package
+  - Applied in both installation and start/restart actions
+  - Works on Ubuntu 24.04 (Python 3.12) and newer
+- **nginx-badbots Filter Fix** - Stock filter has bad regex for Python 3.11+
+  - Original: `(?i)` in middle of regex (invalid in Python 3.11+)
+  - Fixed: Moves `(?i)` to start of expression
+  - Auto-detects and fixes during Fail2Ban installation
+  - Removes duplicate jail files (nginx.local → aegis.local only)
+
+### Graceful Docker Shutdown (NEW)
+- Prevents database restart loops when stopping via GUI
+- Stop order: Apps → Infrastructure → Database
+- Wait periods between service groups
+- Handles container dependencies properly
+- Fixes issue where clicking Stop would corrupt MariaDB state
+
 ---
 
 ## [2.0.0] - 2024-12 (Shellder Release)

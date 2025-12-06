@@ -319,6 +319,48 @@ Fixes these directories:
 
 ---
 
+## Sites & Security
+
+### Setup Wizard (in Dashboard)
+
+Located in Overview → Sites & Security. Guided 6-step setup:
+
+1. **Nginx** - Web server/reverse proxy
+2. **Sites** - Configure reverse proxy for services  
+3. **Certbot** - SSL certificates (Let's Encrypt)
+4. **Fail2Ban** - Brute-force protection
+5. **Authentication** - Basic Auth (htpasswd) or Authelia (SSO)
+6. **UFW** - Firewall rules
+
+### Security Status Dashboard
+
+Shows real-time status of all security services:
+- UFW Firewall (active/inactive, rules count)
+- Fail2Ban (active/inactive, banned IP count)
+- Authelia SSO (installed/running)
+- Basic Auth (user count from htpasswd)
+- SSL Certificates (expiry dates)
+
+### Authentication Options
+
+| Option | Description | Use Case |
+|--------|-------------|----------|
+| **Basic Auth** | htpasswd-based | Simple password protection |
+| **Authelia** | Full SSO container | 2FA, multiple users, access control |
+
+### Python Compatibility (Ubuntu 23.10+)
+
+**asynchat Module Missing (Python 3.12)**
+- Fail2Ban requires `asynchat` which was removed from Python 3.12
+- Shellder auto-installs `pyasynchat` package on install/start
+- Applied to both installation and control panel actions
+
+**Regex Flags (Python 3.11+)**
+- Global flags like `(?i)` must be at start of expression
+- nginx-badbots filter auto-fixed during Fail2Ban installation
+
+---
+
 ## Quick Reference
 
 ### Essential Commands
