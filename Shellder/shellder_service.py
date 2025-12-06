@@ -17807,7 +17807,21 @@ def api_db_events():
 @app.route('/api/stack/test')
 def api_stack_test():
     """Test MariaDB stack connection"""
-    return jsonify(stack_db.test_connection())
+    result = stack_db.test_connection()
+    # Add debug info
+    result['aegis_root'] = str(AEGIS_ROOT)
+    result['aegis_root_exists'] = AEGIS_ROOT.exists()
+    result['env_file_exists'] = (AEGIS_ROOT / '.env').exists()
+    return jsonify(result)
+
+@app.route('/api/stack/reload')
+def api_stack_reload():
+    """Reload MariaDB connection parameters"""
+    stack_db._load_connection_params()
+    result = stack_db.test_connection()
+    result['reloaded'] = True
+    result['aegis_root'] = str(AEGIS_ROOT)
+    return jsonify(result)
 
 @app.route('/api/stack/databases')
 def api_stack_databases():
