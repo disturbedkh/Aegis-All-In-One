@@ -7623,6 +7623,17 @@ def api_status():
             'uptime': str(timedelta(seconds=int(system.get('uptime', 0))))
         }
     
+    # Get server timezone info for log timestamp conversion
+    import time as time_module
+    try:
+        tz_offset_hours = -time_module.timezone / 3600  # Convert to hours, negate for correct sign
+        if time_module.daylight and time_module.localtime().tm_isdst:
+            tz_offset_hours = -time_module.altzone / 3600
+        tz_name = time_module.tzname[1] if time_module.daylight and time_module.localtime().tm_isdst else time_module.tzname[0]
+    except:
+        tz_offset_hours = 0
+        tz_name = 'UTC'
+    
     return jsonify({
         'version': SHELLDER_VERSION,
         'build': SHELLDER_BUILD,
@@ -7637,6 +7648,12 @@ def api_status():
         'xilriws': stats.get('xilriws', {}),
         'ports': stats.get('ports', {}),
         'services': stats.get('services', {}),
+        'server_timezone': {
+            'name': tz_name,
+            'offset_hours': tz_offset_hours,
+            'utc_now': datetime.utcnow().isoformat() + 'Z',
+            'local_now': datetime.now().isoformat()
+        },
         'timestamp': datetime.now().isoformat()
     })
 

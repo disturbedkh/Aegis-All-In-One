@@ -1173,6 +1173,14 @@ document.addEventListener('DOMContentLoaded', () => {
     // Log initial DOM state
     SHELLDER_DEBUG.debug('INIT', 'Initial DOM snapshot', SHELLDER_DEBUG.domSnapshot());
     
+    // Fetch server timezone for log timestamp conversion
+    try {
+        fetchServerTimezone();
+        SHELLDER_DEBUG.info('INIT', 'Server timezone fetch initiated');
+    } catch (e) {
+        SHELLDER_DEBUG.warn('INIT', 'Server timezone fetch failed (non-fatal)', { error: e.message });
+    }
+    
     try {
         initNavigation();
         SHELLDER_DEBUG.info('INIT', 'Navigation initialized successfully');
@@ -3886,16 +3894,42 @@ async function loadCustomLogs() {
     }
 }
 
+// Server timezone offset (fetched from /api/status)
+// Default to 0 (UTC) until fetched
+let serverTimezoneOffsetHours = 0;
+let serverTimezoneName = 'UTC';
+
+// Fetch and cache server timezone from /api/status
+async function fetchServerTimezone() {
+    try {
+        const response = await fetch('/api/status');
+        const data = await response.json();
+        if (data.server_timezone) {
+            serverTimezoneOffsetHours = data.server_timezone.offset_hours || 0;
+            serverTimezoneName = data.server_timezone.name || 'UTC';
+            console.log(`Server timezone: ${serverTimezoneName} (UTC${serverTimezoneOffsetHours >= 0 ? '+' : ''}${serverTimezoneOffsetHours})`);
+        }
+    } catch (e) {
+        console.warn('Could not fetch server timezone, defaulting to UTC:', e);
+    }
+}
+
 // Extract timestamp from log line
 function extractTimestamp(line) {
-    // Try various timestamp formats
+    // Try various timestamp formats in order of specificity
     const patterns = [
-        // ISO format with Z: 2025-12-05T15:08:06.863506872Z
-        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z?)/,
-        // Docker format: 2025-12-05 15:08:06
+        // ISO format with Z (UTC): 2025-12-05T15:08:06.863506872Z
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/,
+        // ISO format with explicit offset: 2025-12-06T01:14:36.682563504-05:00
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{2}:\d{2})/,
+        // ISO format without timezone (will need server TZ): 2025-12-05T15:08:06
+        /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)/,
+        // Apache CLF format: [06/Dec/2025:06:14:48 +0000]
+        /\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]/,
+        // Space-separated format (server local): 2025-12-05 15:08:06
         /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/,
-        // Time only with date context: 15:08:06.86
-        /^\[?(\d{2}:\d{2}:\d{2}(?:\.\d+)?)/
+        // Time only (server local, no date): 15:08:06.86
+        /^\[?(\d{2}:\d{2}:\d{2}(?:\.\d+)?)\]?\s*\|/
     ];
     
     for (const pattern of patterns) {
@@ -3909,38 +3943,86 @@ function extractTimestamp(line) {
 }
 
 // Parse log timestamp string to Date object
-// Docker logs typically use UTC timestamps
+// Handles multiple formats and timezones correctly
 function parseLogTimestamp(timestampStr) {
     if (!timestampStr) return null;
     
     try {
-        // Check if it's a full ISO timestamp
-        if (timestampStr.includes('T') || timestampStr.includes(' ')) {
-            // Full datetime - Docker uses UTC
-            let dateStr = timestampStr;
-            
-            // Add Z if not present to indicate UTC
-            if (!dateStr.endsWith('Z') && dateStr.includes('T')) {
-                // Remove fractional seconds beyond 3 digits for parsing
-                dateStr = dateStr.replace(/(\.\d{3})\d*/, '$1');
-                if (!dateStr.endsWith('Z')) dateStr += 'Z';
-            }
-            
+        // 1. ISO format with Z suffix (UTC) - already correct
+        if (timestampStr.endsWith('Z')) {
+            const dateStr = timestampStr.replace(/(\.\d{3})\d*Z$/, '$1Z');
             return new Date(dateStr);
-        } else {
-            // Time only - assume today in UTC
-            const today = new Date();
-            const [hours, minutes, seconds] = timestampStr.split(':').map(s => parseFloat(s));
+        }
+        
+        // 2. ISO format with explicit offset (e.g., -05:00)
+        if (/[+-]\d{2}:\d{2}$/.test(timestampStr)) {
+            const dateStr = timestampStr.replace(/(\.\d{3})\d*([+-])/, '$1$2');
+            return new Date(dateStr);
+        }
+        
+        // 3. Apache CLF format: 06/Dec/2025:06:14:48 +0000
+        const clfMatch = timestampStr.match(/(\d{2})\/(\w{3})\/(\d{4}):(\d{2}):(\d{2}):(\d{2}) ([+-]\d{4})/);
+        if (clfMatch) {
+            const months = { Jan: 0, Feb: 1, Mar: 2, Apr: 3, May: 4, Jun: 5, Jul: 6, Aug: 7, Sep: 8, Oct: 9, Nov: 10, Dec: 11 };
+            const [, day, mon, year, hour, min, sec, tz] = clfMatch;
+            const tzHours = parseInt(tz.slice(0, 3), 10);
+            const tzMins = parseInt(tz.slice(0, 1) + tz.slice(3), 10);
             const date = new Date(Date.UTC(
-                today.getUTCFullYear(),
-                today.getUTCMonth(),
-                today.getUTCDate(),
-                Math.floor(hours),
+                parseInt(year), months[mon], parseInt(day),
+                parseInt(hour) - tzHours, parseInt(min) - tzMins, parseInt(sec)
+            ));
+            return date;
+        }
+        
+        // 4. ISO format without timezone - treat as server local time
+        if (timestampStr.includes('T')) {
+            const dateStr = timestampStr.replace(/(\.\d{3})\d*$/, '$1');
+            // Parse as local, then adjust for server timezone
+            const parts = dateStr.split(/[T:.-]/);
+            const date = new Date(Date.UTC(
+                parseInt(parts[0]), parseInt(parts[1]) - 1, parseInt(parts[2]),
+                parseInt(parts[3]) - serverTimezoneOffsetHours,
+                parseInt(parts[4]),
+                parseInt(parts[5] || 0)
+            ));
+            return date;
+        }
+        
+        // 5. Space-separated format (server local time): 2025-12-05 15:08:06
+        if (timestampStr.includes(' ') && timestampStr.includes('-')) {
+            const [datePart, timePart] = timestampStr.split(' ');
+            const [year, month, day] = datePart.split('-').map(Number);
+            const [hour, minute, second] = timePart.split(':').map(s => parseFloat(s));
+            // Convert server local time to UTC
+            const date = new Date(Date.UTC(
+                year, month - 1, day,
+                Math.floor(hour) - serverTimezoneOffsetHours,
+                Math.floor(minute),
+                Math.floor(second || 0)
+            ));
+            return date;
+        }
+        
+        // 6. Time only (server local, no date) - use today's date in server timezone
+        if (/^\d{2}:\d{2}:\d{2}/.test(timestampStr)) {
+            const now = new Date();
+            const [hours, minutes, seconds] = timestampStr.split(':').map(s => parseFloat(s));
+            // Get server's current date (adjust for server timezone)
+            const serverNow = new Date(now.getTime() + (serverTimezoneOffsetHours * 60 * 60 * 1000));
+            const date = new Date(Date.UTC(
+                serverNow.getUTCFullYear(),
+                serverNow.getUTCMonth(),
+                serverNow.getUTCDate(),
+                Math.floor(hours) - serverTimezoneOffsetHours,
                 Math.floor(minutes),
                 Math.floor(seconds || 0)
             ));
             return date;
         }
+        
+        // Fallback: try native parsing
+        return new Date(timestampStr);
+        
     } catch (e) {
         console.error('Failed to parse timestamp:', timestampStr, e);
         return null;
@@ -3952,36 +4034,73 @@ function convertLogTimestamp(line) {
     // Find timestamp in various formats and convert to local time
     const patterns = [
         // ISO format with Z (UTC): 2025-12-05T15:08:06.863506872Z
-        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?Z/, isUTC: true },
-        // ISO format without Z (assume UTC from Docker)
-        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(\.\d+)?(?!Z)/, isUTC: true }
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?Z)/, type: 'utc' },
+        // ISO format with explicit offset: 2025-12-06T01:14:36.682563504-05:00
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?[+-]\d{2}:\d{2})/, type: 'offset' },
+        // Apache CLF format: [06/Dec/2025:06:14:48 +0000]
+        { regex: /\[(\d{2}\/\w{3}\/\d{4}:\d{2}:\d{2}:\d{2} [+-]\d{4})\]/, type: 'clf' },
+        // Space-separated format (server local): 2025-12-05 15:08:06
+        { regex: /(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})/, type: 'server_local' },
+        // ISO format without Z (server local): 2025-12-05T15:08:06
+        { regex: /(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?)/, type: 'server_local' },
+        // Time only (server local): 15:08:06.86
+        { regex: /^(\[?)(\d{2}:\d{2}:\d{2}(?:\.\d+)?)(\]?\s*\|)/, type: 'time_only' }
     ];
     
     for (const pattern of patterns) {
         const match = line.match(pattern.regex);
         if (match) {
             try {
-                // Always treat Docker timestamps as UTC
-                let dateStr = match[0];
-                if (!dateStr.endsWith('Z')) {
-                    dateStr = dateStr.replace(/(\.\d{3})\d*/, '$1') + 'Z';
+                let date;
+                const timestampStr = match[1] || match[2]; // Handle time_only group differently
+                
+                switch (pattern.type) {
+                    case 'utc':
+                        date = new Date(timestampStr.replace(/(\.\d{3})\d*Z$/, '$1Z'));
+                        break;
+                    case 'offset':
+                        date = new Date(timestampStr.replace(/(\.\d{3})\d*([+-])/, '$1$2'));
+                        break;
+                    case 'clf':
+                        date = parseLogTimestamp(timestampStr);
+                        break;
+                    case 'server_local':
+                        date = parseLogTimestamp(timestampStr);
+                        break;
+                    case 'time_only':
+                        // For time-only, prepend today's date
+                        date = parseLogTimestamp(match[2]);
+                        if (date) {
+                            const localTime = date.toLocaleTimeString(undefined, {
+                                hour: '2-digit',
+                                minute: '2-digit',
+                                second: '2-digit',
+                                hour12: true
+                            });
+                            return line.replace(match[0], `${match[1]}[${localTime}]${match[3]}`);
+                        }
+                        return line;
+                    default:
+                        continue;
                 }
-                const date = new Date(dateStr);
                 
-                // Format as local time with timezone abbreviation
-                const localTime = date.toLocaleString(undefined, {
-                    year: 'numeric',
-                    month: '2-digit',
-                    day: '2-digit',
-                    hour: '2-digit',
-                    minute: '2-digit',
-                    second: '2-digit',
-                    hour12: true
-                });
-                
-                return line.replace(match[0], `[${localTime}]`);
+                if (date && !isNaN(date.getTime())) {
+                    // Format as local time with timezone abbreviation
+                    const localTime = date.toLocaleString(undefined, {
+                        year: 'numeric',
+                        month: '2-digit',
+                        day: '2-digit',
+                        hour: '2-digit',
+                        minute: '2-digit',
+                        second: '2-digit',
+                        hour12: true
+                    });
+                    
+                    return line.replace(match[0], `[${localTime}]`);
+                }
             } catch (e) {
                 // Keep original if conversion fails
+                console.warn('Timestamp conversion failed:', e);
             }
         }
     }
