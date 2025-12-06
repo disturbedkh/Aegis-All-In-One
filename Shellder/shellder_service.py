@@ -16390,6 +16390,46 @@ def api_install_fail2ban():
         else:
             result['steps'][-1]['status'] = 'completed'
         
+        # Step 2b: Fix nginx-badbots filter for Python 3.11+ compatibility
+        # The stock filter has (?i) in the middle of regex which Python 3.11+ doesn't allow
+        result['steps'].append({'name': 'Fixing filter compatibility', 'status': 'running'})
+        
+        badbots_filter = '/etc/fail2ban/filter.d/nginx-badbots.conf'
+        if os.path.exists(badbots_filter):
+            try:
+                with open(badbots_filter, 'r') as f:
+                    filter_content = f.read()
+                
+                # Check if it has the problematic (?i) in the middle
+                if '.*(?i)(' in filter_content:
+                    # Fix it by moving (?i) to the start of the regex
+                    fixed_content = '''# Fail2Ban filter for bad bots and vulnerability scanners
+# Fixed for Python 3.11+ (moved (?i) to start of regex)
+[Definition]
+failregex = (?i)^<HOST> -.*"(GET|POST|HEAD).*HTTP.*" (404|444|403|400) .*".*(nikto|sqlmap|nmap|masscan|zgrab|curl|wget|python-requests|go-http-client|libwww|lwp-trivial|HTTrack|harvest|extract|grab|miner).*"$
+            ^<HOST> -.*"(GET|POST|HEAD).*(wp-login|wp-admin|xmlrpc|\\.env|\\.git|phpmyadmin|admin|shell|eval).*HTTP.*"
+ignoreregex =
+'''
+                    with open('/tmp/nginx-badbots.conf', 'w') as f:
+                        f.write(fixed_content)
+                    subprocess.run(['sudo', 'mv', '/tmp/nginx-badbots.conf', badbots_filter], 
+                                 capture_output=True, timeout=10)
+                    subprocess.run(['sudo', 'chmod', '644', badbots_filter], 
+                                 capture_output=True, timeout=10)
+                    result['output'] += '\n✓ Fixed nginx-badbots filter for Python 3.11+ compatibility\n'
+                else:
+                    result['output'] += '\n✓ nginx-badbots filter already compatible\n'
+            except Exception as e:
+                result['output'] += f'\nWarning: Could not check/fix nginx-badbots filter: {e}\n'
+        
+        result['steps'][-1]['status'] = 'completed'
+        
+        # Remove any old duplicate jail files
+        old_nginx_jail = '/etc/fail2ban/jail.d/nginx.local'
+        if os.path.exists(old_nginx_jail):
+            subprocess.run(['sudo', 'rm', '-f', old_nginx_jail], capture_output=True, timeout=10)
+            result['output'] += '✓ Removed old duplicate nginx.local jail file\n'
+        
         # Step 3: Create jail configuration (only enable nginx jails if logs exist)
         result['steps'].append({'name': 'Creating jail configuration', 'status': 'running'})
         
