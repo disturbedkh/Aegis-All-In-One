@@ -5007,7 +5007,7 @@ async function editFile(path) {
         fileNameEl.textContent = `📝 ${path.split('/').pop()}`;
         contentEl.value = data.content || '';
         infoEl.textContent = `Path: ${path}`;
-        modal.style.display = 'flex';
+        modal.classList.add('active');
         console.log('Editor modal opened');
     } catch (e) {
         console.error('editFile error:', e);
@@ -5016,7 +5016,7 @@ async function editFile(path) {
 }
 
 function closeFileEditor() {
-    document.getElementById('fileEditorModal').style.display = 'none';
+    document.getElementById('fileEditorModal').classList.remove('active');
     selectedFilePath = null;
 }
 
@@ -5045,12 +5045,12 @@ async function saveFileContent() {
 // Create new file
 function showCreateFileModal() {
     document.getElementById('newFileName').value = '';
-    document.getElementById('createFileModal').style.display = 'flex';
+    document.getElementById('createFileModal').classList.add('active');
     document.getElementById('newFileName').focus();
 }
 
 function closeCreateFileModal() {
-    document.getElementById('createFileModal').style.display = 'none';
+    document.getElementById('createFileModal').classList.remove('active');
 }
 
 async function createNewFile() {
@@ -5084,12 +5084,12 @@ async function createNewFile() {
 // Create new folder
 function showCreateFolderModal() {
     document.getElementById('newFolderName').value = '';
-    document.getElementById('createFolderModal').style.display = 'flex';
+    document.getElementById('createFolderModal').classList.add('active');
     document.getElementById('newFolderName').focus();
 }
 
 function closeCreateFolderModal() {
-    document.getElementById('createFolderModal').style.display = 'none';
+    document.getElementById('createFolderModal').classList.remove('active');
 }
 
 async function createNewFolder() {
@@ -5164,14 +5164,14 @@ function showRenameModal(path, currentName) {
     }
     
     input.value = currentName;
-    modal.style.display = 'flex';
+    modal.classList.add('active');
     input.focus();
     input.select();
     console.log('Rename modal opened');
 }
 
 function closeRenameModal() {
-    document.getElementById('renameModal').style.display = 'none';
+    document.getElementById('renameModal').classList.remove('active');
     selectedFilePath = null;
 }
 
@@ -5264,11 +5264,11 @@ function closeFileInfo() {
 function changeOwnership() {
     document.getElementById('chownInput').value = '';
     document.getElementById('chownRecursive').checked = false;
-    document.getElementById('chownModal').style.display = 'flex';
+    document.getElementById('chownModal').classList.add('active');
 }
 
 function closeChownModal() {
-    document.getElementById('chownModal').style.display = 'none';
+    document.getElementById('chownModal').classList.remove('active');
 }
 
 async function applyChown() {
@@ -5308,7 +5308,7 @@ function changePermissions() {
     document.getElementById('chmodRecursive').checked = false;
     
     updateChmodPreview();
-    document.getElementById('chmodModal').style.display = 'flex';
+    document.getElementById('chmodModal').classList.add('active');
     
     // Add event listeners to update preview
     document.querySelectorAll('#chmodModal input[type="checkbox"]').forEach(cb => {
@@ -5335,7 +5335,7 @@ function updateChmodPreview() {
 }
 
 function closeChmodModal() {
-    document.getElementById('chmodModal').style.display = 'none';
+    document.getElementById('chmodModal').classList.remove('active');
 }
 
 async function applyChmod() {
@@ -5453,13 +5453,13 @@ function showSudoPasswordModal(targetUser, targetPath, action) {
     document.getElementById('sudoTargetUser').textContent = targetUser || 'current user';
     document.getElementById('sudoTargetPath').textContent = targetPath || '/';
     document.getElementById('sudoPasswordInput').value = '';
-    document.getElementById('sudoPasswordModal').style.display = 'flex';
+    document.getElementById('sudoPasswordModal').classList.add('active');
     document.getElementById('sudoPasswordInput').focus();
     pendingSudoAction = action;
 }
 
 function closeSudoPasswordModal() {
-    document.getElementById('sudoPasswordModal').style.display = 'none';
+    document.getElementById('sudoPasswordModal').classList.remove('active');
     document.getElementById('sudoPasswordInput').value = '';
     pendingSudoAction = null;
 }
@@ -5851,7 +5851,7 @@ async function showCrashContext(crashId) {
         logEl.innerHTML = highlightCrashLine(context, data.message);
         
         // Show modal
-        document.getElementById('logContextModal').style.display = 'flex';
+        document.getElementById('logContextModal').classList.add('active');
         
     } catch (e) {
         showToast(`Failed to load crash context: ${e.message}`, 'error');
@@ -5903,7 +5903,7 @@ async function loadMoreContext(delta) {
 }
 
 function closeLogModal() {
-    document.getElementById('logContextModal').style.display = 'none';
+    document.getElementById('logContextModal').classList.remove('active');
     currentCrashId = null;
 }
 
@@ -5911,7 +5911,7 @@ async function showDeviceDetail(deviceName) {
     const modal = document.getElementById('deviceDetailModal');
     const content = document.getElementById('deviceDetailContent');
     
-    modal.style.display = 'flex';
+    modal.classList.add('active');
     content.innerHTML = '<div class="loading">Loading device details...</div>';
     
     try {
@@ -6028,7 +6028,7 @@ async function showDeviceDetail(deviceName) {
 }
 
 function closeDeviceModal() {
-    document.getElementById('deviceDetailModal').style.display = 'none';
+    document.getElementById('deviceDetailModal').classList.remove('active');
 }
 
 async function showDeviceCrashes(deviceName) {
@@ -6066,7 +6066,7 @@ async function searchDeviceLogs(deviceName) {
         document.getElementById('logContextRange').textContent = '';
         content.textContent = formattedResults;
         
-        document.getElementById('logContextModal').style.display = 'flex';
+        document.getElementById('logContextModal').classList.add('active');
         
     } catch (e) {
         showToast(`Search failed: ${e.message}`, 'error');
@@ -7341,7 +7341,7 @@ function showSiteSetupModal() {
 
 // Show authentication setup modal
 async function showAuthSetupModal() {
-    document.getElementById('authSetupModal').style.display = 'flex';
+    document.getElementById('authSetupModal').classList.add('active');
     
     // Hide both setup panels, show choice
     document.getElementById('basicAuthSetupPanel').style.display = 'none';
@@ -7354,7 +7354,7 @@ async function showAuthSetupModal() {
 
 // Close auth setup modal
 function closeAuthSetupModal() {
-    document.getElementById('authSetupModal').style.display = 'none';
+    document.getElementById('authSetupModal').classList.remove('active');
 }
 
 // Load authentication status for both options
@@ -10382,11 +10382,11 @@ function showWebhookModal(editIndex = -1) {
         title.textContent = '🔔 Add Webhook';
     }
     
-    modal.style.display = 'flex';
+    modal.classList.add('active');
 }
 
 function closeWebhookModal() {
-    document.getElementById('webhookModal').style.display = 'none';
+    document.getElementById('webhookModal').classList.remove('active');
 }
 
 function applyWebhookPreset(preset) {
@@ -13510,7 +13510,7 @@ async function editComponent(componentName) {
         toggleLocalRemote();
         
         // Show modal
-        document.getElementById('componentEditorModal').style.display = 'flex';
+        document.getElementById('componentEditorModal').classList.add('active');
         
     } catch (error) {
         console.error('Error loading component config:', error);
@@ -13527,7 +13527,7 @@ function toggleLocalRemote() {
 
 // Close component editor
 function closeComponentEditor() {
-    document.getElementById('componentEditorModal').style.display = 'none';
+    document.getElementById('componentEditorModal').classList.remove('active');
     currentEditingComponent = null;
 }
 
