@@ -1346,6 +1346,9 @@ class DeviceManager:
                 """)
                 for row in cursor.fetchall():
                     name = row[0]
+                    # Skip 'unknown' devices - these are not real devices, just placeholder entries
+                    if not name or name.lower() == 'unknown' or name.strip() == '':
+                        continue
                     if name not in devices:
                         devices[name] = {
                             'uuid': name,
@@ -1373,11 +1376,15 @@ class DeviceManager:
         
         # 3. Calculate derived stats
         for name, dev in devices.items():
+            # Double-check: skip any 'unknown' devices that might have slipped through
+            if not name or name.lower() == 'unknown' or name.strip() == '':
+                continue
             dev['uptime_percent'] = self._calculate_uptime_percent(dev)
             dev['crash_rate'] = self._calculate_crash_rate(dev)
             dev['recent_crashes'] = self._get_recent_crashes(name, limit=5)
         
-        return list(devices.values())
+        # 4. Filter out any 'unknown' devices before returning
+        return [dev for dev in devices.values() if dev.get('uuid') and dev['uuid'].lower() != 'unknown' and dev['uuid'].strip() != '']
     
     def _get_device_stats(self, device_name):
         """Get device stats from SQLite"""
@@ -1475,21 +1482,26 @@ class DeviceManager:
         try:
             cursor = conn.cursor()
             if device_name:
+                # Also filter out 'unknown' devices even when specific device requested
+                if device_name.lower() == 'unknown':
+                    return []
                 cursor.execute("""
                     SELECT id, device_name, crash_type, error_message, log_source,
                            log_line_start, log_line_end, is_during_startup, 
                            resolved, created_at
                     FROM device_crashes
-                    WHERE device_name = ?
+                    WHERE device_name = ? AND device_name != 'unknown' AND device_name != ''
                     ORDER BY created_at DESC
                     LIMIT ?
                 """, (device_name, limit))
             else:
+                # Filter out 'unknown' devices from all crashes
                 cursor.execute("""
                     SELECT id, device_name, crash_type, error_message, log_source,
                            log_line_start, log_line_end, is_during_startup,
                            resolved, created_at
                     FROM device_crashes
+                    WHERE device_name != 'unknown' AND device_name != ''
                     ORDER BY created_at DESC
                     LIMIT ?
                 """, (limit,))
@@ -1647,6 +1659,11 @@ class DeviceManager:
                     log_line_start=None, log_line_end=None, log_context=None,
                     is_during_startup=False):
         """Record a device crash with log reference"""
+        # Validate device name - don't record crashes for 'unknown' devices
+        # These are system errors, not device-specific crashes
+        if not device_name or device_name.lower() == 'unknown' or device_name.strip() == '':
+            return None
+        
         conn = self._connect_sqlite()
         if not conn:
             return None
@@ -1780,7 +1797,16 @@ class DeviceManager:
             for pattern, crash_type in patterns:
                 match = pattern.search(line)
                 if match:
-                    device_name = match.group(1) if match.groups() else 'unknown'
+                    # Only extract device name if pattern has a capture group
+                    # If no device name found, skip this crash - it's not device-specific
+                    if match.groups():
+                        device_name = match.group(1)
+                        # Validate device name - skip if empty, 'unknown', or invalid
+                        if not device_name or device_name.lower() == 'unknown' or device_name.strip() == '':
+                            continue
+                    else:
+                        # Pattern matched but no device name captured - this is a system error, not device-specific
+                        continue
                     
                     # Get context (5 lines before and after)
                     context_start = max(0, i - 5)
@@ -2765,7 +2791,11 @@ class DeviceMonitor:
         if not self.device_manager:
             return
         
-        device = event.get('device', 'unknown')
+        device = event.get('device', '')
+        # Don't record crashes for 'unknown' devices - these are system errors, not device-specific
+        if not device or device.lower() == 'unknown' or device.strip() == '':
+            return
+        
         crash_type = event.get('type', 'unknown')
         message = event.get('raw', event.get('message', ''))[:500]
         
@@ -2881,13 +2911,16 @@ class DeviceMonitor:
                         
                         if db_devices:
                             for db_dev in db_devices:
-                                device_name = db_dev.get('uuid', db_dev.get('device_id', 'unknown'))
+                                device_name = db_dev.get('uuid') or db_dev.get('device_id')
+                                # Skip devices without a valid name - 'unknown' is not a real device
+                                if not device_name or device_name.lower() == 'unknown' or device_name.strip() == '':
+                                    continue
                                 
                                 with self.lock:
                                     if device_name not in self.devices:
                                         self.devices[device_name] = {
                                             'name': device_name,
-                                            'status': 'unknown',
+                                            'status': 'offline',  # Default to offline, not 'unknown'
                                             'source': 'database',
                                             'events': [],
                                             'errors': 0,
@@ -10154,6 +10187,77 @@ def api_xilriws_container_status():
         return jsonify({'running': False, 'status': 'not found'})
     except Exception as e:
         return jsonify({'running': False, 'status': 'error', 'error': str(e)})
+
+@app.route('/api/xilriws/proxy/<path:proxy_address>/stats')
+def api_xilriws_proxy_stats(proxy_address):
+    """Get detailed stats for a specific proxy (all-time + current session)"""
+    try:
+        # Decode URL-encoded proxy address
+        from urllib.parse import unquote
+        proxy_address = unquote(proxy_address)
+        
+        result = {
+            'proxy': proxy_address,
+            'all_time': {},
+            'current_session': {},
+            'first_seen': None,
+            'last_seen': None
+        }
+        
+        # Get all-time stats from database
+        conn = shellder_db._connect()
+        if conn:
+            try:
+                cursor = conn.cursor()
+                cursor.execute("""
+                    SELECT total_requests, successful, failed, timeouts, 
+                           unreachable, bot_blocked, success_rate,
+                           first_seen, last_seen
+                    FROM xilriws_proxy_stats
+                    WHERE proxy_address = ?
+                """, (proxy_address,))
+                row = cursor.fetchone()
+                if row:
+                    result['all_time'] = {
+                        'total_requests': row[0] or 0,
+                        'successful': row[1] or 0,
+                        'failed': row[2] or 0,
+                        'timeouts': row[3] or 0,
+                        'unreachable': row[4] or 0,
+                        'bot_blocked': row[5] or 0,
+                        'success_rate': round(row[6] or 0, 1) if row[6] else 0
+                    }
+                    result['first_seen'] = row[7]
+                    result['last_seen'] = row[8]
+            except Exception as e:
+                print(f"Error getting all-time proxy stats: {e}")
+            finally:
+                conn.close()
+        
+        # Get current session stats from live stats collector
+        stats = stats_collector.get_all_stats()
+        xilriws_stats = stats.get('xilriws', {})
+        proxy_stats = xilriws_stats.get('proxy_stats', {})
+        
+        if proxy_address in proxy_stats:
+            session_data = proxy_stats[proxy_address]
+            total_requests = session_data.get('requests', 0)
+            success = session_data.get('success', 0)
+            fail = session_data.get('fail', 0)
+            
+            result['current_session'] = {
+                'requests': total_requests,
+                'success': success,
+                'fail': fail,
+                'timeout': session_data.get('timeout', 0),
+                'unreachable': session_data.get('unreachable', 0),
+                'bot_blocked': session_data.get('bot_blocked', 0),
+                'success_rate': round((success / total_requests * 100) if total_requests > 0 else 0, 1)
+            }
+        
+        return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
 
 # =============================================================================
 # NGINX MANAGEMENT ENDPOINTS

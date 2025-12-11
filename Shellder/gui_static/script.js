@@ -2106,8 +2106,10 @@ function updateProxyStats(proxyStats) {
         // Highlight consistently failing proxies
         const rowClass = stats.unreachable > 3 ? 'proxy-problematic' : '';
         
+        // Escape proxy for use in onclick attribute (replace single quotes)
+        const escapedProxy = proxy.replace(/'/g, "\\'");
         html += `
-            <tr class="${rowClass}">
+            <tr class="${rowClass} clickable-row" onclick="showProxyDetails('${escapedProxy}')" style="cursor: pointer;" title="Click to view detailed stats">
                 <td class="proxy-addr" title="${proxy}">${truncateProxy(proxy)}</td>
                 <td class="success">${stats.success || 0}</td>
                 <td class="fail">${stats.fail || 0}</td>
@@ -2119,6 +2121,132 @@ function updateProxyStats(proxyStats) {
     
     html += '</tbody></table>';
     container.innerHTML = html;
+}
+
+// Show detailed proxy stats modal
+async function showProxyDetails(proxyAddress) {
+    const modal = document.getElementById('proxyDetailsModal');
+    const content = document.getElementById('proxyDetailsContent');
+    
+    if (!modal || !content) return;
+    
+    modal.style.display = 'block';
+    content.innerHTML = '<div class="loading">Loading proxy details...</div>';
+    
+    try {
+        // URL encode the proxy address for the API call
+        const encodedProxy = encodeURIComponent(proxyAddress);
+        const data = await fetchAPI(`/api/xilriws/proxy/${encodedProxy}/stats`);
+        
+        if (data.error) {
+            content.innerHTML = `<div class="error-msg">Error: ${data.error}</div>`;
+            return;
+        }
+        
+        const allTime = data.all_time || {};
+        const session = data.current_session || {};
+        
+        // Calculate percentages
+        const allTimeTotal = allTime.total_requests || 0;
+        const allTimeSuccessRate = allTimeTotal > 0 
+            ? ((allTime.successful || 0) / allTimeTotal * 100).toFixed(1) 
+            : '0.0';
+        const sessionTotal = session.requests || 0;
+        const sessionSuccessRate = sessionTotal > 0 
+            ? ((session.success || 0) / sessionTotal * 100).toFixed(1) 
+            : '0.0';
+        
+        content.innerHTML = `
+            <div class="proxy-details">
+                <div class="proxy-details-header">
+                    <h3>${escapeHtml(proxyAddress)}</h3>
+                    <div class="proxy-meta">
+                        ${data.first_seen ? `<div><strong>First Seen:</strong> ${formatTime(data.first_seen)}</div>` : ''}
+                        ${data.last_seen ? `<div><strong>Last Seen:</strong> ${formatTime(data.last_seen)}</div>` : ''}
+                    </div>
+                </div>
+                
+                <div class="proxy-stats-sections">
+                    <div class="proxy-stats-section">
+                        <h4>📈 All-Time Statistics</h4>
+                        <div class="stats-grid-detailed">
+                            <div class="stat-item">
+                                <span class="stat-label">Total Requests</span>
+                                <span class="stat-value">${allTimeTotal.toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Successful</span>
+                                <span class="stat-value success">${(allTime.successful || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Failed</span>
+                                <span class="stat-value danger">${(allTime.failed || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Success Rate</span>
+                                <span class="stat-value ${allTimeSuccessRate > 80 ? 'success' : allTimeSuccessRate > 50 ? 'warning' : 'danger'}">${allTimeSuccessRate}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Timeouts</span>
+                                <span class="stat-value">${(allTime.timeouts || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Unreachable</span>
+                                <span class="stat-value">${(allTime.unreachable || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Bot Blocked</span>
+                                <span class="stat-value">${(allTime.bot_blocked || 0).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="proxy-stats-section">
+                        <h4>🔄 Current Session</h4>
+                        <div class="stats-grid-detailed">
+                            <div class="stat-item">
+                                <span class="stat-label">Requests</span>
+                                <span class="stat-value">${sessionTotal.toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Successful</span>
+                                <span class="stat-value success">${(session.success || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Failed</span>
+                                <span class="stat-value danger">${(session.fail || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Success Rate</span>
+                                <span class="stat-value ${sessionSuccessRate > 80 ? 'success' : sessionSuccessRate > 50 ? 'warning' : 'danger'}">${sessionSuccessRate}%</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Timeouts</span>
+                                <span class="stat-value">${(session.timeout || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Unreachable</span>
+                                <span class="stat-value">${(session.unreachable || 0).toLocaleString()}</span>
+                            </div>
+                            <div class="stat-item">
+                                <span class="stat-label">Bot Blocked</span>
+                                <span class="stat-value">${(session.bot_blocked || 0).toLocaleString()}</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        `;
+    } catch (e) {
+        content.innerHTML = `<div class="error-msg">Failed to load proxy details: ${e.message}</div>`;
+    }
+}
+
+function closeProxyDetails() {
+    const modal = document.getElementById('proxyDetailsModal');
+    if (modal) {
+        modal.style.display = 'none';
+    }
 }
 
 function truncateProxy(proxy) {
@@ -5724,7 +5852,7 @@ async function loadDevicesList() {
                                 </span>
                             </td>
                             <td class="device-name" onclick="showDeviceDetail('${d.uuid}')">
-                                ${d.uuid || 'Unknown'}
+                                ${d.uuid || '-'}
                                 ${d.origin ? `<small class="device-origin">${d.origin}</small>` : ''}
                             </td>
                             <td>${d.instance || '-'}</td>
@@ -6659,7 +6787,7 @@ async function loadStackDevices() {
                     <div class="device-card ${d.online ? 'online' : 'offline'}">
                         <div class="device-header">
                             <span class="device-status ${d.online ? 'online' : 'offline'}">●</span>
-                            <span class="device-uuid">${d.uuid || 'Unknown'}</span>
+                            <span class="device-uuid">${d.uuid || '-'}</span>
                         </div>
                         <div class="device-info">
                             <div class="device-row">
