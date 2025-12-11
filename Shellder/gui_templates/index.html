@@ -4068,7 +4068,10 @@
             </div>
             <div class="modal-body">
                 <div class="auth-choice-section">
-                    <p class="info-text">Choose how to protect your sites with authentication. You can use either option or both.</p>
+                    <p class="info-text">Choose how to protect your sites with authentication. <strong>⚠️ You must choose ONE method only - using both Basic Auth and Authelia together can cause conflicts.</strong></p>
+                    <div id="authConflictWarning" class="warning-box" style="display: none; margin: 15px 0; padding: 12px; background: var(--warning-bg, #fff3cd); border-left: 4px solid var(--warning-color, #ffc107); border-radius: 4px;">
+                        <strong>⚠️ Conflict Detected:</strong> <span id="authConflictMessage"></span>
+                    </div>
                     
                     <div class="auth-options-grid">
                         <!-- Basic Auth Option -->

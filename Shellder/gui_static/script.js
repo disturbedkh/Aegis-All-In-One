@@ -7363,7 +7363,9 @@ async function loadAuthStatus() {
         // Load Basic Auth status
         const basicAuthData = await fetchAPI('/api/security/basicauth/users');
         const basicAuthStatus = document.getElementById('basicAuthStatus');
-        if (basicAuthData.users && basicAuthData.users.length > 0) {
+        const hasBasicAuth = basicAuthData.users && basicAuthData.users.length > 0;
+        
+        if (hasBasicAuth) {
             basicAuthStatus.textContent = `${basicAuthData.users.length} user(s)`;
             basicAuthStatus.className = 'auth-status configured';
         } else {
@@ -7374,8 +7376,11 @@ async function loadAuthStatus() {
         // Load Authelia status
         const autheliaData = await fetchAPI('/api/security/authelia/status');
         const autheliaStatus = document.getElementById('autheliaStatus');
-        if (autheliaData.installed) {
-            if (autheliaData.running) {
+        const hasAuthelia = autheliaData.installed;
+        const autheliaRunning = autheliaData.running;
+        
+        if (hasAuthelia) {
+            if (autheliaRunning) {
                 autheliaStatus.textContent = 'Running';
                 autheliaStatus.className = 'auth-status running';
             } else {
@@ -7387,11 +7392,88 @@ async function loadAuthStatus() {
             autheliaStatus.className = 'auth-status';
         }
         
+        // Check for conflicts and update UI
+        checkAuthConflict(hasBasicAuth, hasAuthelia, autheliaRunning);
+        
+        // Update button states based on conflicts
+        updateAuthButtonStates(hasBasicAuth, hasAuthelia, autheliaRunning);
+        
         // Update the wizard step status as well
         updateAuthWizardStep(basicAuthData, autheliaData);
         
     } catch (e) {
         console.error('Error loading auth status:', e);
+    }
+}
+
+// Check for authentication conflicts
+function checkAuthConflict(hasBasicAuth, hasAuthelia, autheliaRunning) {
+    const warningBox = document.getElementById('authConflictWarning');
+    const warningMessage = document.getElementById('authConflictMessage');
+    
+    if (!warningBox || !warningMessage) return;
+    
+    if (hasBasicAuth && hasAuthelia) {
+        warningBox.style.display = 'block';
+        if (autheliaRunning) {
+            warningMessage.textContent = 'Both Basic Auth and Authelia are configured. Authelia is currently running. Please disable Basic Auth or stop Authelia to avoid conflicts.';
+        } else {
+            warningMessage.textContent = 'Both Basic Auth and Authelia are configured. Please disable one to avoid conflicts.';
+        }
+    } else {
+        warningBox.style.display = 'none';
+    }
+}
+
+// Update authentication button states based on conflicts
+function updateAuthButtonStates(hasBasicAuth, hasAuthelia, autheliaRunning) {
+    const basicAuthCard = document.getElementById('basicAuthCard');
+    const autheliaCard = document.getElementById('autheliaCard');
+    const basicAuthBtn = basicAuthCard?.querySelector('button');
+    const autheliaBtn = autheliaCard?.querySelector('button');
+    
+    if (hasAuthelia && autheliaRunning) {
+        // Authelia is running - disable Basic Auth setup
+        if (basicAuthBtn) {
+            basicAuthBtn.disabled = true;
+            basicAuthBtn.title = 'Authelia is running. Stop Authelia first to use Basic Auth.';
+            if (basicAuthCard) {
+                basicAuthCard.style.opacity = '0.6';
+                basicAuthCard.style.pointerEvents = 'none';
+            }
+        }
+    } else {
+        // Authelia not running - enable Basic Auth
+        if (basicAuthBtn) {
+            basicAuthBtn.disabled = false;
+            basicAuthBtn.title = '';
+            if (basicAuthCard) {
+                basicAuthCard.style.opacity = '1';
+                basicAuthCard.style.pointerEvents = 'auto';
+            }
+        }
+    }
+    
+    if (hasBasicAuth) {
+        // Basic Auth has users - disable Authelia setup
+        if (autheliaBtn) {
+            autheliaBtn.disabled = true;
+            autheliaBtn.title = 'Basic Auth is configured. Remove all Basic Auth users first to use Authelia.';
+            if (autheliaCard) {
+                autheliaCard.style.opacity = '0.6';
+                autheliaCard.style.pointerEvents = 'none';
+            }
+        }
+    } else {
+        // No Basic Auth users - enable Authelia
+        if (autheliaBtn) {
+            autheliaBtn.disabled = false;
+            autheliaBtn.title = '';
+            if (autheliaCard) {
+                autheliaCard.style.opacity = '1';
+                autheliaCard.style.pointerEvents = 'auto';
+            }
+        }
     }
 }
 
@@ -7419,6 +7501,27 @@ function updateAuthWizardStep(basicAuthData, autheliaData) {
 
 // Show Basic Auth setup panel
 async function showBasicAuthSetup() {
+    // Check if Authelia is running
+    try {
+        const autheliaData = await fetchAPI('/api/security/authelia/status');
+        if (autheliaData.installed && autheliaData.running) {
+            if (!confirm('⚠️ Authelia is currently running!\n\nUsing both Basic Auth and Authelia together can cause conflicts.\n\nDo you want to stop Authelia and proceed with Basic Auth setup?')) {
+                return;
+            }
+            // Stop Authelia first
+            showToast('Stopping Authelia...', 'info');
+            const stopResult = await fetchAPI('/api/security/authelia/stop', { method: 'POST' });
+            if (!stopResult.success) {
+                showToast('Failed to stop Authelia: ' + (stopResult.error || 'Unknown error'), 'error');
+                return;
+            }
+            showToast('Authelia stopped. Proceeding with Basic Auth setup.', 'success');
+            await loadAuthStatus();
+        }
+    } catch (e) {
+        console.error('Error checking Authelia status:', e);
+    }
+    
     document.querySelector('.auth-choice-section').style.display = 'none';
     document.getElementById('autheliaSetupPanel').style.display = 'none';
     document.getElementById('basicAuthSetupPanel').style.display = 'block';
@@ -7463,6 +7566,17 @@ async function addBasicAuthUser() {
     if (!username || !password) {
         showToast('Please enter both username and password', 'error');
         return;
+    }
+    
+    // Check if Authelia is running
+    try {
+        const autheliaData = await fetchAPI('/api/security/authelia/status');
+        if (autheliaData.installed && autheliaData.running) {
+            showToast('⚠️ Cannot add Basic Auth user: Authelia is running. Stop Authelia first to use Basic Auth.', 'error');
+            return;
+        }
+    } catch (e) {
+        console.error('Error checking Authelia status:', e);
     }
     
     try {
@@ -7521,6 +7635,29 @@ auth_basic_user_file /etc/nginx/.htpasswd;`;
 
 // Show Authelia setup panel
 async function showAutheliaSetup() {
+    // Check if Basic Auth has users
+    try {
+        const basicAuthData = await fetchAPI('/api/security/basicauth/users');
+        if (basicAuthData.users && basicAuthData.users.length > 0) {
+            if (!confirm(`⚠️ Basic Auth is configured with ${basicAuthData.users.length} user(s)!\n\nUsing both Basic Auth and Authelia together can cause conflicts.\n\nDo you want to remove all Basic Auth users and proceed with Authelia setup?`)) {
+                return;
+            }
+            // Remove all Basic Auth users
+            showToast('Removing Basic Auth users...', 'info');
+            for (const username of basicAuthData.users) {
+                try {
+                    await fetchAPI(`/api/security/basicauth/user/${encodeURIComponent(username)}`, { method: 'DELETE' });
+                } catch (e) {
+                    console.error(`Failed to delete user ${username}:`, e);
+                }
+            }
+            showToast('Basic Auth users removed. Proceeding with Authelia setup.', 'success');
+            await loadAuthStatus();
+        }
+    } catch (e) {
+        console.error('Error checking Basic Auth status:', e);
+    }
+    
     document.querySelector('.auth-choice-section').style.display = 'none';
     document.getElementById('basicAuthSetupPanel').style.display = 'none';
     document.getElementById('autheliaSetupPanel').style.display = 'block';
@@ -7604,6 +7741,28 @@ async function autheliaAction(action) {
 
 // Install Authelia
 async function installAuthelia() {
+    // Check if Basic Auth has users
+    try {
+        const basicAuthData = await fetchAPI('/api/security/basicauth/users');
+        if (basicAuthData.users && basicAuthData.users.length > 0) {
+            if (!confirm(`⚠️ Basic Auth is configured with ${basicAuthData.users.length} user(s)!\n\nUsing both Basic Auth and Authelia together can cause conflicts.\n\nDo you want to remove all Basic Auth users and proceed with Authelia installation?`)) {
+                return;
+            }
+            // Remove all Basic Auth users
+            showToast('Removing Basic Auth users...', 'info');
+            for (const username of basicAuthData.users) {
+                try {
+                    await fetchAPI(`/api/security/basicauth/user/${encodeURIComponent(username)}`, { method: 'DELETE' });
+                } catch (e) {
+                    console.error(`Failed to delete user ${username}:`, e);
+                }
+            }
+            showToast('Basic Auth users removed.', 'success');
+        }
+    } catch (e) {
+        console.error('Error checking Basic Auth status:', e);
+    }
+    
     if (!confirm('Auto-install Authelia?\n\nThis will:\n- Enable authelia in docker-compose.yaml\n- Create default configuration\n- Start the Authelia container\n\nYou will need to customize the configuration afterwards.')) return;
     
     showToast('Installing Authelia...', 'info');

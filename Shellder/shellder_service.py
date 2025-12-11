@@ -17041,6 +17041,26 @@ def api_authelia_install():
     """Install/enable Authelia - creates config and starts container"""
     result = {'success': False, 'output': '', 'message': ''}
     
+    # Check if Basic Auth has users (conflict check)
+    htpasswd_paths = ['/etc/nginx/.htpasswd', '/etc/apache2/.htpasswd', '/etc/htpasswd']
+    basic_auth_users = []
+    for path in htpasswd_paths:
+        if os.path.exists(path):
+            try:
+                with open(path, 'r') as f:
+                    for line in f:
+                        if ':' in line:
+                            basic_auth_users.append(line.split(':')[0])
+            except Exception:
+                pass
+    
+    if basic_auth_users:
+        return jsonify({
+            'success': False,
+            'error': f'Cannot install Authelia: Basic Auth is configured with {len(basic_auth_users)} user(s). Remove all Basic Auth users first to use Authelia, as using both together can cause conflicts.',
+            'basic_auth_users': basic_auth_users
+        }), 409  # 409 Conflict
+    
     try:
         authelia_dir = AEGIS_ROOT / 'Authelia'
         config_file = authelia_dir / 'configuration.yml'
@@ -17289,6 +17309,20 @@ def api_basicauth_add_user():
     
     if not username or not password:
         return jsonify({'error': 'Username and password are required'}), 400
+    
+    # Check if Authelia is running (conflict check)
+    try:
+        authelia_check = subprocess.run(
+            ['docker', 'inspect', '--format', '{{.State.Running}}', 'authelia'],
+            capture_output=True, text=True, timeout=5
+        )
+        if authelia_check.returncode == 0 and authelia_check.stdout.strip() == 'true':
+            return jsonify({
+                'success': False,
+                'error': 'Cannot add Basic Auth user: Authelia is currently running. Stop Authelia first to use Basic Auth, as using both together can cause conflicts.'
+            }), 409  # 409 Conflict
+    except Exception:
+        pass  # If check fails, continue (Authelia might not exist)
     
     htpasswd_path = '/etc/nginx/.htpasswd'
     
