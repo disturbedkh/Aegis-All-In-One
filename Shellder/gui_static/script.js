@@ -10805,22 +10805,31 @@ function renderConfigForm(schemaData) {
     
     let html = legendHtml;
     for (const [sectionKey, section] of Object.entries(schemaData.sections)) {
-        // Navigate nested path for section keys like 'db.dragonite'
+        // Navigate nested path for section keys like 'db.dragonite' or 'database.schemas.0'
         let sectionValues = values;
         for (const part of sectionKey.split('.')) {
-            sectionValues = sectionValues?.[part] || {};
+            if (sectionValues === null || sectionValues === undefined) {
+                sectionValues = {};
+                break;
+            }
+            // Handle numeric parts as array indices
+            if (/^\d+$/.test(part)) {
+                sectionValues = Array.isArray(sectionValues) ? sectionValues[parseInt(part)] : {};
+            } else {
+                sectionValues = sectionValues?.[part] || {};
+            }
         }
         
         html += `
-            <div class="config-section" id="config-section-${sectionKey}">
-                <div class="config-section-header" onclick="toggleConfigSection('${sectionKey}')">
+            <div class="config-section" id="config-section-${sectionKey.replace(/\./g, '-')}">
+                <div class="config-section-header" onclick="toggleConfigSection('${sectionKey.replace(/\./g, '-')}')">
                     <h4>${section.title}</h4>
                     ${section.desc ? `<span class="section-desc">${section.desc}</span>` : ''}
                     <span class="config-section-toggle">▼</span>
                 </div>
                 <div class="config-section-fields">
                     ${Object.entries(section.fields).map(([fieldKey, field]) => {
-                        const currentValue = sectionValues[fieldKey] ?? field.default ?? '';
+                        const currentValue = sectionValues?.[fieldKey] ?? field.default ?? '';
                         const sharedInfo = sharedFields[`${sectionKey}.${fieldKey}`] || null;
                         return renderConfigField(sectionKey, fieldKey, field, currentValue, sharedInfo);
                     }).join('')}

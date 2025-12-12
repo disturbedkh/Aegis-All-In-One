@@ -12600,23 +12600,41 @@ CONFIG_FIELD_SCHEMAS = {
                     'geoJsonFileName': {'type': 'text', 'label': 'GeoJSON URL', 'desc': 'Koji URL for scan area polygons', 'default': 'http://koji:8080/api/v1/geofence/feature-collection/Reactmap'},
                 }
             },
-            'database_golbat': {
-                'title': '🗄️ Golbat Database',
-                'desc': 'Connection to Golbat for Pokemon data',
+            # ReactMap database.schemas has 3 entries:
+            # [0] = Golbat API connection (type: "golbat")
+            # [1] = Golbat DB connection (database: "golbat")
+            # [2] = ReactMap DB connection (database: "reactmap")
+            'database.schemas.0': {
+                'title': '🔌 Golbat API Connection',
+                'desc': 'HTTP API connection to Golbat (for device data)',
+                'json_array_index': 0,
                 'fields': {
                     'endpoint': {'type': 'text', 'label': 'Golbat Endpoint', 'desc': 'Golbat HTTP API address', 'default': 'http://golbat:9001'},
                     'secret': {'type': 'password', 'label': 'Golbat API Secret', 'desc': 'Must match api_secret in golbat_config', 'default': '', 'shared': 'golbat_api_secret'},
                 }
             },
-            'database_main': {
-                'title': '🗄️ Main Database',
-                'desc': 'Direct database connection for Pokemon data',
+            'database.schemas.1': {
+                'title': '🗄️ Golbat Database (Pokemon Data)',
+                'desc': 'Direct database for Pokemon, gyms, pokestops, etc.',
+                'json_array_index': 1,
                 'fields': {
                     'host': {'type': 'text', 'label': 'DB Host', 'desc': 'Database server hostname', 'default': 'database'},
                     'port': {'type': 'number', 'label': 'DB Port', 'desc': 'Database port', 'default': 3306},
                     'username': {'type': 'text', 'label': 'DB Username', 'desc': 'Must match MYSQL_USER in .env', 'default': 'dbuser', 'shared': 'db_user'},
                     'password': {'type': 'password', 'label': 'DB Password', 'desc': 'Must match MYSQL_PASSWORD in .env', 'default': '', 'shared': 'db_password'},
-                    'database': {'type': 'text', 'label': 'DB Name', 'desc': 'Golbat database name', 'default': 'golbat'},
+                    'database': {'type': 'text', 'label': 'DB Name', 'desc': 'Database name (golbat for Pokemon data)', 'default': 'golbat', 'readonly': True},
+                }
+            },
+            'database.schemas.2': {
+                'title': '🗄️ ReactMap Database (User Data)',
+                'desc': 'Database for sessions, users, and portals',
+                'json_array_index': 2,
+                'fields': {
+                    'host': {'type': 'text', 'label': 'DB Host', 'desc': 'Database server hostname', 'default': 'database'},
+                    'port': {'type': 'number', 'label': 'DB Port', 'desc': 'Database port', 'default': 3306},
+                    'username': {'type': 'text', 'label': 'DB Username', 'desc': 'Must match MYSQL_USER in .env', 'default': 'dbuser', 'shared': 'db_user'},
+                    'password': {'type': 'password', 'label': 'DB Password', 'desc': 'Must match MYSQL_PASSWORD in .env', 'default': '', 'shared': 'db_password'},
+                    'database': {'type': 'text', 'label': 'DB Name', 'desc': 'Database name (reactmap for user data)', 'default': 'reactmap', 'readonly': True},
                 }
             },
             'scanner': {
