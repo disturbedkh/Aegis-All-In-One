@@ -9643,27 +9643,113 @@ def api_docker_action(action):
 
 @app.route('/api/docker/update-all', methods=['POST'])
 def api_docker_update_all():
-    """Update all containers: pull latest images and recreate"""
+    """Update all installed containers: pull latest images and recreate only installed containers"""
     import time
     start_time = time.time()
     steps = []
     all_output = []
     
+    if LOCAL_MODE or docker_client is None:
+        return jsonify({'error': 'Docker not available'}), 503
+    
     try:
-        # Step 1: Pull latest images
+        # Get list of installed containers (containers that exist, running or stopped)
+        installed_containers = []
+        try:
+            # Use docker compose ps -a to get all services (running and stopped) that have containers
+            compose_ps_result = subprocess.run(
+                ['docker', 'compose', 'ps', '-a', '--format', 'json'],
+                capture_output=True, text=True, timeout=30,
+                cwd=str(AEGIS_ROOT)
+            )
+            
+            # Parse compose ps output to get service names
+            compose_services = set()
+            for line in compose_ps_result.stdout.strip().split('\n'):
+                if line:
+                    try:
+                        container_info = json.loads(line)
+                        service = container_info.get('Service')
+                        if service:
+                            compose_services.add(service)
+                    except:
+                        pass
+            
+            # Also check existing containers by querying docker directly
+            # This catches containers that exist but might not be in compose ps output
+            all_containers = docker_client.containers.list(all=True)
+            container_names = {c.name for c in all_containers}
+            
+            # Get project name from compose (if any)
+            # Container names are typically: <project>_<service>_<number> or just <service>
+            # We need to extract service names from container names
+            for container_name in container_names:
+                # Try to match with compose services first
+                if container_name in compose_services:
+                    installed_containers.append(container_name)
+                    continue
+                
+                # Extract service name from container name
+                # Format: <project>_<service>_<number> or <service>_<number> or just <service>
+                parts = container_name.split('_')
+                if len(parts) >= 2:
+                    # Try last part before number (service name)
+                    service_candidate = parts[-2] if parts[-1].isdigit() else parts[-1]
+                else:
+                    service_candidate = container_name
+                
+                # Check if this service exists in compose services
+                if service_candidate in compose_services:
+                    installed_containers.append(service_candidate)
+            
+            # Add services from compose ps that we found
+            installed_containers.extend(compose_services)
+            
+            # Remove duplicates and sort
+            installed_containers = sorted(list(set(installed_containers)))
+            
+            if not installed_containers:
+                # Fallback: if no containers found, don't proceed
+                all_output.append("No installed containers found in docker compose ps")
+            
+        except Exception as e:
+            # If we can't determine installed containers, don't proceed
+            # This prevents accidentally starting uninstalled containers
+            all_output.append(f"Error determining installed containers: {e}")
+            return jsonify({
+                'success': False,
+                'error': f'Could not determine installed containers: {str(e)}',
+                'steps': steps,
+                'output': '\n'.join(all_output),
+                'duration': f"{time.time() - start_time:.1f}s"
+            })
+        
+        if not installed_containers:
+            return jsonify({
+                'success': False,
+                'error': 'No installed containers found to update',
+                'steps': steps,
+                'output': '\n'.join(all_output),
+                'duration': f"{time.time() - start_time:.1f}s"
+            })
+        
+        # Step 1: Pull latest images for installed containers only
         pull_start = time.time()
+        # Build pull command with specific services
+        pull_cmd = ['docker', 'compose', 'pull'] + installed_containers
         pull_result = subprocess.run(
-            ['docker', 'compose', 'pull'],
+            pull_cmd,
             capture_output=True, text=True, timeout=600,
             cwd=str(AEGIS_ROOT)
         )
         pull_duration = f"{time.time() - pull_start:.1f}s"
         steps.append({
-            'name': 'Pull latest images',
+            'name': f'Pull latest images ({len(installed_containers)} containers)',
             'success': pull_result.returncode == 0,
-            'duration': pull_duration
+            'duration': pull_duration,
+            'containers': installed_containers
         })
-        all_output.append(f"=== Pull Images ===\n{pull_result.stdout}\n{pull_result.stderr}")
+        all_output.append(f"=== Pull Images (Installed Only) ===\nContainers: {', '.join(installed_containers)}\n{pull_result.stdout}\n{pull_result.stderr}")
         
         if pull_result.returncode != 0:
             return jsonify({
@@ -9674,20 +9760,23 @@ def api_docker_update_all():
                 'duration': f"{time.time() - start_time:.1f}s"
             })
         
-        # Step 2: Recreate containers with new images
+        # Step 2: Recreate only installed containers with new images
         up_start = time.time()
+        # Build up command with specific services
+        up_cmd = ['docker', 'compose', 'up', '-d', '--force-recreate'] + installed_containers
         up_result = subprocess.run(
-            ['docker', 'compose', 'up', '-d', '--force-recreate'],
+            up_cmd,
             capture_output=True, text=True, timeout=300,
             cwd=str(AEGIS_ROOT)
         )
         up_duration = f"{time.time() - up_start:.1f}s"
         steps.append({
-            'name': 'Recreate containers',
+            'name': f'Recreate containers ({len(installed_containers)} containers)',
             'success': up_result.returncode == 0,
-            'duration': up_duration
+            'duration': up_duration,
+            'containers': installed_containers
         })
-        all_output.append(f"=== Recreate Containers ===\n{up_result.stdout}\n{up_result.stderr}")
+        all_output.append(f"=== Recreate Containers (Installed Only) ===\nContainers: {', '.join(installed_containers)}\n{up_result.stdout}\n{up_result.stderr}")
         
         total_duration = f"{time.time() - start_time:.1f}s"
         
@@ -9695,7 +9784,9 @@ def api_docker_update_all():
             'success': up_result.returncode == 0,
             'steps': steps,
             'output': '\n'.join(all_output),
-            'duration': total_duration
+            'duration': total_duration,
+            'updated_containers': installed_containers,
+            'count': len(installed_containers)
         })
         
     except subprocess.TimeoutExpired:
