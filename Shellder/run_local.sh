@@ -40,14 +40,15 @@ if ! $PYTHON -m pip --version &>/dev/null; then
     curl -sS https://bootstrap.pypa.io/get-pip.py | $PYTHON
 fi
 
-# Install requirements
+# Install requirements - always ensure up to date
 echo -e "${CYAN}[...]${NC} Checking dependencies..."
-if ! $PYTHON -c "import flask, flask_socketio, docker, psutil, pymysql" 2>/dev/null; then
-    echo -e "${YELLOW}[!]${NC} Installing required packages..."
+# Check ALL required modules (must match requirements.txt)
+if ! $PYTHON -c "import flask, flask_socketio, docker, psutil, pymysql, toml, requests" 2>/dev/null; then
+    echo -e "${YELLOW}[!]${NC} Installing/updating required packages..."
     $PYTHON -m pip install -q -r requirements.txt
     echo -e "${GREEN}[✓]${NC} Dependencies installed"
 else
-    echo -e "${GREEN}[✓]${NC} Dependencies already installed"
+    echo -e "${GREEN}[✓]${NC} Dependencies OK"
 fi
 
 # Set environment for local testing (mock mode if Docker not available)
