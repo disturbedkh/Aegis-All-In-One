@@ -6820,6 +6820,154 @@ def api_debug_clear():
     
     return jsonify({'success': True, 'message': 'Debug logs cleared'})
 
+@app.route('/api/debug/file-locks')
+def api_debug_file_locks():
+    """Diagnose file locks in Shellder directory - find what's locking files"""
+    result = {
+        'shellder_files': {},
+        'locked_by_shellder': [],
+        'open_file_handles': [],
+        'sqlite_status': {},
+        'recommendations': []
+    }
+    
+    # List key Shellder files and their status
+    key_files = [
+        DATA_DIR / 'shellder.db',
+        DATA_DIR / 'shellder.db-wal',
+        DATA_DIR / 'shellder.db-shm',
+        LOG_DIR / 'shellder.log',
+        LOG_DIR / 'debuglog.txt',
+        SHELLDER_DIR / 'gui_server.log',
+        SHELLDER_DIR / '.gui_pid',
+    ]
+    
+    for f in key_files:
+        file_info = {
+            'exists': f.exists(),
+            'path': str(f),
+            'size': None,
+            'locked': False,
+            'lock_holder': None
+        }
+        
+        if f.exists():
+            try:
+                file_info['size'] = f.stat().st_size
+                # Try to open for write to test if locked
+                try:
+                    with open(f, 'a'):
+                        pass
+                    file_info['locked'] = False
+                except (IOError, PermissionError) as e:
+                    file_info['locked'] = True
+                    file_info['lock_error'] = str(e)
+            except Exception as e:
+                file_info['error'] = str(e)
+        
+        result['shellder_files'][f.name] = file_info
+    
+    # Check SQLite database connection status
+    try:
+        conn = sqlite3.connect(str(SHELLDER_DB), timeout=1)
+        conn.execute("SELECT 1")
+        result['sqlite_status']['can_connect'] = True
+        result['sqlite_status']['journal_mode'] = conn.execute("PRAGMA journal_mode").fetchone()[0]
+        conn.close()
+    except Exception as e:
+        result['sqlite_status']['can_connect'] = False
+        result['sqlite_status']['error'] = str(e)
+    
+    # Try to find what's holding file locks using lsof (Linux)
+    if IS_UNIX:
+        try:
+            # Check files open by current process
+            pid = os.getpid()
+            lsof_result = subprocess.run(
+                ['lsof', '-p', str(pid)],
+                capture_output=True, text=True, timeout=5
+            )
+            if lsof_result.returncode == 0:
+                for line in lsof_result.stdout.split('\n'):
+                    if 'Shellder' in line or 'shellder' in line:
+                        result['open_file_handles'].append(line.strip())
+        except Exception as e:
+            result['lsof_error'] = str(e)
+        
+        # Find all processes with files open in Shellder directory
+        try:
+            lsof_dir = subprocess.run(
+                ['lsof', '+D', str(SHELLDER_DIR)],
+                capture_output=True, text=True, timeout=10
+            )
+            if lsof_dir.returncode == 0:
+                for line in lsof_dir.stdout.split('\n')[1:]:  # Skip header
+                    if line.strip():
+                        parts = line.split()
+                        if len(parts) >= 2:
+                            result['locked_by_shellder'].append({
+                                'process': parts[0],
+                                'pid': parts[1] if len(parts) > 1 else None,
+                                'line': line.strip()
+                            })
+        except Exception as e:
+            result['lsof_dir_error'] = str(e)
+    
+    # Recommendations
+    if result['sqlite_status'].get('journal_mode') == 'wal':
+        result['recommendations'].append(
+            "SQLite is in WAL mode. The .wal and .shm files are locked while server runs - this is normal."
+        )
+    
+    wal_file = DATA_DIR / 'shellder.db-wal'
+    shm_file = DATA_DIR / 'shellder.db-shm'
+    if wal_file.exists() or shm_file.exists():
+        result['recommendations'].append(
+            "WAL files exist. These are normal while Shellder is running. They'll be cleaned up on proper shutdown."
+        )
+    
+    if result['locked_by_shellder']:
+        pids = set(p.get('pid') for p in result['locked_by_shellder'] if p.get('pid'))
+        if pids:
+            result['recommendations'].append(
+                f"Processes holding locks: {', '.join(pids)}. To release: stop Shellder with './shellderGUI.sh --stop'"
+            )
+    
+    return jsonify(result)
+
+@app.route('/api/debug/release-locks', methods=['POST'])
+def api_debug_release_locks():
+    """Attempt to release file locks by closing database connections"""
+    result = {'actions': [], 'success': True}
+    
+    # Close any open database connections
+    global shellder_db
+    try:
+        # SQLite connections should auto-close, but we can try to checkpoint WAL
+        conn = sqlite3.connect(str(SHELLDER_DB), timeout=5)
+        # Force WAL checkpoint to merge WAL file into main database
+        conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+        result['actions'].append("Executed WAL checkpoint to reduce lock files")
+        conn.close()
+    except Exception as e:
+        result['actions'].append(f"Could not checkpoint: {e}")
+        result['success'] = False
+    
+    # Clean up orphan PID file if process doesn't exist
+    pid_file = SHELLDER_DIR / '.gui_pid'
+    if pid_file.exists():
+        try:
+            with open(pid_file, 'r') as f:
+                old_pid = int(f.read().strip())
+            # Check if that PID is running
+            if not os.path.exists(f'/proc/{old_pid}'):
+                pid_file.unlink()
+                result['actions'].append(f"Removed orphan PID file (old PID {old_pid} not running)")
+        except Exception as e:
+            result['actions'].append(f"Could not check PID file: {e}")
+    
+    return jsonify(result)
+
 # =============================================================================
 # AI DEBUG ACCESS - Comprehensive API for AI Assistants
 # =============================================================================
