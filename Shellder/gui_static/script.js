@@ -14177,27 +14177,158 @@ async function saveDockerLoggingConfig(dockerRunning) {
     }
 }
 
+let stackLogInterval = null;
+
 async function startStackStep() {
     if (!wizardStatus?.ready_to_start) {
         appendWizardOutput('⚠️ Complete previous steps before starting the stack.\\n', 'warning');
         return;
     }
     
-    appendWizardOutput('Starting Docker stack...\\n');
-    appendWizardOutput('This may take a few minutes as images are pulled.\\n\\n');
+    appendWizardOutput('━━━━━━ Starting Docker Stack ━━━━━━\\n');
+    appendWizardOutput('This may take a few minutes as images are pulled.\\n');
+    appendWizardOutput('Live status updates every 10 seconds...\\n\\n');
     
+    // Start the stack
     const response = await fetch('/api/wizard/start-stack', { method: 'POST' });
     if (!response.ok) throw new Error('Failed to start stack');
     const data = await response.json();
     
-    if (data.success) {
-        appendWizardOutput('\\n✅ Stack started successfully!\\n', 'success');
-        appendWizardOutput('\\nContainers are now starting. Check the Containers page for status.\\n');
-        updateStepStatus('start', true, 'Stack running');
-    } else {
-        appendWizardOutput('\\n❌ Stack start failed:\\n', 'error');
-        appendWizardOutput(data.stderr || data.error || 'Unknown error');
+    if (data.error) {
+        appendWizardOutput(`\\n❌ Stack start failed: ${data.error}\\n`, 'error');
+        return;
     }
+    
+    appendWizardOutput(`📦 Starting ${data.started?.length || 0} containers...\\n`);
+    if (data.already_running?.length > 0) {
+        appendWizardOutput(`ℹ️ Already running: ${data.already_running.join(', ')}\\n`);
+    }
+    appendWizardOutput('\\n');
+    
+    // Start live logging
+    startStackLogPolling();
+}
+
+function startStackLogPolling() {
+    // Clear any existing interval
+    if (stackLogInterval) {
+        clearInterval(stackLogInterval);
+    }
+    
+    // Poll immediately, then every 10 seconds
+    pollStackLogs();
+    stackLogInterval = setInterval(pollStackLogs, 10000);
+    
+    // Auto-stop after 5 minutes (30 polls)
+    setTimeout(() => {
+        if (stackLogInterval) {
+            clearInterval(stackLogInterval);
+            stackLogInterval = null;
+            appendWizardOutput('\\n━━━━━━ Live logging stopped (timeout) ━━━━━━\\n');
+        }
+    }, 300000);
+}
+
+async function pollStackLogs() {
+    try {
+        const response = await fetch('/api/wizard/stack-logs');
+        if (!response.ok) return;
+        
+        const data = await response.json();
+        if (!data.success) return;
+        
+        // Clear previous status section and rewrite
+        const contentEl = document.getElementById('wizardOutputContent');
+        if (!contentEl) return;
+        
+        // Find or create the live status section
+        let statusSection = document.getElementById('liveStackStatus');
+        if (!statusSection) {
+            statusSection = document.createElement('div');
+            statusSection.id = 'liveStackStatus';
+            statusSection.style.cssText = 'border-top: 1px solid #444; margin-top: 10px; padding-top: 10px;';
+            contentEl.appendChild(statusSection);
+        }
+        
+        // Build status display
+        const summary = data.summary;
+        const timestamp = new Date(data.timestamp).toLocaleTimeString();
+        
+        let html = `<div style="color: #888; margin-bottom: 8px;">📡 Live Status (${timestamp})</div>`;
+        html += `<div style="margin-bottom: 10px;">`;
+        html += `<span style="color: #2ecc71;">● Running: ${summary.running}</span> `;
+        html += `<span style="color: #f39c12;">● Starting: ${summary.starting}</span> `;
+        html += `<span style="color: #e74c3c;">● Stopped: ${summary.stopped}</span> `;
+        html += `<span style="color: #888;">/ Total: ${summary.total}</span>`;
+        html += `</div>`;
+        
+        // Container status table
+        html += '<div style="font-family: monospace; font-size: 12px;">';
+        for (const container of data.containers) {
+            let icon = '⏳';
+            let color = '#888';
+            if (container.state === 'running') {
+                icon = '✅';
+                color = '#2ecc71';
+            } else if (container.state === 'starting') {
+                icon = '🔄';
+                color = '#f39c12';
+            } else if (container.state === 'stopped') {
+                icon = '❌';
+                color = '#e74c3c';
+            }
+            
+            html += `<div style="color: ${color}; padding: 2px 0;">${icon} ${container.name}: ${container.status}</div>`;
+            
+            // Show recent logs for this container (collapsed by default, expand for non-running)
+            const logs = data.logs[container.name] || [];
+            if (logs.length > 0 && container.state !== 'running') {
+                html += '<div style="margin-left: 20px; color: #666; font-size: 11px;">';
+                for (const line of logs.slice(-3)) {
+                    // Truncate long lines
+                    const truncated = line.length > 100 ? line.substring(0, 100) + '...' : line;
+                    html += `<div>${escapeHtml(truncated)}</div>`;
+                }
+                html += '</div>';
+            }
+        }
+        html += '</div>';
+        
+        // Check if all running
+        if (summary.all_running) {
+            html += '<div style="color: #2ecc71; margin-top: 15px; font-weight: bold;">✅ All containers are running!</div>';
+            // Stop polling
+            if (stackLogInterval) {
+                clearInterval(stackLogInterval);
+                stackLogInterval = null;
+            }
+            html += '<div style="color: #888; margin-top: 5px;">Live logging stopped - stack is ready.</div>';
+            updateStepStatus('start', true, 'Stack running');
+            await refreshWizardStatus();
+        }
+        
+        statusSection.innerHTML = html;
+        
+        // Auto-scroll to bottom
+        contentEl.scrollTop = contentEl.scrollHeight;
+        
+    } catch (e) {
+        console.error('Error polling stack logs:', e);
+    }
+}
+
+function stopStackLogPolling() {
+    if (stackLogInterval) {
+        clearInterval(stackLogInterval);
+        stackLogInterval = null;
+    }
+}
+
+// Helper to escape HTML
+function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }
 
 function showWizardOutput(title, clear = false) {

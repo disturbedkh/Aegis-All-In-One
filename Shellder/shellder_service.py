@@ -13200,6 +13200,80 @@ def api_wizard_start_stack():
         error('DOCKER', f'Start stack error: {e}')
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/wizard/stack-logs')
+def api_wizard_stack_logs():
+    """Get recent logs from all stack containers for startup monitoring"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    try:
+        # Get container status
+        ps_result = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', '{{.Name}}|{{.Status}}|{{.Health}}'],
+            capture_output=True, text=True, timeout=10, cwd=aegis_root
+        )
+        
+        containers = []
+        for line in ps_result.stdout.strip().split('\n'):
+            if '|' in line:
+                parts = line.split('|')
+                name = parts[0] if len(parts) > 0 else ''
+                status = parts[1] if len(parts) > 1 else ''
+                health = parts[2] if len(parts) > 2 else ''
+                
+                # Determine state
+                if 'Up' in status or 'running' in status.lower():
+                    state = 'running'
+                elif 'starting' in status.lower() or 'created' in status.lower():
+                    state = 'starting'
+                elif 'exited' in status.lower() or 'dead' in status.lower():
+                    state = 'stopped'
+                else:
+                    state = 'unknown'
+                
+                containers.append({
+                    'name': name,
+                    'status': status,
+                    'health': health,
+                    'state': state
+                })
+        
+        # Get recent logs (last 5 lines from each container)
+        logs = {}
+        for container in containers:
+            try:
+                log_result = subprocess.run(
+                    ['docker', 'logs', '--tail', '5', '--timestamps', container['name']],
+                    capture_output=True, text=True, timeout=5
+                )
+                # Combine stdout and stderr
+                log_output = log_result.stdout + log_result.stderr
+                logs[container['name']] = log_output.strip().split('\n')[-5:] if log_output.strip() else []
+            except:
+                logs[container['name']] = []
+        
+        # Calculate summary
+        running_count = sum(1 for c in containers if c['state'] == 'running')
+        starting_count = sum(1 for c in containers if c['state'] == 'starting')
+        stopped_count = sum(1 for c in containers if c['state'] == 'stopped')
+        total_count = len(containers)
+        
+        return jsonify({
+            'success': True,
+            'containers': containers,
+            'logs': logs,
+            'summary': {
+                'running': running_count,
+                'starting': starting_count,
+                'stopped': stopped_count,
+                'total': total_count,
+                'all_running': running_count == total_count and total_count > 0
+            },
+            'timestamp': datetime.now().isoformat()
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)})
+
 @app.route('/api/wizard/check-ports')
 def api_wizard_check_ports():
     """Check if required ports are available"""
