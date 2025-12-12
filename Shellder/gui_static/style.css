@@ -7970,6 +7970,17 @@ select:focus {
     opacity: 0.9;
 }
 
+.wizard-step-card.partial {
+    border-color: var(--warning, #f39c12);
+    background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(243, 156, 18, 0.1) 100%);
+    animation: pulse-partial 2s ease-in-out infinite;
+}
+
+@keyframes pulse-partial {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(243, 156, 18, 0.2); }
+    50% { box-shadow: 0 0 0 6px rgba(243, 156, 18, 0); }
+}
+
 .wizard-step-final {
     background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(52, 152, 219, 0.1) 100%);
     border-color: var(--accent-primary);

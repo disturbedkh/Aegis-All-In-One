@@ -12777,8 +12777,32 @@ function updateWizardUI() {
     updateStepStatus('logging', wizardStatus.steps.docker_logging?.complete,
         wizardStatus.steps.docker_logging?.complete ? 'Log rotation enabled' : 'Not configured');
     
-    updateStepStatus('start', wizardStatus.steps.database?.complete,
-        wizardStatus.steps.database?.complete ? 'Stack is running' : 'Not started');
+    // Update Stack status with partial detection
+    const stackStep = wizardStatus.steps.start_stack;
+    let stackDetails = 'Not started';
+    let stackComplete = false;
+    
+    if (stackStep) {
+        if (stackStep.stack_state === 'running') {
+            stackDetails = 'Stack is running';
+            stackComplete = true;
+        } else if (stackStep.stack_state === 'partial') {
+            // Show partial status with running/total count
+            stackDetails = `Partial (${stackStep.minimum_running_count}/${stackStep.minimum_count}) - Click to start`;
+            stackComplete = false;
+        } else {
+            stackDetails = 'Not started';
+            stackComplete = false;
+        }
+    }
+    updateStepStatus('start', stackComplete, stackDetails);
+    
+    // Update the step card to show partial status visually
+    const stackCard = document.getElementById('wizard-step-start');
+    if (stackCard && stackStep?.stack_state === 'partial') {
+        stackCard.classList.remove('complete', 'pending');
+        stackCard.classList.add('partial');
+    }
     
     // Enable start button if prerequisites are met
     const startBtn = document.getElementById('startStackBtn');

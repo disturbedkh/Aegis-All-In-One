@@ -12545,21 +12545,116 @@ def api_wizard_status():
         'complete': passwords_set
     }
     
-    # Step 8: Database Container
-    db_running = False
+    # Step 8: Port Availability Check
+    required_ports = {
+        5000: 'Shellder GUI',
+        6001: 'ReactMap',
+        6002: 'Dragonite Admin',
+        6003: 'Rotom',
+        6004: 'Koji',
+        7070: 'Rotom Device Port'
+    }
+    ports_status = {}
+    all_ports_free = True
+    
+    import socket
+    for port, service in required_ports.items():
+        try:
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            sock.settimeout(1)
+            result = sock.connect_ex(('127.0.0.1', port))
+            sock.close()
+            # Port is free if connect fails (connection refused)
+            is_free = result != 0
+            ports_status[port] = {'service': service, 'free': is_free}
+            if not is_free:
+                all_ports_free = False
+        except:
+            ports_status[port] = {'service': service, 'free': True}
+    
+    status['steps']['ports'] = {
+        'name': 'Port Availability',
+        'description': 'Check required ports are free',
+        'installed': True,
+        'configured': True,
+        'complete': True,  # Always complete (just info)
+        'ports': ports_status,
+        'all_free': all_ports_free
+    }
+    
+    # Step 9: Stack Status (comprehensive container check)
+    # Define minimum required services for Aegis to function
+    # These are the core services that should always be running
+    MINIMUM_STACK_SERVICES = [
+        'database',      # MariaDB
+        'golbat',        # Data processor
+        'dragonite',     # Scanner backend
+        'admin',         # Dragonite admin UI
+        'rotom',         # Device manager
+        'reactmap',      # Map frontend
+        'koji',          # Geofence manager
+        'pma',           # Database admin (PhpMyAdmin)
+        'vmagent',       # Metrics agent
+        'victoriametrics', # Metrics storage
+        'grafana'        # Stats dashboard
+    ]
+    # Optional services (commented out by default in docker-compose)
+    OPTIONAL_STACK_SERVICES = ['fletchling', 'poracle']
+    
+    running_containers = []
+    all_containers = []
     try:
-        result = subprocess.run(['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
-                              capture_output=True, text=True, timeout=5)
-        db_running = 'database' in result.stdout
+        # Get all defined services from docker compose
+        compose_result = subprocess.run(
+            ['docker', 'compose', 'ps', '--format', '{{.Name}}|{{.Status}}'],
+            capture_output=True, text=True, timeout=10, cwd=aegis_root
+        )
+        if compose_result.returncode == 0:
+            for line in compose_result.stdout.strip().split('\n'):
+                if '|' in line:
+                    name, status_str = line.split('|', 1)
+                    all_containers.append(name)
+                    if 'Up' in status_str or 'running' in status_str.lower():
+                        running_containers.append(name)
     except:
         pass
     
-    status['steps']['database'] = {
-        'name': 'Database Service',
-        'description': 'MariaDB container',
+    # Calculate stack status
+    minimum_running = [s for s in MINIMUM_STACK_SERVICES if s in running_containers]
+    minimum_stopped = [s for s in MINIMUM_STACK_SERVICES if s not in running_containers]
+    optional_running = [s for s in OPTIONAL_STACK_SERVICES if s in running_containers]
+    
+    total_minimum = len(MINIMUM_STACK_SERVICES)
+    running_minimum_count = len(minimum_running)
+    
+    # Determine stack state
+    if running_minimum_count == 0:
+        stack_state = 'stopped'
+        stack_description = 'Stack not running'
+    elif running_minimum_count == total_minimum:
+        stack_state = 'running'
+        stack_description = 'Stack is running'
+    else:
+        stack_state = 'partial'
+        stack_description = f'Partially running ({running_minimum_count}/{total_minimum})'
+    
+    status['steps']['start_stack'] = {
+        'name': 'Start Stack',
+        'description': 'Launch containers',
         'installed': True,
-        'configured': db_running,
-        'complete': db_running
+        'configured': True,
+        'complete': stack_state == 'running',
+        'stack_state': stack_state,
+        'state_description': stack_description,
+        'minimum_services': MINIMUM_STACK_SERVICES,
+        'optional_services': OPTIONAL_STACK_SERVICES,
+        'running': running_containers,
+        'minimum_running': minimum_running,
+        'minimum_stopped': minimum_stopped,
+        'optional_running': optional_running,
+        'running_count': len(running_containers),
+        'minimum_count': total_minimum,
+        'minimum_running_count': running_minimum_count
     }
     
     # Calculate overall progress
