@@ -13838,9 +13838,20 @@ async function runMariaDBSetup() {
         }
         
         if (data.success) {
-            appendWizardOutput('\\n✅ MariaDB setup complete!\\n', 'success');
+            appendWizardOutput('\\n✅ MariaDB databases & users created!\\n', 'success');
+            
+            // Auto-apply optimization if resources were detected
+            if (detectedResources) {
+                appendWizardOutput('\\n━━━━━━ Auto-Applying Optimized Settings ━━━━━━\\n');
+                appendWizardOutput('(Resources were detected - applying optimizations automatically)\\n\\n');
+                await applyMariaDBOptimizationInternal();
+                updateStepStatus('mariadb', true, 'Databases ready & optimized ✓');
+            } else {
+                appendWizardOutput('\\nℹ️ Tip: Run "Detect Resources" first, then setup again to auto-optimize.\\n', 'info');
+                updateStepStatus('mariadb', true, 'Databases ready ✓');
+            }
+            
             showToast('MariaDB setup complete!', 'success');
-            updateStepStatus('mariadb', true, 'Databases ready');
             closeMariaDBSetupPanel();
             await refreshWizardStatus();
         } else {
@@ -13854,14 +13865,11 @@ async function runMariaDBSetup() {
     }
 }
 
-async function applyMariaDBOptimization() {
-    if (!detectedResources) {
-        showToast('Please run "Detect Resources" step first', 'warning');
-        appendWizardOutput('⚠️ Please run "Detect Resources" first.\\n', 'warning');
-        return;
+// Internal function to apply optimization (called by both manual and auto)
+async function applyMariaDBOptimizationInternal() {
+    if (!detectedResources || !detectedResources.recommended) {
+        throw new Error('No resource data available');
     }
-    
-    appendWizardOutput('\\nApplying optimized MariaDB settings...\\n');
     
     const settings = {
         'innodb_buffer_pool_size': detectedResources.recommended.innodb_buffer_pool_size,
@@ -13873,22 +13881,37 @@ async function applyMariaDBOptimization() {
         'max_heap_table_size': detectedResources.recommended.tmp_table_size
     };
     
+    const response = await fetch('/api/wizard/apply-mariadb-config', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ settings })
+    });
+    
+    if (!response.ok) throw new Error('Failed to apply MariaDB config');
+    
+    appendWizardOutput('Applied optimized settings:\\n');
+    for (const [key, value] of Object.entries(settings)) {
+        appendWizardOutput(`  ✓ ${key} = ${value}\\n`);
+    }
+    
+    appendWizardOutput('\\n✅ MariaDB configuration optimized!\\n', 'success');
+    return true;
+}
+
+// Manual button handler
+async function applyMariaDBOptimization() {
+    if (!detectedResources) {
+        showToast('Please run "Detect Resources" step first', 'warning');
+        appendWizardOutput('⚠️ Please run "Detect Resources" first.\\n', 'warning');
+        return;
+    }
+    
+    appendWizardOutput('\\nApplying optimized MariaDB settings...\\n');
+    
     try {
-        const response = await fetch('/api/wizard/apply-mariadb-config', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ settings })
-        });
-        
-        if (!response.ok) throw new Error('Failed to apply MariaDB config');
-        
-        appendWizardOutput('Applied settings:\\n');
-        for (const [key, value] of Object.entries(settings)) {
-            appendWizardOutput(`  ${key} = ${value}\\n`);
-        }
-        
-        appendWizardOutput('\\n✅ MariaDB configuration optimized!\\n', 'success');
+        await applyMariaDBOptimizationInternal();
         showToast('MariaDB optimization applied', 'success');
+        await refreshWizardStatus();
     } catch (e) {
         appendWizardOutput(`❌ Error: ${e.message}\\n`, 'error');
         showToast(`Error: ${e.message}`, 'error');
