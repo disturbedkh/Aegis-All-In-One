@@ -1958,25 +1958,29 @@ function updateXilriwsStats(data) {
             dashboardEl.innerHTML = '<div class="xilriws-empty">Xilriws not running or no data yet</div>';
         } else {
             const successRate = data.success_rate || 0;
+            const cookieRate = data.cookie_rate || 0;
+            const authRate = data.auth_rate || 0;
             const rateClass = successRate > 80 ? 'excellent' : successRate > 50 ? 'good' : successRate > 20 ? 'warning' : 'critical';
+            const cookieClass = cookieRate > 80 ? 'excellent' : cookieRate > 50 ? 'good' : 'warning';
+            const authClass = authRate > 80 ? 'excellent' : authRate > 50 ? 'good' : 'warning';
             
             dashboardEl.innerHTML = `
                 <div class="xilriws-summary">
                     <div class="xilriws-stat primary">
                         <span class="stat-value ${rateClass}">${successRate.toFixed(1)}%</span>
-                        <span class="stat-label">Success Rate</span>
+                        <span class="stat-label">Overall Rate</span>
                     </div>
-                    <div class="xilriws-stat">
-                        <span class="stat-value success">${data.successful || 0}</span>
-                        <span class="stat-label">Successful</span>
+                    <div class="xilriws-stat" title="Cookie retrieval success rate">
+                        <span class="stat-value ${cookieClass}">🍪 ${cookieRate.toFixed(0)}%</span>
+                        <span class="stat-label">${data.cookie_success || 0}/${data.cookie_total || 0}</span>
                     </div>
-                    <div class="xilriws-stat">
-                        <span class="stat-value error">${data.failed || 0}</span>
-                        <span class="stat-label">Failed</span>
+                    <div class="xilriws-stat" title="Account auth success rate (excludes banned accounts)">
+                        <span class="stat-value ${authClass}">🔐 ${authRate.toFixed(0)}%</span>
+                        <span class="stat-label">${data.auth_success || 0}/${data.auth_total || 0}</span>
                     </div>
-                    <div class="xilriws-stat">
-                        <span class="stat-value">${data.total_requests || 0}</span>
-                        <span class="stat-label">Total</span>
+                    <div class="xilriws-stat" title="Accounts returned 418 banned">
+                        <span class="stat-value error">🚫 ${data.auth_banned || 0}</span>
+                        <span class="stat-label">Banned</span>
                     </div>
                 </div>
             `;
@@ -1993,7 +1997,7 @@ function updateXilriwsPage(data) {
      */
     if (!data) return;
     
-    // Main stats
+    // Main stats - Overall
     const successRate = data.success_rate || 0;
     const rateEl = document.getElementById('xilSuccessRate');
     if (rateEl) {
@@ -2003,14 +2007,22 @@ function updateXilriwsPage(data) {
         rateEl.parentElement?.classList.add(rateClass);
     }
     
-    setElementText('xilSuccessful', data.successful || data.auth_success || 0);
+    setElementText('xilSuccessful', data.successful || 0);
     setElementText('xilFailed', data.failed || 0);
     setElementText('xilTotal', data.total_requests || 0);
     
-    // Cookie storage
+    // Cookie stats
     const cookieCurrent = data.cookie_current ?? 0;
     const cookieMax = data.cookie_max ?? 2;
     setElementText('xilCookieStatus', `${cookieCurrent}/${cookieMax}`);
+    setElementText('xilCookieSuccess', data.cookie_success || 0);
+    setElementText('xilCookieFailed', data.cookie_failed || 0);
+    setElementText('xilCookieRate', `${(data.cookie_rate || 0).toFixed(0)}%`);
+    
+    // Auth stats  
+    setElementText('xilAuthSuccess', data.auth_success || 0);
+    setElementText('xilAuthFailed', data.auth_failed || 0);
+    setElementText('xilAuthRate', `${(data.auth_rate || 0).toFixed(0)}%`);
     
     // Critical events
     setElementText('xilCritical', data.critical_failures || 0);
@@ -2020,12 +2032,12 @@ function updateXilriwsPage(data) {
         criticalIcon.parentElement?.classList.toggle('danger', data.critical_failures > 0);
     }
     
-    // Error breakdown - Account Status
+    // Error breakdown - Account Status (Auth failures)
     setElementText('xilAuthBanned', data.auth_banned || 0);
     setElementText('xilMaxRetries', data.auth_max_retries || 0);
     setElementText('xilInternalError', data.auth_internal_error || 0);
     
-    // Error breakdown - Browser Issues
+    // Error breakdown - Browser Issues (Cookie failures)
     setElementText('xilCode15', data.browser_bot_protection || 0);
     setElementText('xilBrowserTimeout', data.browser_timeout || 0);
     setElementText('xilBrowserUnreachable', data.browser_unreachable || 0);
@@ -2063,7 +2075,7 @@ function setElementText(id, value) {
 
 function updateProxyStats(proxyStats) {
     /**
-     * Update the proxy performance table
+     * Update the proxy performance table with cookie/auth breakdown
      */
     const container = document.getElementById('proxyStats');
     if (!container) return;
@@ -2082,11 +2094,11 @@ function updateProxyStats(proxyStats) {
         <table class="proxy-table">
             <thead>
                 <tr>
-                    <th>Proxy</th>
-                    <th>Success</th>
-                    <th>Fail</th>
+                    <th>Proxy/IP</th>
+                    <th title="Cookie retrieval success/fail">🍪 Cookie</th>
+                    <th title="Account authentication success/fail">🔐 Auth</th>
                     <th>Rate</th>
-                    <th>Issues</th>
+                    <th title="Issues breakdown">Issues</th>
                 </tr>
             </thead>
             <tbody>
@@ -2096,22 +2108,45 @@ function updateProxyStats(proxyStats) {
         const successRate = stats.success_rate || 0;
         const rateClass = successRate > 80 ? 'rate-good' : successRate > 50 ? 'rate-ok' : 'rate-bad';
         
+        // Cookie stats
+        const cookieSuccess = stats.cookie_success || 0;
+        const cookieFail = stats.cookie_fail || 0;
+        const cookieCode15 = stats.cookie_code15 || 0;
+        
+        // Auth stats
+        const authSuccess = stats.auth_success || 0;
+        const authBanned = stats.auth_banned || 0;
+        const authProxyError = stats.auth_proxy_error || 0;
+        
         // Build issues summary
         const issues = [];
-        if (stats.timeout > 0) issues.push(`⏱${stats.timeout}`);
-        if (stats.unreachable > 0) issues.push(`🌐${stats.unreachable}`);
-        if (stats.bot_blocked > 0) issues.push(`🛡${stats.bot_blocked}`);
+        if (cookieCode15 > 0) issues.push(`<span title="Code 15 Bot Protection">🛡${cookieCode15}</span>`);
+        if (stats.timeout > 0) issues.push(`<span title="Timeouts">⏱${stats.timeout}</span>`);
+        if (authBanned > 0) issues.push(`<span title="Account Banned (418)">🚫${authBanned}</span>`);
+        if (authProxyError > 0) issues.push(`<span title="Proxy errors during auth">⚠${authProxyError}</span>`);
+        if (stats.unreachable > 0) issues.push(`<span title="Unreachable">🌐${stats.unreachable}</span>`);
         
         // Highlight consistently failing proxies
-        const rowClass = stats.unreachable > 3 ? 'proxy-problematic' : '';
+        const rowClass = stats.unreachable > 3 || cookieCode15 > 5 ? 'proxy-problematic' : '';
         
         // Escape proxy for use in onclick attribute (replace single quotes)
         const escapedProxy = proxy.replace(/'/g, "\\'");
+        
+        // Cookie cell with success/fail
+        const cookieCell = cookieSuccess > 0 || cookieFail > 0 
+            ? `<span class="success">${cookieSuccess}</span>/<span class="fail">${cookieFail}</span>`
+            : '-';
+            
+        // Auth cell with success/banned/error
+        const authCell = authSuccess > 0 || authBanned > 0 || authProxyError > 0
+            ? `<span class="success">${authSuccess}</span>/<span class="fail" title="Banned: ${authBanned}, Proxy errors: ${authProxyError}">${authBanned + authProxyError}</span>`
+            : '-';
+        
         html += `
             <tr class="${rowClass} clickable-row" onclick="showProxyDetails('${escapedProxy}')" style="cursor: pointer;" title="Click to view detailed stats">
                 <td class="proxy-addr" title="${proxy}">${truncateProxy(proxy)}</td>
-                <td class="success">${stats.success || 0}</td>
-                <td class="fail">${stats.fail || 0}</td>
+                <td>${cookieCell}</td>
+                <td>${authCell}</td>
                 <td class="${rateClass}">${successRate.toFixed(0)}%</td>
                 <td class="issues">${issues.join(' ') || '-'}</td>
             </tr>

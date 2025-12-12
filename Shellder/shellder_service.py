@@ -4936,28 +4936,40 @@ class StatsCollector:
                         'successful': 0,
                         'failed': 0,
                         'success_rate': 0,
-                        # Auth results
+                        
+                        # Cookie operations (getting cookies from PTC/Nintendo)
+                        'cookie_success': 0,        # I | Browser | Got cookies
+                        'cookie_failed': 0,         # Failed cookie attempts
+                        
+                        # Auth operations (using cookies to authenticate accounts)
                         'auth_success': 0,          # S | Xilriws | 200 OK: successful auth
+                        'auth_failed': 0,           # Total auth failures
                         'auth_banned': 0,           # W | Xilriws | 418: account is ptc-banned
                         'auth_max_retries': 0,      # E | Xilriws | Error: Exceeded max retries
                         'auth_internal_error': 0,   # W | Xilriws | 500 Internal Server Error
-                        # Browser errors
+                        
+                        # Proxy/Network errors (during cookie or auth)
                         'browser_timeout': 0,       # E | Browser | Page timed out
                         'browser_unreachable': 0,   # E | Browser | Page couldn't be reached
                         'browser_bot_protection': 0,# E | Browser | Didn't pass JS check. Code 15
                         'browser_js_timeout': 0,    # E | Browser | Timeout on JS challenge
+                        
                         # PTC errors
                         'ptc_tunnel_failed': 0,     # E | PTC | curl: (56) CONNECT tunnel failed
                         'ptc_connection_timeout': 0,# E | PTC | curl: (28) Connection timed out
                         'ptc_captcha': 0,           # W | PTC | Error code 12 (Captcha)
+                        
                         # Critical
                         'critical_failures': 0,     # C | Browser | consecutive failures
+                        
                         # Cookie status
                         'cookie_current': 0,
                         'cookie_max': 2,
-                        # Proxy stats (per-proxy tracking)
+                        
+                        # Proxy stats (per-proxy tracking with detailed breakdown)
                         'proxy_stats': {},
                         'current_proxy': None,
+                        
                         # Recent events
                         'recent_errors': [],
                         'recent_successes': [],
@@ -4982,6 +4994,24 @@ class StatsCollector:
                         message = message.strip()
                         msg_lower = message.lower()
                         
+                        # Helper to initialize proxy stats
+                        def init_proxy_stats(proxy_addr):
+                            if proxy_addr not in stats['proxy_stats']:
+                                stats['proxy_stats'][proxy_addr] = {
+                                    'requests': 0,
+                                    # Cookie operations
+                                    'cookie_success': 0,
+                                    'cookie_fail': 0,
+                                    'cookie_code15': 0,
+                                    # Auth operations  
+                                    'auth_success': 0,
+                                    'auth_banned': 0,
+                                    'auth_proxy_error': 0,
+                                    # Legacy totals
+                                    'success': 0, 'fail': 0,
+                                    'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
+                                }
+                        
                         # Track proxy switches
                         if component == 'Proxy':
                             if 'Switching to Proxy' in message:
@@ -4989,28 +5019,16 @@ class StatsCollector:
                                 if proxy_match:
                                     current_proxy = proxy_match.group(1)
                                     stats['current_proxy'] = current_proxy
-                                    if current_proxy not in stats['proxy_stats']:
-                                        stats['proxy_stats'][current_proxy] = {
-                                            'requests': 0, 'success': 0, 'fail': 0,
-                                            'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
-                                        }
+                                    init_proxy_stats(current_proxy)
                             elif 'No proxies configured' in message or 'using local IP' in message.lower():
                                 current_proxy = 'local'
                                 stats['current_proxy'] = 'local'
-                                if 'local' not in stats['proxy_stats']:
-                                    stats['proxy_stats']['local'] = {
-                                        'requests': 0, 'success': 0, 'fail': 0,
-                                        'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
-                                    }
+                                init_proxy_stats('local')
                         
                         # If no proxy set yet, assume local
                         if current_proxy is None:
                             current_proxy = 'local'
-                            if 'local' not in stats['proxy_stats']:
-                                stats['proxy_stats']['local'] = {
-                                    'requests': 0, 'success': 0, 'fail': 0,
-                                    'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
-                                }
+                            init_proxy_stats('local')
                         
                         # Track cookie storage
                         if component == 'Cookie':
@@ -5019,17 +5037,38 @@ class StatsCollector:
                                 stats['cookie_current'] = int(cookie_match.group(1))
                                 stats['cookie_max'] = int(cookie_match.group(2))
                         
-                        # SUCCESS events (S level)
+                        # INFO level events - includes cookie success!
+                        if level == 'I':
+                            # Cookie retrieval success: "I | Browser | Got cookies"
+                            if component == 'Browser' and 'Got cookies' in message:
+                                stats['cookie_success'] += 1
+                                stats['successful'] += 1
+                                stats['recent_successes'].append({
+                                    'time': timestamp,
+                                    'type': 'cookie',
+                                    'proxy': current_proxy
+                                })
+                                # Update proxy stats
+                                if current_proxy:
+                                    init_proxy_stats(current_proxy)
+                                    stats['proxy_stats'][current_proxy]['cookie_success'] += 1
+                                    stats['proxy_stats'][current_proxy]['success'] += 1
+                                    stats['proxy_stats'][current_proxy]['requests'] += 1
+                        
+                        # SUCCESS events (S level) - Auth success
                         if level == 'S':
                             if '200 OK' in message and 'successful auth' in msg_lower:
                                 stats['auth_success'] += 1
                                 stats['successful'] += 1
                                 stats['recent_successes'].append({
                                     'time': timestamp,
+                                    'type': 'auth',
                                     'proxy': current_proxy
                                 })
                                 # Update proxy stats
-                                if current_proxy and current_proxy in stats['proxy_stats']:
+                                if current_proxy:
+                                    init_proxy_stats(current_proxy)
+                                    stats['proxy_stats'][current_proxy]['auth_success'] += 1
                                     stats['proxy_stats'][current_proxy]['success'] += 1
                                     stats['proxy_stats'][current_proxy]['requests'] += 1
                         
@@ -5038,13 +5077,31 @@ class StatsCollector:
                             if component == 'Xilriws':
                                 if '418' in message and 'ptc-banned' in msg_lower:
                                     stats['auth_banned'] += 1
+                                    stats['auth_failed'] += 1
                                     stats['failed'] += 1
+                                    # Update proxy stats - this is account issue, not proxy
+                                    if current_proxy:
+                                        init_proxy_stats(current_proxy)
+                                        stats['proxy_stats'][current_proxy]['auth_banned'] += 1
+                                        stats['proxy_stats'][current_proxy]['fail'] += 1
+                                        stats['proxy_stats'][current_proxy]['requests'] += 1
+                                    stats['recent_errors'].append({
+                                        'time': timestamp,
+                                        'type': 'auth_banned',
+                                        'proxy': current_proxy,
+                                        'message': message[:100]
+                                    })
                                 elif '500' in message and 'internal server error' in msg_lower:
                                     stats['auth_internal_error'] += 1
+                                    stats['auth_failed'] += 1
                                     stats['failed'] += 1
                             elif component == 'PTC':
                                 if 'Error code 12' in message or 'Captcha' in message:
                                     stats['ptc_captcha'] += 1
+                                    # This is a proxy error during auth
+                                    if current_proxy:
+                                        init_proxy_stats(current_proxy)
+                                        stats['proxy_stats'][current_proxy]['auth_proxy_error'] += 1
                                     stats['recent_errors'].append({
                                         'time': timestamp,
                                         'type': 'captcha',
@@ -5055,6 +5112,7 @@ class StatsCollector:
                         # ERROR events (E level)
                         elif level == 'E':
                             error_recorded = False
+                            is_cookie_error = 'while getting cookie' in msg_lower
                             
                             if component == 'Browser':
                                 # Extract proxy from error message if present
@@ -5065,11 +5123,7 @@ class StatsCollector:
                                 
                                 # Use current_proxy or 'local' for stats tracking
                                 tracking_proxy = error_proxy or current_proxy or 'local'
-                                if tracking_proxy not in stats['proxy_stats']:
-                                    stats['proxy_stats'][tracking_proxy] = {
-                                        'requests': 0, 'success': 0, 'fail': 0,
-                                        'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
-                                    }
+                                init_proxy_stats(tracking_proxy)
                                 
                                 if 'Page timed out' in message or 'timed out' in msg_lower:
                                     stats['browser_timeout'] += 1
@@ -5077,46 +5131,86 @@ class StatsCollector:
                                     stats['proxy_stats'][tracking_proxy]['timeout'] += 1
                                     stats['proxy_stats'][tracking_proxy]['fail'] += 1
                                     stats['proxy_stats'][tracking_proxy]['requests'] += 1
+                                    if is_cookie_error:
+                                        stats['cookie_failed'] += 1
+                                        stats['proxy_stats'][tracking_proxy]['cookie_fail'] += 1
+                                        
                                 elif "Page couldn't be reached" in message or "couldn't be reached" in msg_lower:
                                     stats['browser_unreachable'] += 1
                                     error_recorded = True
                                     stats['proxy_stats'][tracking_proxy]['unreachable'] += 1
                                     stats['proxy_stats'][tracking_proxy]['fail'] += 1
                                     stats['proxy_stats'][tracking_proxy]['requests'] += 1
+                                    if is_cookie_error:
+                                        stats['cookie_failed'] += 1
+                                        stats['proxy_stats'][tracking_proxy]['cookie_fail'] += 1
+                                        
                                 elif "Didn't pass JS check" in message or 'Code 15' in message or 'code 15' in msg_lower:
                                     stats['browser_bot_protection'] += 1
                                     error_recorded = True
-                                    error_proxy = current_proxy or 'local'
-                                    if error_proxy not in stats['proxy_stats']:
-                                        stats['proxy_stats'][error_proxy] = {
-                                            'requests': 0, 'success': 0, 'fail': 0,
-                                            'timeout': 0, 'unreachable': 0, 'bot_blocked': 0
-                                        }
-                                    stats['proxy_stats'][error_proxy]['bot_blocked'] += 1
-                                    stats['proxy_stats'][error_proxy]['fail'] += 1
-                                    stats['proxy_stats'][error_proxy]['requests'] += 1
+                                    init_proxy_stats(tracking_proxy)
+                                    stats['proxy_stats'][tracking_proxy]['bot_blocked'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['requests'] += 1
+                                    if is_cookie_error:
+                                        stats['cookie_failed'] += 1
+                                        stats['proxy_stats'][tracking_proxy]['cookie_fail'] += 1
+                                        stats['proxy_stats'][tracking_proxy]['cookie_code15'] += 1
+                                        
                                 elif 'Timeout on JS challenge' in message:
                                     stats['browser_js_timeout'] += 1
                                     error_recorded = True
+                                    stats['proxy_stats'][tracking_proxy]['timeout'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['requests'] += 1
+                                    if is_cookie_error:
+                                        stats['cookie_failed'] += 1
+                                        stats['proxy_stats'][tracking_proxy]['cookie_fail'] += 1
+                                        
+                                elif "Didn't find reese cookie" in message:
+                                    # Cookie not found in browser - still a cookie failure
+                                    stats['cookie_failed'] += 1
+                                    error_recorded = True
+                                    stats['proxy_stats'][tracking_proxy]['cookie_fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['fail'] += 1
+                                    stats['proxy_stats'][tracking_proxy]['requests'] += 1
                             
                             elif component == 'PTC':
                                 if 'curl: (56)' in message or 'CONNECT tunnel failed' in message or 'response 407' in message:
                                     stats['ptc_tunnel_failed'] += 1
                                     error_recorded = True
+                                    # This is a proxy error during auth
+                                    if current_proxy:
+                                        init_proxy_stats(current_proxy)
+                                        stats['proxy_stats'][current_proxy]['auth_proxy_error'] += 1
+                                        stats['proxy_stats'][current_proxy]['fail'] += 1
+                                        stats['proxy_stats'][current_proxy]['requests'] += 1
                                 elif 'curl: (28)' in message or 'Connection timed out' in message or 'timed out after' in msg_lower:
                                     stats['ptc_connection_timeout'] += 1
                                     error_recorded = True
+                                    # This is a proxy/network error during auth
+                                    if current_proxy:
+                                        init_proxy_stats(current_proxy)
+                                        stats['proxy_stats'][current_proxy]['auth_proxy_error'] += 1
+                                        stats['proxy_stats'][current_proxy]['timeout'] += 1
+                                        stats['proxy_stats'][current_proxy]['fail'] += 1
+                                        stats['proxy_stats'][current_proxy]['requests'] += 1
                             
                             elif component == 'Xilriws':
                                 if 'Exceeded max retries' in message:
                                     stats['auth_max_retries'] += 1
+                                    stats['auth_failed'] += 1
                                     error_recorded = True
+                                    if current_proxy:
+                                        init_proxy_stats(current_proxy)
+                                        stats['proxy_stats'][current_proxy]['auth_proxy_error'] += 1
                             
                             if error_recorded:
                                 stats['failed'] += 1
+                                error_type = 'cookie' if is_cookie_error else component.lower()
                                 stats['recent_errors'].append({
                                     'time': timestamp,
-                                    'type': component.lower(),
+                                    'type': error_type,
                                     'proxy': current_proxy,
                                     'message': message[:150]
                                 })
@@ -5159,18 +5253,36 @@ class StatsCollector:
                     
                     # Create error breakdown for display
                     stats['error_breakdown'] = {
-                        'Browser Timeouts': stats['browser_timeout'],
-                        'Proxy Unreachable': stats['browser_unreachable'],
-                        'Bot Protection (Code 15)': stats['browser_bot_protection'],
-                        'JS Challenge Timeout': stats['browser_js_timeout'],
-                        'Tunnel Failed (407)': stats['ptc_tunnel_failed'],
-                        'Connection Timeout': stats['ptc_connection_timeout'],
-                        'Captcha Triggered': stats['ptc_captcha'],
-                        'Account Banned (418)': stats['auth_banned'],
-                        'Max Retries Exceeded': stats['auth_max_retries'],
-                        'Internal Server Error': stats['auth_internal_error'],
+                        # Cookie errors
+                        'Cookie: Bot Protection (Code 15)': stats['browser_bot_protection'],
+                        'Cookie: Page Timeout': stats['browser_timeout'],
+                        'Cookie: JS Challenge Timeout': stats['browser_js_timeout'],
+                        'Cookie: Unreachable': stats['browser_unreachable'],
+                        # Auth errors - Account issues
+                        'Auth: Account Banned (418)': stats['auth_banned'],
+                        'Auth: Max Retries Exceeded': stats['auth_max_retries'],
+                        'Auth: Internal Server Error': stats['auth_internal_error'],
+                        # Auth errors - Proxy/Network issues
+                        'Auth: Connection Timeout': stats['ptc_connection_timeout'],
+                        'Auth: Tunnel Failed (407)': stats['ptc_tunnel_failed'],
+                        'Auth: Captcha Triggered': stats['ptc_captcha'],
+                        # Critical
                         'Critical Failures': stats['critical_failures']
                     }
+                    
+                    # Summary stats
+                    stats['cookie_total'] = stats['cookie_success'] + stats['cookie_failed']
+                    stats['auth_total'] = stats['auth_success'] + stats['auth_failed']
+                    
+                    if stats['cookie_total'] > 0:
+                        stats['cookie_rate'] = round((stats['cookie_success'] / stats['cookie_total']) * 100, 1)
+                    else:
+                        stats['cookie_rate'] = 0
+                        
+                    if stats['auth_total'] > 0:
+                        stats['auth_rate'] = round((stats['auth_success'] / stats['auth_total']) * 100, 1)
+                    else:
+                        stats['auth_rate'] = 0
                     
                     with self.lock:
                         self.xilriws_stats = stats
