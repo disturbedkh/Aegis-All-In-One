@@ -1,11 +1,19 @@
+# =============================================================================
+# USER CONFIG FILES (created by setup.sh, contain secrets)
+# =============================================================================
 .env
 reactmap/local.json
 unown/dragonite_config.toml
 unown/golbat_config.toml
 unown/rotom_config.json
+init/01.sql
+Poracle/config/local.json
 
-# Shellder
+# =============================================================================
+# SHELLDER (Control Panel)
+# =============================================================================
 Shellder/.venv/
+Shellder/__pycache__/
 Shellder/data/*
 !Shellder/data/.gitkeep
 Shellder/logs/*
@@ -14,7 +22,63 @@ Shellder/.gui_pid
 Shellder/gui_server.log
 Shellder/shellder.db
 Shellder/shellder.log
+Shellder/shellder.log.*
+Shellder/*.log.*
+Shellder/*.bak
+Shellder/debuglog.txt*
 
 # MCP Server
 Shellder/mcp-server/node_modules/
 Shellder/mcp-server/package-lock.json
+
+# =============================================================================
+# DATA DIRECTORIES (contain runtime data, not code)
+# =============================================================================
+# MySQL/MariaDB data
+mysql_data/
+
+# Grafana (dashboards, plugins, user prefs)
+grafana/grafana.db
+grafana/grafana.db-*
+grafana/alerting/
+grafana/csv/
+grafana/plugins/
+grafana/png/
+grafana/*.log
+
+# VictoriaMetrics time-series data
+victoriametrics/data/
+
+# VMAgent data
+vmagent/data/
+
+# Fletchling data
+fletchling/*.db
+fletchling/*.log
+fletchling/data/
+
+# Poracle data
+Poracle/logs/
+Poracle/.pokemon-icons/
+Poracle/*.db
+
+# ReactMap cache
+reactmap/.pokemon-icons/
+reactmap/logs/
+
+# Unown scanner logs
+unown/logs/
+unown/*.log
+
+# =============================================================================
+# OS & IDE FILES
+# =============================================================================
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+*~
+.idea/
+.vscode/
+*.pyc
+__pycache__/
