@@ -13483,22 +13483,68 @@ def api_mariadb_setup():
             if start_result.returncode == 0:
                 results['steps'].append('✓ Database container started')
                 
-                # Wait for MariaDB to be ready (up to 45 seconds - first start can be slow)
-                results['steps'].append('⏳ Waiting for MariaDB to initialize (first start may take 30-45 seconds)...')
-                for i in range(45):
+                # Get the root password from .env (container uses this on first init)
+                env_root_password = ''
+                if os.path.exists(env_file):
+                    try:
+                        with open(env_file, 'r') as f:
+                            for line in f:
+                                if line.startswith('MYSQL_ROOT_PASSWORD='):
+                                    env_root_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                                    break
+                    except:
+                        pass
+                
+                # Use env password - the container initializes with MYSQL_ROOT_PASSWORD from .env
+                # The form password may not match what the container actually has
+                if env_root_password:
+                    root_password = env_root_password
+                    results['steps'].append(f'ℹ️ Using MYSQL_ROOT_PASSWORD from .env')
+                
+                # Wait for MariaDB to be ready (up to 60 seconds - first start can be slow)
+                results['steps'].append('⏳ Waiting for MariaDB to initialize (first start may take 30-60 seconds)...')
+                last_error = ''
+                for i in range(60):
                     time.sleep(1)
-                    # Check if we can connect
-                    check_result = subprocess.run(
-                        ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
-                        capture_output=True, text=True, timeout=5
-                    )
-                    if check_result.returncode == 0:
-                        use_docker = True
-                        results['steps'].append(f'✓ MariaDB ready after {i+1} seconds')
-                        break
+                    try:
+                        # Check if mysql socket is ready first
+                        socket_check = subprocess.run(
+                            ['docker', 'exec', 'database', 'test', '-S', '/run/mysqld/mysqld.sock'],
+                            capture_output=True, text=True, timeout=5
+                        )
+                        if socket_check.returncode != 0:
+                            last_error = 'Socket not ready'
+                            continue
+                        
+                        # Try to connect
+                        check_result = subprocess.run(
+                            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if check_result.returncode == 0:
+                            use_docker = True
+                            results['steps'].append(f'✓ MariaDB ready after {i+1} seconds')
+                            break
+                        else:
+                            last_error = check_result.stderr.strip()
+                    except subprocess.TimeoutExpired:
+                        last_error = 'Connection timeout'
+                    except Exception as e:
+                        last_error = str(e)
                 
                 if not use_docker:
-                    results['errors'].append('Database container started but MariaDB not responding after 45 seconds. Check container logs.')
+                    # Get container logs for debugging
+                    results['errors'].append(f'Database container started but could not connect after 60 seconds.')
+                    results['errors'].append(f'Last error: {last_error}')
+                    try:
+                        logs_result = subprocess.run(
+                            ['docker', 'logs', '--tail', '10', 'database'],
+                            capture_output=True, text=True, timeout=10
+                        )
+                        if logs_result.stdout:
+                            results['errors'].append(f'Container log tail: {logs_result.stdout[-300:]}')
+                    except:
+                        pass
             else:
                 results['errors'].append(f'Failed to start database container: {start_result.stderr}')
         except Exception as e:
