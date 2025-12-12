@@ -1362,6 +1362,13 @@ function navigateTo(page) {
     } else if (page === 'poracle') {
         // Load Poracle status when navigating to the page
         if (typeof loadPoracleStatus === 'function') loadPoracleStatus();
+    } else if (page === 'nginx') {
+        // Load running containers for nginx setup when navigating to the page
+        setTimeout(() => {
+            if (typeof loadRunningContainers === 'function') {
+                loadRunningContainers();
+            }
+        }, 100);
     }
 }
 
@@ -8335,13 +8342,27 @@ let runningContainers = [];
 // Load running containers for nginx setup
 async function loadRunningContainers() {
     const servicesList = document.getElementById('servicesList');
-    if (!servicesList) return;
+    if (!servicesList) {
+        console.error('[Nginx Setup] servicesList element not found');
+        return;
+    }
     
     servicesList.innerHTML = '<div class="loading">Loading running containers...</div>';
     
     try {
-        const result = await fetchAPI('/api/nginx/running-containers');
+        console.log('[Nginx Setup] Fetching running containers...');
+        const result = await fetchAPI('/api/nginx/running-containers', { force: true });
+        console.log('[Nginx Setup] API response:', result);
+        
+        // Check for API error response
+        if (result.error) {
+            servicesList.innerHTML = `<div class="text-danger">Error: ${result.error}</div>`;
+            console.error('[Nginx Setup] API returned error:', result.error);
+            return;
+        }
+        
         runningContainers = result.containers || [];
+        console.log('[Nginx Setup] Found containers:', runningContainers.length);
         
         if (runningContainers.length === 0) {
             servicesList.innerHTML = '<div class="text-muted">No running containers found. Start your stack services first.</div>';
@@ -8350,7 +8371,8 @@ async function loadRunningContainers() {
         
         renderServicesList();
     } catch (e) {
-        servicesList.innerHTML = `<div class="text-danger">Error loading containers: ${e.message}</div>`;
+        console.error('[Nginx Setup] Exception loading containers:', e);
+        servicesList.innerHTML = `<div class="text-danger">Error loading containers: ${e.message || 'Unknown error'}</div>`;
     }
 }
 
@@ -8593,23 +8615,6 @@ async function runMultiServiceNginxSetup() {
 
 // Auto-load containers when Sites & Security tab is opened
 document.addEventListener('DOMContentLoaded', function() {
-    // Load containers when tab is shown
-    const sitesTab = document.querySelector('[data-tab="sites"]');
-    if (sitesTab) {
-        sitesTab.addEventListener('click', function() {
-            setTimeout(() => {
-                if (document.getElementById('servicesList')) {
-                    loadRunningContainers();
-                }
-            }, 100);
-        });
-    }
-    
-    // Also load on initial page load if tab is active
-    if (document.getElementById('servicesList')) {
-        loadRunningContainers();
-    }
-    
     // Update previews when base domain changes
     const baseDomainInput = document.getElementById('setupBaseDomain');
     if (baseDomainInput) {
@@ -8621,6 +8626,15 @@ document.addEventListener('DOMContentLoaded', function() {
                 });
             }
         });
+    }
+    
+    // Also load on initial page load if nginx page is active
+    if (document.getElementById('page-nginx')?.classList.contains('active')) {
+        setTimeout(() => {
+            if (typeof loadRunningContainers === 'function') {
+                loadRunningContainers();
+            }
+        }, 200);
     }
 });
 

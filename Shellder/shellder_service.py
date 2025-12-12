@@ -11983,7 +11983,11 @@ def api_nginx_running_containers():
                                     'status': 'running'
                                 })
     except Exception as e:
-        return jsonify({'error': str(e), 'containers': []})
+        import traceback
+        error_trace = traceback.format_exc()
+        print(f"[Nginx Setup] Error getting running containers: {e}")
+        print(f"[Nginx Setup] Traceback: {error_trace}")
+        return jsonify({'error': str(e), 'containers': []}), 500
     
     return jsonify({'containers': containers})
 
