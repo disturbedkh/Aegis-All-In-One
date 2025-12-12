@@ -13547,6 +13547,10 @@ async function applyPasswordChoices() {
         showToast(`✅ Applied ${Object.keys(secretsToApply).length} secrets to ${totalUpdated} files!`, 'success');
         await refreshWizardStatus();
         
+        // Refresh config variables status card at top of page
+        cachedConfigVarsData = null;  // Invalidate cache to force fresh fetch
+        await loadConfigVarsQuickStatus();
+        
     } catch (e) {
         showToast(`Failed to apply secrets: ${e.message}`, 'error');
     }
