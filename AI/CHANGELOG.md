@@ -17,6 +17,44 @@
 ## [Unreleased]
 
 ### Added
+- **Metrics Page Redesign** - Full-page Grafana dashboard
+  - Removed "Historical Shellder Stats" and "All-Time Proxy Stats" sections
+  - Grafana iframe now fills viewport (`calc(100vh - 200px)`)
+  - Fullscreen toggle button for even larger view
+  - Compact status bar with VictoriaMetrics/Grafana status indicators
+  - Inline setup wizard with step-by-step progress
+  - Credential form for Grafana login during dashboard import
+  - Live setup log showing import progress
+- **Grafana Provisioning System**
+  - `grafana/provisioning/datasources/victoriametrics.yml` - Auto-configure datasource
+  - `grafana/provisioning/dashboards/aegis.yml` - Auto-load dashboards
+  - `grafana/dashboards/Dragonite-Emi-v5.json` - Pre-configured dashboard
+  - Docker Compose mounts for provisioning directories
+- **GRAFANA_ADMIN_PASSWORD** - Added to password generation in Setup Wizard
+- **Setup Wizard Enhancements**
+  - Live stack logging during `docker compose up -d`
+  - Auto-apply MariaDB optimization when resources detected
+  - Progress bar updates after each step completion
+  - Partial stack state detection ("partially started" status)
+
+### Changed
+- **Removed Updates Page** - Functionality moved to Setup & Config → GitHub Manager
+- **MariaDB Setup** - Now exclusively uses `docker exec database mariadb` (not localhost)
+- **MariaDB Client** - Changed from `mysql` to `mariadb` command for newer containers
+- **Metrics queries** - Use `docker exec victoriametrics` for PromQL queries
+
+### Fixed
+- **Grafana 401 errors** - Now tries multiple passwords (provided, .env, default)
+- **Grafana "starting up" loop** - Fixed health check to use GET /api/health
+- **requests import missing** - Added `import requests` for Grafana status checks
+- **Dashboard not found** - Improved dashboard UID detection and import
+- **Config variables check** - Now updates after password and config copy steps
+
+---
+
+## [Previous Unreleased]
+
+### Added
 - AI/ folder for cross-tool AI collaboration
 - MCP server documentation (AI/MCP_SERVER.md)
 - AI Debug API reference (AI/AI_DEBUG_API.md)

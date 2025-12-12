@@ -8,6 +8,19 @@
 
 Aegis All-in-One provides a **pre-configured Docker stack** that brings together all the services needed for Pokémon mapping. It's designed as a **learning tool** to help newcomers understand how the different components interact.
 
+### What's New in 2.0?
+
+**Shellder** 🐚 is the game-changer — a full web-based control panel that eliminates the need for command-line setup:
+
+| Before (AIO 1.x) | Now (AIO 2.0 + Shellder) |
+|-----------------|--------------------------|
+| Edit configs via SSH | Browser-based config editor |
+| Run setup scripts | Guided setup wizard |
+| `docker logs` commands | Multi-container log viewer |
+| Manual Grafana setup | Auto-provisioned dashboards |
+| `git pull` via SSH | One-click updates |
+| Manual nginx config | Security setup wizard |
+
 ---
 
 ## 📦 Stack Components

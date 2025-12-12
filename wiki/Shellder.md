@@ -56,17 +56,23 @@ sudo bash shellder.sh
 
 | Section | Features |
 |---------|----------|
-| **Dashboard** | Overview stats, quick actions, container status, system services |
-| **Containers** | Detailed container management, logs, restart controls |
-| **Devices** | Connected device monitoring (when stack is running) |
-| **Stack Data** | Database statistics and management |
-| **Xilriws** | Proxy statistics, success rates, error tracking |
-| **Statistics** | Historical metrics and performance data |
-| **Nginx & Sites** | Site configuration and availability monitoring |
-| **Files** | Configuration file browser and editor |
-| **Scripts** | Quick access to Shellder shell scripts |
-| **Logs** | Aggregated log viewer with search |
-| **Updates** | Git pull and container image updates |
+| **Overview** | |
+| └─ Dashboard | Live stats, container status, system services, quick actions |
+| └─ Setup & Config | Setup wizard, GitHub manager, config editor |
+| └─ Sites & Security | Nginx, SSL, firewall, authentication setup |
+| **Monitoring** | |
+| └─ Metrics | **Full-page Grafana dashboard** with VictoriaMetrics |
+| └─ Logs | Multi-container viewer with search, filters, presets |
+| **Management** | |
+| └─ Containers | Start/stop/restart, CPU/RAM per container |
+| └─ Devices | Connected device monitoring |
+| └─ Xilriws | Proxy statistics, success rates, error tracking |
+| └─ Fletchling | Nest detection setup and management |
+| └─ Poracle | Discord/Telegram alert bot configuration |
+| **Tools** | |
+| └─ Files | File browser, editor, upload, permissions |
+| └─ Scripts | Quick access to shell scripts |
+| └─ Debug | AI debug panel, live logs, version info |
 
 ### Metric History Charts
 
@@ -115,6 +121,22 @@ The Device Monitor parses logs from:
 ---
 
 ## Recent Updates (v1.0.x)
+
+### Version 1.0.50+ (December 2024)
+- **Metrics Page Redesign** - Full-page Grafana dashboard replaces Statistics
+  - Removed historical stats and all-time proxy stats sections
+  - Grafana iframe fills viewport with fullscreen toggle
+  - Inline setup wizard for first-time Grafana configuration
+  - Credential form for dashboard import
+- **Removed Updates Page** - Moved to Setup & Config → GitHub Manager
+- **Grafana Auto-Provisioning** - Datasource and dashboard auto-configured on container start
+- **Setup Wizard Improvements**
+  - Live logging during stack startup
+  - Auto-apply MariaDB optimization
+  - Progress bar updates correctly
+  - Partial stack state detection
+- **MariaDB Setup Fixes** - Uses `docker exec` exclusively for container operations
+- **GRAFANA_ADMIN_PASSWORD** - Added to password generation
 
 ### Version 1.0.40+ (December 2024)
 - **Auto PUID/PGID Detection** - Automatically detects correct user from directory ownership

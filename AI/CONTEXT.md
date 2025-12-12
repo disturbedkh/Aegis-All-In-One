@@ -91,13 +91,15 @@ Aegis Phone → Rotom → Dragonite → Golbat → MariaDB → ReactMap
                       Xilriws (for auth)
 ```
 
-### Management
+### Management & Monitoring
 
 | Component | Purpose | Port |
 |-----------|---------|------|
 | **Shellder** | Web dashboard & CLI management | 5000 |
 | **Koji** | Geofence/area management | 6004 |
-| **Grafana** | Performance monitoring | 6006 |
+| **Grafana** | Performance monitoring (embedded in Shellder Metrics page) | 6006 |
+| **VictoriaMetrics** | Time-series metrics database | 8428 (internal) |
+| **VMAgent** | Metrics scraper | 8429 (internal) |
 | **phpMyAdmin** | Database administration | 6005 |
 
 ### Optional Features (Commented in docker-compose.yaml)
