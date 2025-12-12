@@ -2216,6 +2216,28 @@ select:focus {
 .proxy-table .rate-ok { color: #eab308; }
 .proxy-table .rate-bad { color: #ef4444; }
 
+/* Sortable table headers */
+.proxy-table.sortable th.sortable-header {
+    cursor: pointer;
+    user-select: none;
+    transition: background 0.15s ease;
+}
+
+.proxy-table.sortable th.sortable-header:hover {
+    background: var(--bg-tertiary);
+}
+
+.proxy-table .sort-icon {
+    margin-left: 4px;
+    opacity: 0.4;
+    font-size: 0.7rem;
+}
+
+.proxy-table .sort-icon.active {
+    opacity: 1;
+    color: var(--accent-primary);
+}
+
 .proxy-table .issues {
     font-size: 0.8rem;
 }

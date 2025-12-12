@@ -2073,50 +2073,133 @@ function setElementText(id, value) {
     if (el) el.textContent = value;
 }
 
+// Store proxy stats globally for sorting
+let _proxyStatsData = {};
+let _proxySortColumn = 'requests';
+let _proxySortAsc = false; // false = high to low (default)
+
 function updateProxyStats(proxyStats) {
     /**
      * Update the proxy performance table with cookie/auth breakdown
      */
+    _proxyStatsData = proxyStats;
+    renderProxyTable();
+}
+
+function sortProxyStats(column) {
+    // Toggle direction if same column, otherwise default to descending
+    if (_proxySortColumn === column) {
+        _proxySortAsc = !_proxySortAsc;
+    } else {
+        _proxySortColumn = column;
+        _proxySortAsc = false; // Start with high to low
+    }
+    renderProxyTable();
+}
+
+function renderProxyTable() {
     const container = document.getElementById('proxyStats');
     if (!container) return;
     
-    const proxies = Object.entries(proxyStats);
+    const proxies = Object.entries(_proxyStatsData);
     
     if (proxies.length === 0) {
         container.innerHTML = '<div class="no-data">No proxy data available</div>';
         return;
     }
     
-    // Sort by requests (most active first)
-    proxies.sort((a, b) => (b[1].requests || 0) - (a[1].requests || 0));
+    // Calculate rates for each proxy
+    const proxiesWithRates = proxies.map(([proxy, stats]) => {
+        const cookieSuccess = stats.cookie_success || 0;
+        const cookieFail = stats.cookie_fail || 0;
+        const cookieTotal = cookieSuccess + cookieFail;
+        const cookieRate = cookieTotal > 0 ? (cookieSuccess / cookieTotal) * 100 : 0;
+        
+        const authSuccess = stats.auth_success || 0;
+        const authBanned = stats.auth_banned || 0;
+        const authProxyError = stats.auth_proxy_error || 0;
+        const authTotal = authSuccess + authBanned + authProxyError;
+        const authRate = authTotal > 0 ? (authSuccess / authTotal) * 100 : 0;
+        
+        return {
+            proxy,
+            stats,
+            cookieSuccess,
+            cookieFail,
+            cookieTotal,
+            cookieRate,
+            authSuccess,
+            authBanned,
+            authProxyError,
+            authTotal,
+            authRate,
+            requests: stats.requests || 0,
+            issues: (stats.cookie_code15 || 0) + (stats.timeout || 0) + (stats.unreachable || 0)
+        };
+    });
+    
+    // Sort based on current column
+    proxiesWithRates.sort((a, b) => {
+        let aVal, bVal;
+        switch (_proxySortColumn) {
+            case 'proxy': aVal = a.proxy; bVal = b.proxy; break;
+            case 'cookie': aVal = a.cookieSuccess; bVal = b.cookieSuccess; break;
+            case 'cookieFail': aVal = a.cookieFail; bVal = b.cookieFail; break;
+            case 'auth': aVal = a.authSuccess; bVal = b.authSuccess; break;
+            case 'authFail': aVal = a.authBanned + a.authProxyError; bVal = b.authBanned + b.authProxyError; break;
+            case 'cookieRate': aVal = a.cookieRate; bVal = b.cookieRate; break;
+            case 'authRate': aVal = a.authRate; bVal = b.authRate; break;
+            case 'issues': aVal = a.issues; bVal = b.issues; break;
+            case 'requests': 
+            default: aVal = a.requests; bVal = b.requests; break;
+        }
+        
+        // String comparison for proxy name
+        if (typeof aVal === 'string') {
+            return _proxySortAsc ? aVal.localeCompare(bVal) : bVal.localeCompare(aVal);
+        }
+        return _proxySortAsc ? aVal - bVal : bVal - aVal;
+    });
+    
+    // Build sort indicator
+    const sortIcon = (col) => {
+        if (_proxySortColumn !== col) return '<span class="sort-icon">⇅</span>';
+        return _proxySortAsc ? '<span class="sort-icon active">↑</span>' : '<span class="sort-icon active">↓</span>';
+    };
     
     let html = `
-        <table class="proxy-table">
+        <table class="proxy-table sortable">
             <thead>
                 <tr>
-                    <th>Proxy/IP</th>
-                    <th title="Cookie retrieval success/fail">🍪 Cookie</th>
-                    <th title="Account authentication success/fail">🔐 Auth</th>
-                    <th>Rate</th>
-                    <th title="Issues breakdown">Issues</th>
+                    <th class="sortable-header" onclick="sortProxyStats('proxy')" title="Sort by proxy name">
+                        Proxy/IP ${sortIcon('proxy')}
+                    </th>
+                    <th class="sortable-header" onclick="sortProxyStats('cookie')" title="Sort by cookie success">
+                        🍪 Cookie ${sortIcon('cookie')}
+                    </th>
+                    <th class="sortable-header" onclick="sortProxyStats('auth')" title="Sort by auth success">
+                        🔐 Auth ${sortIcon('auth')}
+                    </th>
+                    <th class="sortable-header" onclick="sortProxyStats('cookieRate')" title="Sort by cookie success rate">
+                        🍪 Rate ${sortIcon('cookieRate')}
+                    </th>
+                    <th class="sortable-header" onclick="sortProxyStats('authRate')" title="Sort by auth success rate">
+                        🔐 Rate ${sortIcon('authRate')}
+                    </th>
+                    <th class="sortable-header" onclick="sortProxyStats('issues')" title="Sort by issue count">
+                        Issues ${sortIcon('issues')}
+                    </th>
                 </tr>
             </thead>
             <tbody>
     `;
     
-    for (const [proxy, stats] of proxies) {
-        const successRate = stats.success_rate || 0;
-        const rateClass = successRate > 80 ? 'rate-good' : successRate > 50 ? 'rate-ok' : 'rate-bad';
-        
-        // Cookie stats
-        const cookieSuccess = stats.cookie_success || 0;
-        const cookieFail = stats.cookie_fail || 0;
+    for (const p of proxiesWithRates) {
+        const { proxy, stats, cookieSuccess, cookieFail, cookieRate, authSuccess, authBanned, authProxyError, authRate } = p;
         const cookieCode15 = stats.cookie_code15 || 0;
         
-        // Auth stats
-        const authSuccess = stats.auth_success || 0;
-        const authBanned = stats.auth_banned || 0;
-        const authProxyError = stats.auth_proxy_error || 0;
+        const cookieRateClass = cookieRate > 80 ? 'rate-good' : cookieRate > 50 ? 'rate-ok' : cookieRate > 0 ? 'rate-bad' : '';
+        const authRateClass = authRate > 80 ? 'rate-good' : authRate > 50 ? 'rate-ok' : authRate > 0 ? 'rate-bad' : '';
         
         // Build issues summary
         const issues = [];
@@ -2129,7 +2212,7 @@ function updateProxyStats(proxyStats) {
         // Highlight consistently failing proxies
         const rowClass = stats.unreachable > 3 || cookieCode15 > 5 ? 'proxy-problematic' : '';
         
-        // Escape proxy for use in onclick attribute (replace single quotes)
+        // Escape proxy for use in onclick attribute
         const escapedProxy = proxy.replace(/'/g, "\\'");
         
         // Cookie cell with success/fail
@@ -2147,7 +2230,8 @@ function updateProxyStats(proxyStats) {
                 <td class="proxy-addr" title="${proxy}">${truncateProxy(proxy)}</td>
                 <td>${cookieCell}</td>
                 <td>${authCell}</td>
-                <td class="${rateClass}">${successRate.toFixed(0)}%</td>
+                <td class="${cookieRateClass}">${cookieRate > 0 ? cookieRate.toFixed(0) + '%' : '-'}</td>
+                <td class="${authRateClass}">${authRate > 0 ? authRate.toFixed(0) + '%' : '-'}</td>
                 <td class="issues">${issues.join(' ') || '-'}</td>
             </tr>
         `;
