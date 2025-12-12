@@ -12489,7 +12489,7 @@ def api_wizard_status():
         # Try with password first, then without (for fresh installs)
         for password_arg in ([f'-p{root_password}'] if root_password else [], []):
             try:
-                cmd = ['docker', 'exec', 'database', 'mysql', '-u', 'root'] + password_arg + ['-e', 'SHOW DATABASES']
+                cmd = ['docker', 'exec', 'database', 'mariadb', '-u', 'root'] + password_arg + ['-e', 'SHOW DATABASES']
                 result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
                 if result.returncode == 0:
                     db_accessible = True
@@ -13242,7 +13242,7 @@ def api_mariadb_status():
             
             # Get MariaDB version
             ver_result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-V'],
+                ['docker', 'exec', 'database', 'mariadb', '-V'],
                 capture_output=True, text=True, timeout=10
             )
             if ver_result.returncode == 0:
@@ -13330,7 +13330,7 @@ def api_mariadb_status():
             # Fallback to docker exec if no local mysql client
             try:
                 result = subprocess.run(
-                    ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_pass}', '-e', 'SELECT 1'],
+                    ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_pass}', '-e', 'SELECT 1'],
                     capture_output=True, text=True, timeout=10
                 )
                 if result.returncode == 0:
@@ -13356,7 +13356,7 @@ def api_mariadb_status():
             # Fallback to docker exec
             try:
                 result = subprocess.run(
-                    ['docker', 'exec', 'database', 'mysql', '-u', db_user, f'-p{db_pass}', '-e', 'SELECT 1'],
+                    ['docker', 'exec', 'database', 'mariadb', '-u', db_user, f'-p{db_pass}', '-e', 'SELECT 1'],
                     capture_output=True, text=True, timeout=10
                 )
                 status['connection_test']['db_user'] = result.returncode == 0
@@ -13453,24 +13453,40 @@ def api_mariadb_test_container():
         result['tests'].append(f'❌ docker ps failed: {e}')
         return jsonify(result)
     
-    # Test 2: Check mysql client in container
+    # Test 2: Check mysql/mariadb client in container
+    mysql_cmd = 'mysql'  # Default
     try:
-        mysql_ver = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '--version'],
+        # First try 'mariadb' (newer images)
+        mariadb_ver = subprocess.run(
+            ['docker', 'exec', 'database', 'mariadb', '--version'],
             capture_output=True, text=True, timeout=10
         )
-        if mysql_ver.returncode == 0:
-            result['tests'].append(f'✓ MySQL client: {mysql_ver.stdout.strip()[:60]}')
+        if mariadb_ver.returncode == 0:
+            mysql_cmd = 'mariadb'
+            result['tests'].append(f'✓ MariaDB client found: {mariadb_ver.stdout.strip()[:60]}')
         else:
-            result['tests'].append(f'❌ mysql --version failed: {mysql_ver.stderr}')
+            # Try 'mysql' (older images)
+            mysql_ver = subprocess.run(
+                ['docker', 'exec', 'database', 'mariadb', '--version'],
+                capture_output=True, text=True, timeout=10
+            )
+            if mysql_ver.returncode == 0:
+                mysql_cmd = 'mysql'
+                result['tests'].append(f'✓ MySQL client found: {mysql_ver.stdout.strip()[:60]}')
+            else:
+                result['tests'].append(f'❌ Neither mariadb nor mysql client found in container')
+                result['tests'].append(f'mariadb error: {mariadb_ver.stderr[:100]}')
+                result['tests'].append(f'mysql error: {mysql_ver.stderr[:100]}')
     except Exception as e:
         result['tests'].append(f'❌ docker exec mysql --version failed: {e}')
+    
+    result['mysql_cmd'] = mysql_cmd
     
     # Test 3: Try connection with password
     try:
         # Build command exactly as we do in setup
-        cmd = ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1 as test']
-        result['tests'].append(f'Running: docker exec database mysql -u root -p*** -e "SELECT 1"')
+        cmd = ['docker', 'exec', 'database', mysql_cmd, '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1 as test']
+        result['tests'].append(f'Running: docker exec database {mysql_cmd} -u root -p*** -e "SELECT 1"')
         
         conn_result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
         
@@ -13491,7 +13507,7 @@ def api_mariadb_test_container():
     # Test 4: Try without password (in case container has no root password)
     if not result['success']:
         try:
-            cmd_no_pass = ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e', 'SELECT 1 as test']
+            cmd_no_pass = ['docker', 'exec', 'database', mysql_cmd, '-u', 'root', '-e', 'SELECT 1 as test']
             result['tests'].append('Trying without password...')
             no_pass_result = subprocess.run(cmd_no_pass, capture_output=True, text=True, timeout=15)
             
@@ -13604,7 +13620,7 @@ def api_mariadb_setup():
                         
                         # Try to connect
                         check_result = subprocess.run(
-                            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
+                            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
                             capture_output=True, text=True, timeout=10
                         )
                         if check_result.returncode == 0:
@@ -13641,10 +13657,36 @@ def api_mariadb_setup():
         results['success'] = False
         return jsonify(results)
     
+    # Detect which mysql client is available (mariadb or mysql)
+    mysql_client = 'mariadb'  # Default for newer images
+    try:
+        mariadb_check = subprocess.run(
+            ['docker', 'exec', 'database', 'mariadb', '--version'],
+            capture_output=True, text=True, timeout=10
+        )
+        if mariadb_check.returncode != 0:
+            # Try mysql instead
+            mysql_check = subprocess.run(
+                ['docker', 'exec', 'database', 'mariadb', '--version'],
+                capture_output=True, text=True, timeout=10
+            )
+            if mysql_check.returncode == 0:
+                mysql_client = 'mysql'
+            else:
+                results['errors'].append(f'❌ Neither mariadb nor mysql client found in container')
+                results['success'] = False
+                return jsonify(results)
+    except Exception as e:
+        results['errors'].append(f'❌ Failed to detect mysql client: {e}')
+        results['success'] = False
+        return jsonify(results)
+    
+    results['steps'].append(f'✓ Using {mysql_client} client in container')
+    
     # Helper function to run mysql commands via Docker container
     def run_mysql(user, password, query, check_db=None):
         # Note: -p has no space before password (mysql quirk)
-        cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
+        cmd = ['docker', 'exec', 'database', mysql_client, '-u', user, f'-p{password}']
         if check_db:
             cmd.extend(['-D', check_db])
         cmd.extend(['-e', query])
@@ -13656,7 +13698,7 @@ def api_mariadb_setup():
     # First verify container has mysql client and is responding
     try:
         verify_result = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '--version'],
+            ['docker', 'exec', 'database', 'mariadb', '--version'],
             capture_output=True, text=True, timeout=10
         )
         if verify_result.returncode == 0:
@@ -14029,7 +14071,7 @@ def api_fletchling_status():
     # Check nests table in golbat database
     try:
         result = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e',
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', '-e',
              'SELECT COUNT(*) as count FROM golbat.nests 2>/dev/null; SELECT COUNT(*) as active FROM golbat.nests WHERE pokemon_id > 0 2>/dev/null;'],
             capture_output=True, text=True, timeout=10
         )
@@ -14057,7 +14099,7 @@ def api_fletchling_status():
     try:
         # Try to check for OSM data in the golbat database (fletchling stores it there)
         result = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e',
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', '-e',
              "SELECT COUNT(*) as count FROM golbat.park_polygon 2>/dev/null;"],
             capture_output=True, text=True, timeout=10
         )
@@ -14415,7 +14457,7 @@ def api_fletchling_nests_stats():
         
         # Try docker exec first
         proc = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', queries],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-N', '-e', queries],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14495,7 +14537,7 @@ def api_fletchling_nests_list():
         
         # Execute count
         proc_count = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14506,7 +14548,7 @@ def api_fletchling_nests_list():
         
         # Execute data query
         proc_data = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', data_query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-N', '-e', data_query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14552,7 +14594,7 @@ def api_fletchling_nest_get(nest_id):
         """
         
         proc = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-N', '-e', query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14601,7 +14643,7 @@ def api_fletchling_nest_update(nest_id):
         """
         
         proc = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-e', query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14628,7 +14670,7 @@ def api_fletchling_nest_delete(nest_id):
         query = f"DELETE FROM golbat.nests WHERE nest_id = {nest_id};"
         
         proc = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-e', query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14655,7 +14697,7 @@ def api_fletchling_area_delete(area_name):
         # First count how many will be deleted
         count_query = f"SELECT COUNT(*) FROM golbat.nests WHERE area_name = '{area_name}';"
         proc_count = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-N', '-e', count_query],
             capture_output=True, text=True, timeout=30
         )
         
@@ -14666,7 +14708,7 @@ def api_fletchling_area_delete(area_name):
         delete_query = f"DELETE FROM golbat.nests WHERE area_name = '{area_name}';"
         
         proc = subprocess.run(
-            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{db_pass}', '-e', delete_query],
+            ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{db_pass}', '-e', delete_query],
             capture_output=True, text=True, timeout=30
         )
         
