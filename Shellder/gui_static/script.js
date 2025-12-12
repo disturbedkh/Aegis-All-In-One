@@ -2128,9 +2128,13 @@ async function showProxyDetails(proxyAddress) {
     const modal = document.getElementById('proxyDetailsModal');
     const content = document.getElementById('proxyDetailsContent');
     
-    if (!modal || !content) return;
+    if (!modal || !content) {
+        console.error('Proxy details modal not found');
+        return;
+    }
     
-    modal.style.display = 'block';
+    // Use classList.add('active') - CSS uses !important so style.display won't work
+    modal.classList.add('active');
     content.innerHTML = '<div class="loading">Loading proxy details...</div>';
     
     try {
@@ -2245,7 +2249,7 @@ async function showProxyDetails(proxyAddress) {
 function closeProxyDetails() {
     const modal = document.getElementById('proxyDetailsModal');
     if (modal) {
-        modal.style.display = 'none';
+        modal.classList.remove('active');
     }
 }
 
@@ -12417,6 +12421,22 @@ function updateWizardUI() {
     updateStepStatus('resources', detectedResources !== null,
         detectedResources ? `${detectedResources.ram_gb}GB RAM, ${detectedResources.cpu_cores} cores` : 'Click to detect');
     
+    // Update Chrome step
+    const chromeStep = wizardStatus.steps.chrome;
+    if (chromeStep) {
+        let chromeDetails = '';
+        if (!chromeStep.installed) {
+            chromeDetails = 'Not installed';
+        } else if (!chromeStep.version_match) {
+            chromeDetails = `v${chromeStep.version || '?'} (need ${chromeStep.required_version})`;
+        } else if (!chromeStep.updates_disabled) {
+            chromeDetails = `v${chromeStep.version} - updates not disabled`;
+        } else {
+            chromeDetails = `v${chromeStep.version} ✓`;
+        }
+        updateStepStatus('chrome', chromeStep.complete, chromeDetails);
+    }
+    
     // Update other steps
     updateStepStatus('configs', wizardStatus.steps.config_files?.complete,
         wizardStatus.steps.config_files?.complete ? 'Config files ready' : 'Configs need to be copied');
@@ -12451,6 +12471,227 @@ function updateStepStatus(stepName, complete, details) {
     if (cardEl) {
         cardEl.classList.remove('complete', 'pending');
         cardEl.classList.add(complete ? 'complete' : 'pending');
+    }
+}
+
+// =============================================================================
+// CHROME SETUP PANEL
+// =============================================================================
+
+async function showChromeSetupPanel() {
+    // Remove existing panel if any
+    closeChromeSetupPanel();
+    
+    // Fetch current Chrome status
+    let chromeStatus = null;
+    try {
+        chromeStatus = await fetchAPI('/api/stack/chrome/check');
+    } catch (e) {
+        showToast('Failed to check Chrome status: ' + e.message, 'error');
+        return;
+    }
+    
+    const installed = chromeStatus.installed;
+    const versionMatch = chromeStatus.version_match;
+    const updatesDisabled = chromeStatus.updates_disabled;
+    const currentVersion = chromeStatus.version || 'Not installed';
+    const requiredVersion = chromeStatus.required_version || '125.0.6422.141';
+    
+    const html = `
+        <div id="chromeSetupPanel" class="wizard-popout-panel">
+            <div class="popout-header">
+                <h3>🌐 Google Chrome Setup</h3>
+                <button class="btn btn-sm" onclick="closeChromeSetupPanel()">✕ Close</button>
+            </div>
+            <div class="popout-body">
+                <div class="chrome-status-grid" style="display: grid; grid-template-columns: 1fr 1fr; gap: 1rem; margin-bottom: 1.5rem;">
+                    <div class="status-item">
+                        <strong>Current Version:</strong>
+                        <span class="${installed ? (versionMatch ? 'text-success' : 'text-warning') : 'text-danger'}">${currentVersion}</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Required Version:</strong>
+                        <span>${requiredVersion}</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Version Match:</strong>
+                        <span class="${versionMatch ? 'text-success' : 'text-danger'}">${versionMatch ? '✅ Yes' : '❌ No'}</span>
+                    </div>
+                    <div class="status-item">
+                        <strong>Updates Disabled:</strong>
+                        <span class="${updatesDisabled ? 'text-success' : 'text-warning'}">${updatesDisabled ? '✅ Yes' : '⚠️ No'}</span>
+                    </div>
+                </div>
+                
+                <div class="chrome-info-box" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; margin-bottom: 1.5rem;">
+                    <h4 style="margin: 0 0 0.5rem 0;">ℹ️ Why specific Chrome version?</h4>
+                    <p style="margin: 0; font-size: 0.9rem; color: var(--text-secondary);">
+                        Scanner tools require ChromeDriver compatibility. Version ${requiredVersion} is tested and 
+                        verified to work with the scanning components. Auto-updates must be disabled to prevent
+                        Chrome from updating and breaking ChromeDriver compatibility.
+                    </p>
+                </div>
+                
+                <div class="chrome-actions" style="display: flex; flex-direction: column; gap: 1rem;">
+                    ${!installed || !versionMatch ? `
+                        <div class="action-card" style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--accent-color);">
+                            <h4 style="margin: 0 0 0.5rem 0;">📥 Install Chrome ${requiredVersion}</h4>
+                            <p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: var(--text-secondary);">
+                                ${installed ? 'Replace current version with required version.' : 'Download and install the required Chrome version.'}
+                            </p>
+                            <button class="btn btn-primary" onclick="installChromeVersion()" id="installChromeBtn">
+                                ${installed ? '🔄 Replace Chrome' : '📥 Install Chrome'}
+                            </button>
+                        </div>
+                    ` : ''}
+                    
+                    ${installed && versionMatch && !updatesDisabled ? `
+                        <div class="action-card" style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--warning-color);">
+                            <h4 style="margin: 0 0 0.5rem 0;">🔒 Disable Chrome Updates</h4>
+                            <p style="margin: 0 0 1rem 0; font-size: 0.9rem; color: var(--text-secondary);">
+                                Prevent Chrome from auto-updating to maintain scanner compatibility.
+                            </p>
+                            <button class="btn btn-warning" onclick="disableChromeUpdates()" id="disableUpdatesBtn">
+                                🔒 Disable Updates
+                            </button>
+                        </div>
+                    ` : ''}
+                    
+                    ${installed && versionMatch && updatesDisabled ? `
+                        <div class="action-card" style="background: var(--bg-secondary); padding: 1rem; border-radius: 8px; border-left: 4px solid var(--success-color);">
+                            <h4 style="margin: 0 0 0.5rem 0;">✅ Chrome Setup Complete</h4>
+                            <p style="margin: 0; font-size: 0.9rem; color: var(--text-secondary);">
+                                Chrome ${requiredVersion} is installed and updates are disabled. Scanner is ready!
+                            </p>
+                        </div>
+                    ` : ''}
+                </div>
+                
+                <div id="chromeOutputContainer" style="margin-top: 1.5rem; display: none;">
+                    <h4 style="margin: 0 0 0.5rem 0;">📋 Installation Output</h4>
+                    <pre id="chromeOutput" style="background: var(--bg-tertiary); padding: 1rem; border-radius: 8px; max-height: 300px; overflow-y: auto; font-size: 0.85rem; white-space: pre-wrap;"></pre>
+                </div>
+            </div>
+            <div class="popout-footer">
+                <button class="btn btn-secondary btn-sm" onclick="refreshChromeStatus()">🔄 Refresh Status</button>
+                <a href="${chromeStatus.download_url}" target="_blank" class="btn btn-outline btn-sm" style="text-decoration: none;">
+                    📥 Manual Download
+                </a>
+            </div>
+        </div>
+    `;
+    
+    // Insert after the wizard steps grid
+    const stepsGrid = document.querySelector('.wizard-steps-grid');
+    if (stepsGrid) {
+        stepsGrid.insertAdjacentHTML('afterend', html);
+    } else {
+        const wizardContent = document.getElementById('wizardContent');
+        if (wizardContent) {
+            wizardContent.insertAdjacentHTML('beforeend', html);
+        }
+    }
+    
+    document.getElementById('chromeSetupPanel')?.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+}
+
+function closeChromeSetupPanel() {
+    const panel = document.getElementById('chromeSetupPanel');
+    if (panel) panel.remove();
+}
+
+async function refreshChromeStatus() {
+    closeChromeSetupPanel();
+    await refreshWizardStatus();
+    showChromeSetupPanel();
+}
+
+async function installChromeVersion() {
+    const btn = document.getElementById('installChromeBtn');
+    const outputContainer = document.getElementById('chromeOutputContainer');
+    const output = document.getElementById('chromeOutput');
+    
+    if (btn) btn.disabled = true;
+    if (btn) btn.innerHTML = '⏳ Installing...';
+    if (outputContainer) outputContainer.style.display = 'block';
+    if (output) output.textContent = 'Starting Chrome installation...\n';
+    
+    try {
+        const result = await fetchAPI('/api/stack/chrome/install', { method: 'POST' });
+        
+        if (output) {
+            output.textContent = '';
+            if (result.steps) {
+                result.steps.forEach(step => {
+                    output.textContent += `${step.status === 'completed' ? '✅' : '❌'} ${step.name}\n`;
+                });
+            }
+            output.textContent += '\n' + (result.output || '');
+            
+            if (result.version_installed) {
+                output.textContent += `\n\n✅ Chrome ${result.version_installed} installed successfully!`;
+            }
+        }
+        
+        if (result.success) {
+            showToast(`Chrome ${result.version_installed} installed successfully!`, 'success');
+            
+            // Automatically disable updates after installation
+            if (output) output.textContent += '\n\nDisabling Chrome updates...';
+            await disableChromeUpdates();
+        } else {
+            showToast('Chrome installation failed: ' + (result.error || 'Unknown error'), 'error');
+            if (btn) btn.innerHTML = '❌ Failed - Retry';
+            if (btn) btn.disabled = false;
+        }
+        
+    } catch (e) {
+        showToast('Chrome installation failed: ' + e.message, 'error');
+        if (output) output.textContent += '\n\n❌ Error: ' + e.message;
+        if (btn) btn.innerHTML = '❌ Failed - Retry';
+        if (btn) btn.disabled = false;
+    }
+}
+
+async function disableChromeUpdates() {
+    const btn = document.getElementById('disableUpdatesBtn');
+    const outputContainer = document.getElementById('chromeOutputContainer');
+    const output = document.getElementById('chromeOutput');
+    
+    if (btn) btn.disabled = true;
+    if (btn) btn.innerHTML = '⏳ Disabling...';
+    if (outputContainer) outputContainer.style.display = 'block';
+    if (output) output.textContent += '\n\nDisabling Chrome updates...\n';
+    
+    try {
+        const result = await fetchAPI('/api/stack/chrome/disable-updates', { method: 'POST' });
+        
+        if (output && result.steps) {
+            result.steps.forEach(step => {
+                output.textContent += `${step.status === 'completed' ? '✅' : '❌'} ${step.name}\n`;
+            });
+        }
+        
+        if (result.success) {
+            showToast('Chrome updates disabled successfully!', 'success');
+            if (output) output.textContent += '\n✅ ' + (result.message || 'Updates disabled');
+            
+            // Refresh the panel to show completion state
+            setTimeout(() => {
+                refreshChromeStatus();
+                refreshWizardStatus();
+            }, 1000);
+        } else {
+            showToast('Failed to disable updates: ' + (result.error || 'Unknown error'), 'error');
+            if (btn) btn.innerHTML = '❌ Failed - Retry';
+            if (btn) btn.disabled = false;
+        }
+        
+    } catch (e) {
+        showToast('Failed to disable updates: ' + e.message, 'error');
+        if (output) output.textContent += '\n❌ Error: ' + e.message;
+        if (btn) btn.innerHTML = '❌ Failed - Retry';
+        if (btn) btn.disabled = false;
     }
 }
 

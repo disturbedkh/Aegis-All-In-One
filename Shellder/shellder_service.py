@@ -94,6 +94,46 @@ except ImportError as e:
     def track_websocket(event, sid, data=None): pass
 
 # =============================================================================
+# PLATFORM COMPATIBILITY - Must be early for cross-platform support
+# =============================================================================
+try:
+    from platform_compat import (
+        IS_WINDOWS, IS_LINUX, IS_MACOS, IS_UNIX, PLATFORM_NAME,
+        get_current_user, get_current_uid, get_current_gid,
+        get_user_by_uid, get_group_by_gid, get_uid_by_name, get_gid_by_name,
+        get_file_owner, get_file_group,
+        is_admin, is_root, can_use_pty,
+        safe_chown, safe_chmod, safe_setsid,
+        run_privileged_command, get_shell_executable,
+        detect_puid_pgid, should_fix_puid_pgid,
+        check_service_status, is_feature_available,
+        PTY_AVAILABLE, pwd, grp, pty
+    )
+    PLATFORM_COMPAT_LOADED = True
+    info('STARTUP', f'Platform compatibility layer loaded (platform: {PLATFORM_NAME})')
+except ImportError as e:
+    PLATFORM_COMPAT_LOADED = False
+    # Fallback for when platform_compat is not available
+    import sys
+    IS_WINDOWS = sys.platform == 'win32'
+    IS_LINUX = sys.platform.startswith('linux')
+    IS_MACOS = sys.platform == 'darwin'
+    IS_UNIX = IS_LINUX or IS_MACOS
+    PLATFORM_NAME = 'Unknown'
+    PTY_AVAILABLE = False
+    print(f"Warning: platform_compat not available: {e}")
+    # Define stubs
+    def get_current_user(): import getpass; return getpass.getuser()
+    def get_current_uid(): return os.getuid() if hasattr(os, 'getuid') else 1000
+    def get_current_gid(): return os.getgid() if hasattr(os, 'getgid') else 1000
+    def is_admin(): return os.geteuid() == 0 if hasattr(os, 'geteuid') else False
+    def is_root(): return is_admin()
+    def can_use_pty(): return False
+    def safe_chown(p, u, g): return False
+    def should_fix_puid_pgid(): return IS_UNIX
+    def detect_puid_pgid(): return (1000, 1000)
+
+# =============================================================================
 # THIRD-PARTY IMPORTS
 # =============================================================================
 
@@ -391,7 +431,10 @@ def auto_detect_and_fix_puid_pgid():
     Auto-detect the correct PUID/PGID and update .env if needed.
     Called on startup to ensure Docker containers use correct permissions.
     """
-    import pwd
+    # Skip on Windows - not applicable
+    if IS_WINDOWS or not should_fix_puid_pgid():
+        debug('PUID', 'Skipping PUID/PGID detection on Windows')
+        return
     
     # Detect the actual owner of AEGIS_ROOT (the user who owns the project)
     try:
@@ -404,11 +447,19 @@ def auto_detect_and_fix_puid_pgid():
             # Try SUDO_USER
             sudo_user = os.environ.get('SUDO_USER')
             if sudo_user:
-                try:
-                    user_info = pwd.getpwnam(sudo_user)
-                    detected_uid = user_info.pw_uid
-                    detected_gid = user_info.pw_gid
-                except:
+                uid = get_uid_by_name(sudo_user)
+                if uid is not None:
+                    detected_uid = uid
+                    # Try to get gid from user's primary group
+                    if pwd:
+                        try:
+                            user_info = pwd.getpwnam(sudo_user)
+                            detected_gid = user_info.pw_gid
+                        except:
+                            detected_gid = uid  # Use uid as fallback
+                    else:
+                        detected_gid = uid
+                else:
                     return  # Can't determine, skip
             else:
                 return  # Owned by root and no SUDO_USER, skip
@@ -468,11 +519,8 @@ def auto_detect_and_fix_puid_pgid():
             with open(env_file, 'w') as f:
                 f.writelines(new_lines)
             
-            # Fix ownership of .env itself
-            try:
-                os.chown(env_file, detected_uid, detected_gid)
-            except:
-                pass
+            # Fix ownership of .env itself (Unix only)
+            safe_chown(env_file, detected_uid, detected_gid)
             
             print(f"[Shellder] Updated .env with correct PUID={detected_uid} PGID={detected_gid}")
             
@@ -490,28 +538,25 @@ def get_aegis_owner():
     Priority: SUDO_USER env var > owner of AEGIS_ROOT > uid 1000
     Returns (uid, gid, username)
     """
-    import pwd
-    import grp
+    # On Windows, return current user with default IDs
+    if IS_WINDOWS:
+        return 1000, 1000, get_current_user()
     
     # Try SUDO_USER first (if running with sudo)
     sudo_user = os.environ.get('SUDO_USER')
     if sudo_user:
-        try:
-            user_info = pwd.getpwnam(sudo_user)
-            return user_info.pw_uid, user_info.pw_gid, sudo_user
-        except:
-            pass
+        uid = get_uid_by_name(sudo_user)
+        gid = get_gid_by_name(sudo_user) if pwd else 1000
+        if uid is not None:
+            return uid, gid or 1000, sudo_user
     
     # Try owner of AEGIS_ROOT
     try:
         stat_info = os.stat(AEGIS_ROOT)
         # Don't use root even if AEGIS_ROOT is owned by root
         if stat_info.st_uid != 0:
-            try:
-                user_info = pwd.getpwuid(stat_info.st_uid)
-                return stat_info.st_uid, stat_info.st_gid, user_info.pw_name
-            except:
-                return stat_info.st_uid, stat_info.st_gid, str(stat_info.st_uid)
+            username = get_user_by_uid(stat_info.st_uid)
+            return stat_info.st_uid, stat_info.st_gid, username
     except:
         pass
     
@@ -521,23 +566,26 @@ def get_aegis_owner():
         puid = int(os.environ.get('PUID', 0))
         pgid = int(os.environ.get('PGID', 0))
         if puid > 0 and pgid > 0:
-            try:
-                user_info = pwd.getpwuid(puid)
-                return puid, pgid, user_info.pw_name
-            except:
-                return puid, pgid, str(puid)
+            username = get_user_by_uid(puid)
+            return puid, pgid, username
         
         # Try to find pokemap user
-        user_info = pwd.getpwnam('pokemap')
-        return user_info.pw_uid, user_info.pw_gid, 'pokemap'
+        uid = get_uid_by_name('pokemap')
+        if uid is not None:
+            gid = uid  # Use uid as default gid
+            if pwd:
+                try:
+                    user_info = pwd.getpwnam('pokemap')
+                    gid = user_info.pw_gid
+                except:
+                    pass
+            return uid, gid, 'pokemap'
     except:
         # Last resort - try uid 1000, then 1001
         for uid in [1000, 1001]:
-            try:
-                user_info = pwd.getpwuid(uid)
-                return uid, uid, user_info.pw_name
-            except:
-                continue
+            username = get_user_by_uid(uid)
+            if username and username != f'uid:{uid}':
+                return uid, uid, username
         return 1000, 1000, 'unknown'
 
 
@@ -557,15 +605,16 @@ def fix_file_ownership(file_path, use_sudo=True):
         except:
             pass
         
-        # Try chown without sudo first
-        try:
-            os.chown(file_path, uid, gid)
+        # On Windows, ownership is handled differently - just return success
+        if IS_WINDOWS:
             return True
-        except PermissionError:
-            pass
+        
+        # Try chown without sudo first
+        if safe_chown(file_path, uid, gid):
+            return True
         
         # Use sudo if needed and allowed
-        if use_sudo:
+        if use_sudo and IS_UNIX:
             result = subprocess.run(
                 ['sudo', 'chown', f'{uid}:{gid}', file_path],
                 capture_output=True,
@@ -583,12 +632,16 @@ def fix_directory_ownership(dir_path, recursive=True, use_sudo=True):
     """
     Fix ownership of a directory (and optionally its contents) to the correct Aegis user.
     """
+    # On Windows, ownership is handled differently - just return success
+    if IS_WINDOWS:
+        return True
+    
     try:
         uid, gid, username = get_aegis_owner()
         
         if recursive:
             # Use sudo chown -R for recursive
-            if use_sudo:
+            if use_sudo and IS_UNIX:
                 result = subprocess.run(
                     ['sudo', 'chown', '-R', f'{uid}:{gid}', str(dir_path)],
                     capture_output=True,
@@ -598,15 +651,9 @@ def fix_directory_ownership(dir_path, recursive=True, use_sudo=True):
             else:
                 # Manual recursive without sudo
                 for root, dirs, files in os.walk(dir_path):
-                    try:
-                        os.chown(root, uid, gid)
-                    except:
-                        pass
+                    safe_chown(root, uid, gid)
                     for f in files:
-                        try:
-                            os.chown(os.path.join(root, f), uid, gid)
-                        except:
-                            pass
+                        safe_chown(os.path.join(root, f), uid, gid)
                 return True
         else:
             return fix_file_ownership(dir_path, use_sudo)
@@ -6320,6 +6367,14 @@ def api_debug_git_pull():
                                     capture_output=True, text=True, cwd=str(AEGIS_ROOT))
         changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
         
+        # Fix ownership of changed files to prevent root-locked files
+        if success and changed_files:
+            info('DEBUG', f'Fixing ownership of {len(changed_files)} changed files')
+            for changed_file in changed_files:
+                file_path = AEGIS_ROOT / changed_file
+                if file_path.exists():
+                    fix_file_ownership(str(file_path))
+        
         info('DEBUG', f'Git pull {"succeeded" if success else "failed"}', {
             'output': output[:500],
             'new_commit': new_commit,
@@ -6373,6 +6428,15 @@ def api_debug_pull_and_restart():
         commit_result = subprocess.run(['git', 'rev-parse', '--short', 'HEAD'], 
                                        capture_output=True, text=True, cwd=str(AEGIS_ROOT))
         new_commit = commit_result.stdout.strip()
+        
+        # Fix ownership of changed files to prevent root-locked files
+        diff_result = subprocess.run(['git', 'diff', '--name-only', 'HEAD~1'], 
+                                    capture_output=True, text=True, cwd=str(AEGIS_ROOT))
+        changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+        for changed_file in changed_files:
+            file_path = AEGIS_ROOT / changed_file
+            if file_path.exists():
+                fix_file_ownership(str(file_path))
         
         info('DEBUG', f'Pull successful, restarting with commit {new_commit}')
         
@@ -6476,15 +6540,17 @@ def api_debug_debuglog():
         try:
             LOG_DIR.mkdir(parents=True, exist_ok=True)
             debug_log.touch()
-            # Fix ownership
-            try:
-                import pwd
-                real_user = os.environ.get('SUDO_USER')
-                if real_user:
-                    user_info = pwd.getpwnam(real_user)
-                    os.chown(debug_log, user_info.pw_uid, user_info.pw_gid)
-            except:
-                pass
+            # Fix ownership (Unix only)
+            if IS_UNIX:
+                try:
+                    real_user = os.environ.get('SUDO_USER')
+                    if real_user:
+                        uid = get_uid_by_name(real_user)
+                        gid = get_gid_by_name(real_user) if pwd else uid
+                        if uid is not None:
+                            safe_chown(debug_log, uid, gid or uid)
+                except:
+                    pass
         except Exception as e:
             return jsonify({'error': f'Could not create debuglog.txt: {e}', 'path': str(debug_log)}), 500
     
@@ -7847,16 +7913,16 @@ def _expand_path(path):
         # Try to find the main user's home (not root)
         home_dir = None
         try:
-            # Get the home directory of the user running the service
-            import pwd
-            # Look for common non-root users
-            for user in ['pokemap', 'aegis', 'ubuntu', 'admin']:
-                try:
-                    pw = pwd.getpwnam(user)
-                    home_dir = pw.pw_dir
-                    break
-                except KeyError:
-                    continue
+            if IS_UNIX and pwd:
+                # Get the home directory of the user running the service
+                # Look for common non-root users
+                for user in ['pokemap', 'aegis', 'ubuntu', 'admin']:
+                    try:
+                        pw = pwd.getpwnam(user)
+                        home_dir = pw.pw_dir
+                        break
+                    except KeyError:
+                        continue
             # Fall back to current user's home
             if not home_dir:
                 home_dir = os.path.expanduser('~')
@@ -11527,25 +11593,72 @@ def api_wizard_status():
         'complete': log_configured
     }
     
-    # Step 3: Chrome (optional for scanner)
+    # Step 3: Chrome (required for scanner - specific version)
+    REQUIRED_CHROME_VERSION = "125.0.6422.141"
+    CHROME_DEB_URL = "https://github.com/NDViet/google-chrome-stable/releases/download/125.0.6422.141-1/google-chrome-stable_125.0.6422.141-1_amd64.deb"
+    
     chrome_installed = shutil.which('google-chrome') is not None or shutil.which('google-chrome-stable') is not None
     chrome_version = None
+    chrome_correct_version = False
+    chrome_updates_disabled = False
+    
     if chrome_installed:
         try:
-            result = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True, timeout=5)
-            if result.returncode == 0:
-                chrome_version = result.stdout.strip().split()[-1] if result.stdout else None
+            # Try google-chrome first, then google-chrome-stable
+            for cmd in ['google-chrome', 'google-chrome-stable', '/usr/bin/google-chrome']:
+                try:
+                    result = subprocess.run([cmd, '--version'], capture_output=True, text=True, timeout=5)
+                    if result.returncode == 0 and result.stdout:
+                        # Extract version from "Google Chrome 125.0.6422.141"
+                        chrome_version = result.stdout.strip().split()[-1]
+                        break
+                except:
+                    continue
+        except:
+            pass
+        
+        # Check if version matches required
+        if chrome_version:
+            chrome_correct_version = chrome_version == REQUIRED_CHROME_VERSION
+        
+        # Check if updates are disabled
+        try:
+            # Check apt pinning
+            pin_file = '/etc/apt/preferences.d/google-chrome'
+            if os.path.exists(pin_file):
+                with open(pin_file, 'r') as f:
+                    pin_content = f.read()
+                    if 'Pin-Priority: 1001' in pin_content or 'google-chrome-stable' in pin_content:
+                        chrome_updates_disabled = True
+            
+            # Check if package is held
+            if not chrome_updates_disabled:
+                hold_result = subprocess.run(['apt-mark', 'showhold'], capture_output=True, text=True, timeout=5)
+                if hold_result.returncode == 0 and 'google-chrome-stable' in hold_result.stdout:
+                    chrome_updates_disabled = True
         except:
             pass
     
+    # Chrome is complete only if installed with correct version AND updates disabled
+    chrome_complete = chrome_installed and chrome_correct_version and chrome_updates_disabled
+    
     status['steps']['chrome'] = {
         'name': 'Google Chrome',
-        'description': 'Required for scanner (specific version)',
+        'description': f'Scanner requires version {REQUIRED_CHROME_VERSION}',
         'installed': chrome_installed,
         'version': chrome_version,
-        'configured': chrome_installed,
-        'complete': chrome_installed,
-        'optional': True
+        'required_version': REQUIRED_CHROME_VERSION,
+        'version_match': chrome_correct_version,
+        'updates_disabled': chrome_updates_disabled,
+        'configured': chrome_correct_version and chrome_updates_disabled,
+        'complete': chrome_complete,
+        'optional': False,  # Chrome is required for scanner
+        'download_url': CHROME_DEB_URL,
+        'actions': {
+            'install': '/api/stack/chrome/install',
+            'disable_updates': '/api/stack/chrome/disable-updates',
+            'check': '/api/stack/chrome/check'
+        }
     }
     
     # Step 4: System Resources (always complete - just detection)
@@ -14161,8 +14274,15 @@ def api_poracle_restart():
 # INTERACTIVE TERMINAL FOR SCRIPTS (subprocess + PTY)
 # =============================================================================
 
-import pty
-import select
+# PTY is Unix-only - make it optional for Windows development
+try:
+    import pty
+    import select
+    PTY_AVAILABLE = True
+except ImportError:
+    PTY_AVAILABLE = False
+    pty = None
+    select = None
 
 # Track active terminal sessions
 terminal_sessions = {}
@@ -14181,8 +14301,10 @@ class TerminalSession:
         
     def start(self):
         """Start the PTY process using subprocess"""
-        import pty
         import subprocess
+        
+        if not PTY_AVAILABLE:
+            raise RuntimeError("PTY not available on Windows - terminal sessions require Linux")
         
         # Create master/slave PTY pair
         self.master_fd, slave_fd = pty.openpty()
@@ -14195,7 +14317,7 @@ class TerminalSession:
         
         # Try to run without sudo first (service may already have privileges)
         # If we're root, run directly; otherwise try sudo without password
-        if os.geteuid() == 0:
+        if is_admin():
             cmd = ['bash', self.script_path]
         else:
             # Use sudo with -n (non-interactive, fails if password needed)
@@ -14210,7 +14332,7 @@ class TerminalSession:
             stderr=slave_fd,
             cwd=self.cwd,
             env=env,
-            preexec_fn=os.setsid
+            preexec_fn=safe_setsid()
         )
         
         # Close slave in parent
@@ -15368,35 +15490,43 @@ def api_secrets_apply():
                 # Write the updated content
                 if updated_content != content:
                     # Get original file ownership before writing
-                    try:
-                        import pwd
-                        import grp
-                        stat_info = os.stat(full_path)
-                        original_uid = stat_info.st_uid
-                        original_gid = stat_info.st_gid
-                    except:
-                        original_uid = 1000  # Default to common user
-                        original_gid = 1000
+                    original_uid = 1000  # Default to common user
+                    original_gid = 1000
+                    if IS_UNIX:
+                        try:
+                            stat_info = os.stat(full_path)
+                            original_uid = stat_info.st_uid
+                            original_gid = stat_info.st_gid
+                        except:
+                            pass
                     
                     # Write the file
-                    result = subprocess.run(
-                        ['sudo', 'tee', full_path],
-                        input=updated_content,
-                        capture_output=True,
-                        text=True,
-                        timeout=10
-                    )
+                    if IS_WINDOWS:
+                        # Direct write on Windows
+                        with open(full_path, 'w') as f:
+                            f.write(updated_content)
+                        result_returncode = 0
+                    else:
+                        result = subprocess.run(
+                            ['sudo', 'tee', full_path],
+                            input=updated_content,
+                            capture_output=True,
+                            text=True,
+                            timeout=10
+                        )
+                        result_returncode = result.returncode
                     
-                    if result.returncode == 0:
-                        # Restore original file ownership (prevent root ownership)
-                        try:
-                            subprocess.run(
-                                ['sudo', 'chown', f'{original_uid}:{original_gid}', full_path],
-                                capture_output=True,
-                                timeout=5
-                            )
-                        except:
-                            pass  # Best effort to restore ownership
+                    if result_returncode == 0:
+                        # Restore original file ownership (prevent root ownership) - Unix only
+                        if IS_UNIX:
+                            try:
+                                subprocess.run(
+                                    ['sudo', 'chown', f'{original_uid}:{original_gid}', full_path],
+                                    capture_output=True,
+                                    timeout=5
+                                )
+                            except:
+                                pass  # Best effort to restore ownership
                         
                         target_results.append({
                             'file': target_file,
@@ -15996,6 +16126,18 @@ def api_github_pull():
             capture_output=True, text=True, timeout=60, cwd=aegis_root
         )
         
+        # Fix ownership of changed files to prevent root-locked files
+        if result.returncode == 0:
+            diff_result = subprocess.run(
+                ['git', 'diff', '--name-only', 'HEAD~1'],
+                capture_output=True, text=True, cwd=aegis_root
+            )
+            changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+            for changed_file in changed_files:
+                file_path = AEGIS_ROOT / changed_file
+                if file_path.exists():
+                    fix_file_ownership(str(file_path))
+        
         # Restore stashed changes
         if stashed:
             subprocess.run(['git', 'stash', 'pop'], capture_output=True, timeout=30, cwd=aegis_root)
@@ -16048,6 +16190,18 @@ def api_github_pull_restart():
             if stashed:
                 subprocess.run(['git', 'stash', 'pop'], capture_output=True, timeout=30, cwd=aegis_root)
             return jsonify({'success': False, 'steps': steps, 'error': 'Pull failed'})
+        
+        # Step 2.5: Fix ownership of changed files to prevent root-locked files
+        diff_result = subprocess.run(
+            ['git', 'diff', '--name-only', 'HEAD~1'],
+            capture_output=True, text=True, cwd=aegis_root
+        )
+        changed_files = diff_result.stdout.strip().split('\n') if diff_result.stdout.strip() else []
+        for changed_file in changed_files:
+            file_path = AEGIS_ROOT / changed_file
+            if file_path.exists():
+                fix_file_ownership(str(file_path))
+        steps.append({'step': 'fix_ownership', 'success': True, 'files': len(changed_files)})
         
         # Step 3: Restore stash
         if stashed:
@@ -18018,6 +18172,292 @@ def api_stack_health():
     return jsonify(stack_db.get_health_dashboard())
 
 # =============================================================================
+# CHROME MANAGEMENT ENDPOINTS (Required for Scanner)
+# =============================================================================
+
+# Chrome version required for scanner compatibility
+REQUIRED_CHROME_VERSION = "125.0.6422.141"
+CHROME_DEB_URL = "https://github.com/NDViet/google-chrome-stable/releases/download/125.0.6422.141-1/google-chrome-stable_125.0.6422.141-1_amd64.deb"
+
+@app.route('/api/stack/chrome/check')
+def api_stack_chrome_check():
+    """Check Google Chrome installation status"""
+    result = {
+        'required_version': REQUIRED_CHROME_VERSION,
+        'download_url': CHROME_DEB_URL,
+        'installed': False,
+        'version': None,
+        'version_match': False,
+        'updates_disabled': False,
+        'complete': False
+    }
+    
+    # Check if Chrome is installed
+    chrome_cmd = shutil.which('google-chrome') or shutil.which('google-chrome-stable') or '/usr/bin/google-chrome'
+    
+    if os.path.exists(chrome_cmd) or shutil.which('google-chrome') or shutil.which('google-chrome-stable'):
+        result['installed'] = True
+        
+        # Get Chrome version
+        try:
+            for cmd in ['google-chrome', 'google-chrome-stable', '/usr/bin/google-chrome']:
+                try:
+                    ver_result = subprocess.run([cmd, '--version'], capture_output=True, text=True, timeout=5)
+                    if ver_result.returncode == 0 and ver_result.stdout:
+                        result['version'] = ver_result.stdout.strip().split()[-1]
+                        break
+                except:
+                    continue
+        except:
+            pass
+        
+        # Check version match
+        if result['version']:
+            result['version_match'] = result['version'] == REQUIRED_CHROME_VERSION
+        
+        # Check if updates are disabled
+        try:
+            # Method 1: Check apt pinning file
+            pin_file = '/etc/apt/preferences.d/google-chrome'
+            if os.path.exists(pin_file):
+                with open(pin_file, 'r') as f:
+                    pin_content = f.read()
+                    if 'Pin-Priority: 1001' in pin_content:
+                        result['updates_disabled'] = True
+            
+            # Method 2: Check if package is held
+            if not result['updates_disabled']:
+                hold_result = subprocess.run(['apt-mark', 'showhold'], capture_output=True, text=True, timeout=5)
+                if hold_result.returncode == 0 and 'google-chrome-stable' in hold_result.stdout:
+                    result['updates_disabled'] = True
+            
+            # Method 3: Check if repo is disabled
+            if not result['updates_disabled']:
+                repo_disabled = '/etc/apt/sources.list.d/google-chrome.list.disabled'
+                if os.path.exists(repo_disabled):
+                    result['updates_disabled'] = True
+        except:
+            pass
+    
+    result['complete'] = result['installed'] and result['version_match'] and result['updates_disabled']
+    
+    return jsonify(result)
+
+@app.route('/api/stack/chrome/install', methods=['POST'])
+def api_stack_chrome_install():
+    """Install Google Chrome (specific version required for scanner)"""
+    result = {
+        'success': False,
+        'steps': [],
+        'output': '',
+        'version_installed': None
+    }
+    
+    try:
+        # Check if we're on a Debian/Ubuntu system
+        if not shutil.which('apt'):
+            result['error'] = 'Chrome installation is only supported on Debian/Ubuntu systems (apt required)'
+            return jsonify(result)
+        
+        # Step 1: Remove existing Chrome if present
+        result['steps'].append({'name': 'Removing existing Chrome', 'status': 'running'})
+        remove_result = subprocess.run(
+            ['sudo', 'apt-get', 'remove', '-y', 'google-chrome-stable'],
+            capture_output=True, text=True, timeout=60
+        )
+        result['output'] += f"=== Remove existing Chrome ===\n{remove_result.stdout}\n{remove_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed'
+        
+        # Step 2: Install dependencies
+        result['steps'].append({'name': 'Installing dependencies', 'status': 'running'})
+        deps_result = subprocess.run(
+            ['sudo', 'apt-get', 'install', '-y', 'wget', 'fonts-liberation', 'libasound2', 
+             'libatk-bridge2.0-0', 'libatk1.0-0', 'libatspi2.0-0', 'libcups2', 'libdbus-1-3',
+             'libdrm2', 'libgbm1', 'libgtk-3-0', 'libnspr4', 'libnss3', 'libwayland-client0',
+             'libxcomposite1', 'libxdamage1', 'libxfixes3', 'libxkbcommon0', 'libxrandr2', 'xdg-utils'],
+            capture_output=True, text=True, timeout=120
+        )
+        result['output'] += f"=== Install dependencies ===\n{deps_result.stdout}\n{deps_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed' if deps_result.returncode == 0 else 'failed'
+        
+        # Step 3: Download Chrome .deb
+        result['steps'].append({'name': f'Downloading Chrome {REQUIRED_CHROME_VERSION}', 'status': 'running'})
+        chrome_deb = '/tmp/chrome.deb'
+        
+        # Remove old download if exists
+        if os.path.exists(chrome_deb):
+            os.remove(chrome_deb)
+        
+        download_result = subprocess.run(
+            ['wget', '-q', '-O', chrome_deb, CHROME_DEB_URL],
+            capture_output=True, text=True, timeout=120
+        )
+        result['output'] += f"=== Download Chrome ===\nURL: {CHROME_DEB_URL}\n{download_result.stdout}\n{download_result.stderr}\n"
+        
+        if download_result.returncode != 0 or not os.path.exists(chrome_deb):
+            result['steps'][-1]['status'] = 'failed'
+            result['error'] = f'Failed to download Chrome from {CHROME_DEB_URL}'
+            return jsonify(result)
+        result['steps'][-1]['status'] = 'completed'
+        
+        # Step 4: Install Chrome .deb
+        result['steps'].append({'name': 'Installing Chrome package', 'status': 'running'})
+        install_result = subprocess.run(
+            ['sudo', 'dpkg', '-i', chrome_deb],
+            capture_output=True, text=True, timeout=60
+        )
+        result['output'] += f"=== Install Chrome ===\n{install_result.stdout}\n{install_result.stderr}\n"
+        
+        # Fix broken dependencies if needed
+        if install_result.returncode != 0:
+            fix_result = subprocess.run(
+                ['sudo', 'apt-get', 'install', '-f', '-y'],
+                capture_output=True, text=True, timeout=60
+            )
+            result['output'] += f"=== Fix dependencies ===\n{fix_result.stdout}\n{fix_result.stderr}\n"
+            
+            # Try installing again
+            install_result = subprocess.run(
+                ['sudo', 'dpkg', '-i', chrome_deb],
+                capture_output=True, text=True, timeout=60
+            )
+            result['output'] += f"=== Retry install ===\n{install_result.stdout}\n{install_result.stderr}\n"
+        
+        # Cleanup
+        if os.path.exists(chrome_deb):
+            os.remove(chrome_deb)
+        
+        if install_result.returncode == 0:
+            result['steps'][-1]['status'] = 'completed'
+            
+            # Verify installation
+            ver_result = subprocess.run(['google-chrome', '--version'], capture_output=True, text=True, timeout=5)
+            if ver_result.returncode == 0:
+                result['version_installed'] = ver_result.stdout.strip().split()[-1]
+            
+            result['success'] = True
+        else:
+            result['steps'][-1]['status'] = 'failed'
+            result['error'] = 'Failed to install Chrome package'
+        
+        return jsonify(result)
+        
+    except subprocess.TimeoutExpired:
+        result['error'] = 'Installation timed out'
+        return jsonify(result)
+    except Exception as e:
+        result['error'] = str(e)
+        return jsonify(result)
+
+@app.route('/api/stack/chrome/disable-updates', methods=['POST'])
+def api_stack_chrome_disable_updates():
+    """Disable Chrome auto-updates to maintain version compatibility"""
+    result = {
+        'success': False,
+        'steps': [],
+        'output': ''
+    }
+    
+    try:
+        # Step 1: Create apt pinning file
+        result['steps'].append({'name': 'Creating apt pin configuration', 'status': 'running'})
+        pin_content = f'''# Prevent Google Chrome from being updated
+# Required version: {REQUIRED_CHROME_VERSION} for scanner compatibility
+Package: google-chrome-stable
+Pin: version {REQUIRED_CHROME_VERSION}*
+Pin-Priority: 1001
+'''
+        
+        # Write to temp file and move with sudo
+        pin_temp = '/tmp/google-chrome-pin'
+        with open(pin_temp, 'w') as f:
+            f.write(pin_content)
+        
+        mv_result = subprocess.run(
+            ['sudo', 'mv', pin_temp, '/etc/apt/preferences.d/google-chrome'],
+            capture_output=True, text=True, timeout=10
+        )
+        result['output'] += f"=== Create pin file ===\n{mv_result.stdout}\n{mv_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed' if mv_result.returncode == 0 else 'failed'
+        
+        # Step 2: Disable Google Chrome repository
+        result['steps'].append({'name': 'Disabling Chrome repository', 'status': 'running'})
+        repo_file = '/etc/apt/sources.list.d/google-chrome.list'
+        if os.path.exists(repo_file):
+            disable_result = subprocess.run(
+                ['sudo', 'mv', repo_file, f'{repo_file}.disabled'],
+                capture_output=True, text=True, timeout=10
+            )
+            result['output'] += f"=== Disable repo ===\n{disable_result.stdout}\n{disable_result.stderr}\n"
+            result['steps'][-1]['status'] = 'completed'
+        else:
+            result['output'] += "Chrome repository file not found (already disabled or not installed via apt)\n"
+            result['steps'][-1]['status'] = 'completed'
+        
+        # Step 3: Hold the package
+        result['steps'].append({'name': 'Holding Chrome package', 'status': 'running'})
+        hold_result = subprocess.run(
+            ['sudo', 'apt-mark', 'hold', 'google-chrome-stable'],
+            capture_output=True, text=True, timeout=10
+        )
+        result['output'] += f"=== Hold package ===\n{hold_result.stdout}\n{hold_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed' if hold_result.returncode == 0 else 'failed'
+        
+        result['success'] = all(s['status'] == 'completed' for s in result['steps'])
+        result['message'] = f'Chrome updates disabled. Chrome will stay at version {REQUIRED_CHROME_VERSION}'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        result['error'] = str(e)
+        return jsonify(result)
+
+@app.route('/api/stack/chrome/enable-updates', methods=['POST'])
+def api_stack_chrome_enable_updates():
+    """Re-enable Chrome auto-updates (reverses disable-updates)"""
+    result = {
+        'success': False,
+        'steps': [],
+        'output': ''
+    }
+    
+    try:
+        # Step 1: Remove apt pin file
+        result['steps'].append({'name': 'Removing apt pin configuration', 'status': 'running'})
+        pin_file = '/etc/apt/preferences.d/google-chrome'
+        if os.path.exists(pin_file):
+            rm_result = subprocess.run(['sudo', 'rm', pin_file], capture_output=True, text=True, timeout=10)
+            result['output'] += f"Removed pin file\n{rm_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed'
+        
+        # Step 2: Re-enable Chrome repository
+        result['steps'].append({'name': 'Re-enabling Chrome repository', 'status': 'running'})
+        repo_disabled = '/etc/apt/sources.list.d/google-chrome.list.disabled'
+        repo_file = '/etc/apt/sources.list.d/google-chrome.list'
+        if os.path.exists(repo_disabled):
+            mv_result = subprocess.run(['sudo', 'mv', repo_disabled, repo_file], capture_output=True, text=True, timeout=10)
+            result['output'] += f"Re-enabled Chrome repository\n{mv_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed'
+        
+        # Step 3: Unhold the package
+        result['steps'].append({'name': 'Unholding Chrome package', 'status': 'running'})
+        unhold_result = subprocess.run(
+            ['sudo', 'apt-mark', 'unhold', 'google-chrome-stable'],
+            capture_output=True, text=True, timeout=10
+        )
+        result['output'] += f"=== Unhold package ===\n{unhold_result.stdout}\n{unhold_result.stderr}\n"
+        result['steps'][-1]['status'] = 'completed'
+        
+        result['success'] = True
+        result['message'] = 'Chrome updates re-enabled. Chrome will update automatically.'
+        
+        return jsonify(result)
+        
+    except Exception as e:
+        result['error'] = str(e)
+        return jsonify(result)
+
+# =============================================================================
 # DEVICE MANAGEMENT ENDPOINTS (Cross-reference Rotom/Dragonite logs & DB)
 # =============================================================================
 
@@ -18727,19 +19167,14 @@ def api_file_info():
     
     try:
         stat_info = full_path.stat()
-        import pwd
-        import grp
         
-        # Get owner and group names
-        try:
-            owner = pwd.getpwuid(stat_info.st_uid).pw_name
-        except:
-            owner = str(stat_info.st_uid)
-        
-        try:
-            group = grp.getgrgid(stat_info.st_gid).gr_name
-        except:
-            group = str(stat_info.st_gid)
+        # Get owner and group names (cross-platform)
+        if IS_UNIX:
+            owner = get_user_by_uid(stat_info.st_uid)
+            group = get_group_by_gid(stat_info.st_gid)
+        else:
+            owner = get_current_user()
+            group = 'Users'
         
         # Format permissions
         mode = stat_info.st_mode
@@ -18817,9 +19252,11 @@ def api_file_create():
     
     try:
         full_path.touch()
-        # Fix ownership
-        result = subprocess.run(['sudo', 'chown', f'{os.getuid()}:{os.getgid()}', str(full_path)],
-                               capture_output=True, timeout=5)
+        # Fix ownership (Unix only)
+        if IS_UNIX:
+            uid, gid, _ = get_aegis_owner()
+            subprocess.run(['sudo', 'chown', f'{uid}:{gid}', str(full_path)],
+                           capture_output=True, timeout=5)
         return jsonify({'success': True, 'message': f'Created {filename}'})
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
@@ -18947,8 +19384,11 @@ def api_file_chown():
     
     # Default to current user if no owner specified
     if not owner:
-        import pwd
-        owner = pwd.getpwuid(os.getuid()).pw_name
+        _, _, owner = get_aegis_owner()
+    
+    # On Windows, ownership changes are not supported the same way
+    if IS_WINDOWS:
+        return jsonify({'success': True, 'message': 'Ownership changes not required on Windows'})
     
     try:
         cmd = ['sudo', 'chown']
@@ -19100,18 +19540,14 @@ def api_file_upload():
         # Save file
         file.save(str(dest_path))
         
-        # Fix ownership to actual user (not root)
-        try:
-            import pwd
-            # Try SUDO_USER first, then Aegis dir owner
-            current_user = os.environ.get('SUDO_USER')
-            if not current_user:
-                aegis_stat = os.stat(AEGIS_ROOT)
-                current_user = pwd.getpwuid(aegis_stat.st_uid).pw_name
-            subprocess.run(['sudo', 'chown', f'{current_user}:{current_user}', str(dest_path)],
-                          capture_output=True, timeout=5)
-        except:
-            pass
+        # Fix ownership to actual user (not root) - Unix only
+        if IS_UNIX:
+            try:
+                uid, gid, username = get_aegis_owner()
+                subprocess.run(['sudo', 'chown', f'{username}:{username}', str(dest_path)],
+                              capture_output=True, timeout=5)
+            except:
+                pass
         
         action = 'replaced' if replacing else 'uploaded'
         return jsonify({'success': True, 'message': f'File {action}: {file.filename}'})
@@ -19122,6 +19558,10 @@ def api_file_upload():
 @app.route('/api/files/chown-all', methods=['POST'])
 def api_file_chown_all():
     """Change ownership of all files in Aegis directory to current user"""
+    # On Windows, ownership is not handled the same way
+    if IS_WINDOWS:
+        return jsonify({'success': True, 'message': 'Ownership changes not required on Windows'})
+    
     data = request.json or {}
     path = data.get('path', '')  # Optional: specific subdirectory
     
@@ -19130,29 +19570,8 @@ def api_file_chown_all():
     current_group = None
     
     try:
-        import pwd
-        import grp
-        
-        # First try SUDO_USER (set when running via sudo)
-        current_user = os.environ.get('SUDO_USER')
-        if current_user:
-            user_info = pwd.getpwnam(current_user)
-            current_group = grp.getgrgid(user_info.pw_gid).gr_name
-        
-        # If no SUDO_USER, try to get owner of the Aegis directory
-        if not current_user:
-            aegis_stat = os.stat(AEGIS_ROOT)
-            user_info = pwd.getpwuid(aegis_stat.st_uid)
-            current_user = user_info.pw_name
-            current_group = grp.getgrgid(user_info.pw_gid).gr_name
-        
-        # Last resort: use os.getlogin() or getuid
-        if not current_user:
-            try:
-                current_user = os.getlogin()
-            except:
-                current_user = pwd.getpwuid(os.getuid()).pw_name
-            current_group = current_user
+        uid, gid, current_user = get_aegis_owner()
+        current_group = get_group_by_gid(gid)
             
     except Exception as e:
         return jsonify({'success': False, 'error': f'Could not determine current user: {e}'})
@@ -19291,41 +19710,26 @@ def api_fix_docker_permissions():
 def api_files_current_user():
     """Get current user info for ownership operations"""
     try:
-        import pwd
-        import grp
+        # Get the real user info via cross-platform helper
+        uid, gid, username = get_aegis_owner()
+        group_name = get_group_by_gid(gid)
+        home_dir = os.path.expanduser('~')
         
-        # Get the real user (not root if running with sudo)
-        username = None
-        
-        # First try SUDO_USER
-        username = os.environ.get('SUDO_USER')
-        
-        # If no SUDO_USER, try owner of Aegis directory
-        if not username:
+        # On Unix, try to get more accurate home directory
+        if IS_UNIX and pwd:
             try:
-                aegis_stat = os.stat(AEGIS_ROOT)
-                user_info = pwd.getpwuid(aegis_stat.st_uid)
-                username = user_info.pw_name
+                user_info = pwd.getpwnam(username)
+                home_dir = user_info.pw_dir
             except:
                 pass
         
-        # Last resort
-        if not username:
-            try:
-                username = os.getlogin()
-            except:
-                username = pwd.getpwuid(os.getuid()).pw_name
-        
-        # Get user info
-        user_info = pwd.getpwnam(username)
-        group_info = grp.getgrgid(user_info.pw_gid)
-        
         return jsonify({
-            'username': user_info.pw_name,
-            'uid': user_info.pw_uid,
-            'group': group_info.gr_name,
-            'gid': user_info.pw_gid,
-            'home': user_info.pw_dir
+            'username': username,
+            'uid': uid,
+            'group': group_name,
+            'gid': gid,
+            'home': home_dir,
+            'platform': PLATFORM_NAME
         })
     except Exception as e:
         return jsonify({'error': str(e)})

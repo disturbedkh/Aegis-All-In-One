@@ -1342,10 +1342,23 @@
                             <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('resources')">Detect</button>
                         </div>
                         
-                        <!-- Step 4: Config Files -->
-                        <div class="wizard-step-card" id="wizard-step-configs">
+                        <!-- Step 4: Google Chrome -->
+                        <div class="wizard-step-card" id="wizard-step-chrome">
                             <div class="step-header">
                                 <div class="step-number">4</div>
+                                <div class="step-status" id="step-chrome-status">⏳</div>
+                            </div>
+                            <div class="step-icon">🌐</div>
+                            <div class="step-name">Google Chrome</div>
+                            <div class="step-desc">Required for scanner (v125)</div>
+                            <div class="step-details" id="step-chrome-details">Checking...</div>
+                            <button class="btn btn-sm btn-primary step-action" onclick="showChromeSetupPanel()">Setup Chrome</button>
+                        </div>
+                        
+                        <!-- Step 5: Config Files -->
+                        <div class="wizard-step-card" id="wizard-step-configs">
+                            <div class="step-header">
+                                <div class="step-number">5</div>
                                 <div class="step-status" id="step-configs-status">⏳</div>
                             </div>
                             <div class="step-icon">📁</div>
@@ -1355,10 +1368,10 @@
                             <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('configs')">Copy Configs</button>
                         </div>
                         
-                        <!-- Step 5: Passwords -->
+                        <!-- Step 6: Passwords -->
                         <div class="wizard-step-card" id="wizard-step-passwords">
                             <div class="step-header">
-                                <div class="step-number">5</div>
+                                <div class="step-number">6</div>
                                 <div class="step-status" id="step-passwords-status">⏳</div>
                             </div>
                             <div class="step-icon">🔐</div>
@@ -1392,10 +1405,10 @@
                             </div>
                         </div>
                         
-                        <!-- Step 6: MariaDB Setup -->
+                        <!-- Step 7: MariaDB Setup -->
                         <div class="wizard-step-card" id="wizard-step-mariadb">
                             <div class="step-header">
-                                <div class="step-number">6</div>
+                                <div class="step-number">7</div>
                                 <div class="step-status" id="step-mariadb-status">⏳</div>
                             </div>
                             <div class="step-icon">🗄️</div>
@@ -1405,10 +1418,10 @@
                             <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('mariadb_setup')">Setup</button>
                         </div>
                         
-                        <!-- Step 7: Docker Logging -->
+                        <!-- Step 8: Docker Logging -->
                         <div class="wizard-step-card" id="wizard-step-logging">
                             <div class="step-header">
-                                <div class="step-number">7</div>
+                                <div class="step-number">8</div>
                                 <div class="step-status" id="step-logging-status">⏳</div>
                             </div>
                             <div class="step-icon">📋</div>
@@ -1418,10 +1431,10 @@
                             <button class="btn btn-sm btn-primary step-action" onclick="runWizardStep('logging')">Configure</button>
                         </div>
                         
-                        <!-- Step 8: Start Stack -->
+                        <!-- Step 9: Start Stack -->
                         <div class="wizard-step-card wizard-step-final" id="wizard-step-start">
                             <div class="step-header">
-                                <div class="step-number">8</div>
+                                <div class="step-number">9</div>
                                 <div class="step-status" id="step-start-status">⏳</div>
                             </div>
                             <div class="step-icon">🚀</div>
@@ -3696,7 +3709,7 @@
             </div>
             
             <!-- Proxy Details Modal -->
-            <div id="proxyDetailsModal" class="modal" style="display: none;">
+            <div id="proxyDetailsModal" class="modal" onclick="if(event.target === this) closeProxyDetails()">
                 <div class="modal-content modal-lg">
                     <div class="modal-header">
                         <h2>📊 Proxy Details</h2>
