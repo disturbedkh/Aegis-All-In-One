@@ -13426,26 +13426,33 @@ def api_mariadb_setup():
     db_password = data.get('db_password', '')
     databases = data.get('databases', AEGIS_DATABASES)
     
-    # If not provided, try to load from .env
-    if not root_password and os.path.exists(env_file):
+    # ALWAYS load passwords from .env - the container uses these, not form values
+    # Form values are only used if .env doesn't have them
+    env_root_password = ''
+    env_db_password = ''
+    env_db_user = ''
+    
+    if os.path.exists(env_file):
         try:
             with open(env_file) as f:
                 for line in f:
+                    line = line.strip()
                     if line.startswith('MYSQL_ROOT_PASSWORD='):
-                        root_password = line.split('=', 1)[1].strip()
-                        break
+                        env_root_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith('MYSQL_PASSWORD='):
+                        env_db_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                    elif line.startswith('MYSQL_USER='):
+                        env_db_user = line.split('=', 1)[1].strip().strip('"').strip("'")
         except:
             pass
     
-    if not db_password and os.path.exists(env_file):
-        try:
-            with open(env_file) as f:
-                for line in f:
-                    if line.startswith('MYSQL_PASSWORD='):
-                        db_password = line.split('=', 1)[1].strip()
-                        break
-        except:
-            pass
+    # Use .env values (what container actually has), fall back to form values
+    if env_root_password:
+        root_password = env_root_password
+    if env_db_password:
+        db_password = env_db_password
+    if env_db_user:
+        db_user = env_db_user
     
     results = {
         'success': True,
@@ -13483,23 +13490,7 @@ def api_mariadb_setup():
             if start_result.returncode == 0:
                 results['steps'].append('✓ Database container started')
                 
-                # Get the root password from .env (container uses this on first init)
-                env_root_password = ''
-                if os.path.exists(env_file):
-                    try:
-                        with open(env_file, 'r') as f:
-                            for line in f:
-                                if line.startswith('MYSQL_ROOT_PASSWORD='):
-                                    env_root_password = line.split('=', 1)[1].strip().strip('"').strip("'")
-                                    break
-                    except:
-                        pass
-                
-                # Use env password - the container initializes with MYSQL_ROOT_PASSWORD from .env
-                # The form password may not match what the container actually has
-                if env_root_password:
-                    root_password = env_root_password
-                    results['steps'].append(f'ℹ️ Using MYSQL_ROOT_PASSWORD from .env')
+                # root_password is already set from .env at the start of the function
                 
                 # Wait for MariaDB to be ready (up to 60 seconds - first start can be slow)
                 results['steps'].append('⏳ Waiting for MariaDB to initialize (first start may take 30-60 seconds)...')
@@ -13563,11 +13554,17 @@ def api_mariadb_setup():
         cmd.extend(['-e', query])
         return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     
+    # Show which password source we're using (for debugging)
+    results['steps'].append(f'ℹ️ Using credentials from .env file')
+    
     # Test root connection
     try:
         test_result = run_mysql('root', root_password, 'SELECT 1')
         if test_result.returncode != 0:
-            results['errors'].append(f'Root connection failed: {test_result.stderr}')
+            error_msg = test_result.stderr.strip() if test_result.stderr else 'Unknown error (no stderr)'
+            results['errors'].append(f'Root connection failed: {error_msg}')
+            # Add debugging info
+            results['errors'].append(f'Debug: Password length={len(root_password)}, first 3 chars={root_password[:3] if len(root_password) >= 3 else "too short"}...')
             results['success'] = False
             return jsonify(results)
         results['steps'].append('✓ Root connection verified')
