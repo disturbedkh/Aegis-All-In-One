@@ -2239,6 +2239,15 @@ async function showProxyDetails(proxyAddress) {
                         </div>
                     </div>
                 </div>
+                
+                <div class="proxy-details-actions" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                    <button class="btn btn-sm btn-warning" onclick="resetProxyStats('${escapeHtml(proxyAddress)}')" title="Reset all-time stats if data looks incorrect">
+                        🔄 Reset All-Time Stats
+                    </button>
+                    <span class="text-muted" style="margin-left: 10px; font-size: 0.85em;">
+                        (Use if all-time data looks incorrect due to previous counting bug)
+                    </span>
+                </div>
             </div>
         `;
     } catch (e) {
@@ -2250,6 +2259,30 @@ function closeProxyDetails() {
     const modal = document.getElementById('proxyDetailsModal');
     if (modal) {
         modal.classList.remove('active');
+    }
+}
+
+async function resetProxyStats(proxyAddress) {
+    if (!confirm(`Reset all-time stats for "${proxyAddress}"?\n\nThis will clear the corrupted all-time data. Current session stats will remain and be used to rebuild accurate all-time stats.`)) {
+        return;
+    }
+    
+    try {
+        const encodedProxy = encodeURIComponent(proxyAddress);
+        const response = await fetch(`/api/xilriws/proxy/${encodedProxy}/reset`, {
+            method: 'POST'
+        });
+        const data = await response.json();
+        
+        if (data.success) {
+            alert('✓ All-time stats reset successfully!\n\nThe stats will rebuild accurately from this point forward.');
+            // Refresh the modal to show updated (empty) all-time stats
+            showProxyDetails(proxyAddress);
+        } else {
+            alert(`Error: ${data.error || 'Failed to reset stats'}`);
+        }
+    } catch (e) {
+        alert(`Error resetting stats: ${e.message}`);
     }
 }
 

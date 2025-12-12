@@ -4002,6 +4002,9 @@ class ShellderDB:
         finally:
             conn.close()
     
+    # Track last-persisted proxy stats to calculate deltas (prevents re-counting)
+    _last_persisted_proxy_stats = {}
+    
     def persist_xilriws_stats(self, stats):
         """Save Xilriws stats to database"""
         conn = self._connect()
@@ -4012,7 +4015,7 @@ class ShellderDB:
             cursor = conn.cursor()
             today = datetime.now().strftime('%Y-%m-%d')
             
-            # Update daily aggregates
+            # Update daily aggregates (REPLACE - current session totals for today)
             cursor.execute("""
                 INSERT INTO xilriws_daily (stat_date, total_requests, successful, failed,
                                            auth_banned, code_15, tunnel_failed, timeouts, success_rate)
@@ -4038,32 +4041,78 @@ class ShellderDB:
                 stats.get('success_rate', 0)
             ))
             
-            # Update per-proxy stats
+            # Update per-proxy stats using DELTA tracking
+            # Only add NEW counts since last persist (prevents re-counting same logs)
             for proxy_addr, proxy_data in stats.get('proxy_stats', {}).items():
-                cursor.execute("""
-                    INSERT INTO xilriws_proxy_stats (proxy_address, total_requests, successful, 
-                                                     failed, timeouts, unreachable, bot_blocked, 
-                                                     success_rate, last_seen)
-                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
-                    ON CONFLICT(proxy_address) DO UPDATE SET
-                        total_requests = total_requests + excluded.total_requests,
-                        successful = successful + excluded.successful,
-                        failed = failed + excluded.failed,
-                        timeouts = timeouts + excluded.timeouts,
-                        unreachable = unreachable + excluded.unreachable,
-                        bot_blocked = bot_blocked + excluded.bot_blocked,
-                        success_rate = excluded.success_rate,
-                        last_seen = CURRENT_TIMESTAMP
-                """, (
-                    proxy_addr,
-                    proxy_data.get('requests', 0),
-                    proxy_data.get('success', 0),
-                    proxy_data.get('fail', 0),
-                    proxy_data.get('timeout', 0),
-                    proxy_data.get('unreachable', 0),
-                    proxy_data.get('bot_blocked', 0),
-                    proxy_data.get('success_rate', 0)
-                ))
+                # Get current session values
+                current_requests = proxy_data.get('requests', 0)
+                current_success = proxy_data.get('success', 0)
+                current_fail = proxy_data.get('fail', 0)
+                current_timeout = proxy_data.get('timeout', 0)
+                current_unreachable = proxy_data.get('unreachable', 0)
+                current_bot_blocked = proxy_data.get('bot_blocked', 0)
+                
+                # Get last persisted values for this proxy
+                last = self._last_persisted_proxy_stats.get(proxy_addr, {})
+                last_requests = last.get('requests', 0)
+                last_success = last.get('success', 0)
+                last_fail = last.get('fail', 0)
+                last_timeout = last.get('timeout', 0)
+                last_unreachable = last.get('unreachable', 0)
+                last_bot_blocked = last.get('bot_blocked', 0)
+                
+                # Calculate deltas (new events since last persist)
+                delta_requests = max(0, current_requests - last_requests)
+                delta_success = max(0, current_success - last_success)
+                delta_fail = max(0, current_fail - last_fail)
+                delta_timeout = max(0, current_timeout - last_timeout)
+                delta_unreachable = max(0, current_unreachable - last_unreachable)
+                delta_bot_blocked = max(0, current_bot_blocked - last_bot_blocked)
+                
+                # Only persist if there are new events
+                if delta_requests > 0 or delta_success > 0 or delta_fail > 0:
+                    cursor.execute("""
+                        INSERT INTO xilriws_proxy_stats (proxy_address, total_requests, successful, 
+                                                         failed, timeouts, unreachable, bot_blocked, 
+                                                         success_rate, last_seen)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                        ON CONFLICT(proxy_address) DO UPDATE SET
+                            total_requests = total_requests + ?,
+                            successful = successful + ?,
+                            failed = failed + ?,
+                            timeouts = timeouts + ?,
+                            unreachable = unreachable + ?,
+                            bot_blocked = bot_blocked + ?,
+                            success_rate = ?,
+                            last_seen = CURRENT_TIMESTAMP
+                    """, (
+                        proxy_addr,
+                        delta_requests,
+                        delta_success,
+                        delta_fail,
+                        delta_timeout,
+                        delta_unreachable,
+                        delta_bot_blocked,
+                        proxy_data.get('success_rate', 0),
+                        # For UPDATE clause
+                        delta_requests,
+                        delta_success,
+                        delta_fail,
+                        delta_timeout,
+                        delta_unreachable,
+                        delta_bot_blocked,
+                        proxy_data.get('success_rate', 0)
+                    ))
+                
+                # Update last persisted values
+                self._last_persisted_proxy_stats[proxy_addr] = {
+                    'requests': current_requests,
+                    'success': current_success,
+                    'fail': current_fail,
+                    'timeout': current_timeout,
+                    'unreachable': current_unreachable,
+                    'bot_blocked': current_bot_blocked
+                }
             
             conn.commit()
         except Exception as e:
@@ -10322,6 +10371,72 @@ def api_xilriws_proxy_stats(proxy_address):
             }
         
         return jsonify(result)
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/xilriws/proxy/<path:proxy_address>/reset', methods=['POST'])
+def api_xilriws_proxy_reset(proxy_address):
+    """Reset all-time stats for a specific proxy (fixes corrupted data from duplicate counting bug)"""
+    try:
+        from urllib.parse import unquote
+        proxy_address = unquote(proxy_address)
+        
+        conn = shellder_db._connect()
+        if not conn:
+            return jsonify({'error': 'Database not available'}), 500
+        
+        try:
+            cursor = conn.cursor()
+            cursor.execute("""
+                DELETE FROM xilriws_proxy_stats WHERE proxy_address = ?
+            """, (proxy_address,))
+            conn.commit()
+            
+            # Also reset the delta tracking for this proxy
+            if hasattr(shellder_db, '_last_persisted_proxy_stats'):
+                shellder_db._last_persisted_proxy_stats.pop(proxy_address, None)
+            
+            return jsonify({
+                'success': True,
+                'message': f'Reset all-time stats for {proxy_address}',
+                'note': 'Current session stats will be used to rebuild all-time stats'
+            })
+        finally:
+            conn.close()
+    except Exception as e:
+        return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/xilriws/proxy/reset-all', methods=['POST'])
+def api_xilriws_proxy_reset_all():
+    """Reset all proxy stats (fixes corrupted data from duplicate counting bug)"""
+    try:
+        conn = shellder_db._connect()
+        if not conn:
+            return jsonify({'error': 'Database not available'}), 500
+        
+        try:
+            cursor = conn.cursor()
+            # Get count before delete
+            cursor.execute("SELECT COUNT(*) FROM xilriws_proxy_stats")
+            count = cursor.fetchone()[0]
+            
+            # Delete all proxy stats
+            cursor.execute("DELETE FROM xilriws_proxy_stats")
+            conn.commit()
+            
+            # Reset the delta tracking
+            if hasattr(shellder_db, '_last_persisted_proxy_stats'):
+                shellder_db._last_persisted_proxy_stats.clear()
+            
+            return jsonify({
+                'success': True,
+                'message': f'Reset all-time stats for {count} proxies',
+                'note': 'Current session stats will be used to rebuild all-time stats'
+            })
+        finally:
+            conn.close()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
