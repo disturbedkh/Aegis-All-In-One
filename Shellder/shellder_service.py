@@ -11904,6 +11904,11 @@ def api_nginx_logs():
 @app.route('/api/nginx/running-containers')
 def api_nginx_running_containers():
     """Get running containers with exposed ports for nginx setup"""
+    debug('API', '/api/nginx/running-containers called', {
+        'docker_client': docker_client is not None,
+        'local_mode': LOCAL_MODE
+    })
+    
     # Service name mapping to friendly names
     service_names = {
         'reactmap': {'name': 'ReactMap', 'desc': 'Map Frontend', 'websocket': False},
@@ -11933,9 +11938,14 @@ def api_nginx_running_containers():
     try:
         # Get running containers
         if docker_client:
+            debug('API', 'Using docker_client to list containers')
             running = docker_client.containers.list(filters={'status': 'running'})
+            debug('API', f'Found {len(running)} running containers')
+            
             for container in running:
                 name = container.name
+                debug('API', f'Checking container: {name}')
+                
                 if name in service_names:
                     # Get exposed ports from container
                     ports = container.attrs.get('NetworkSettings', {}).get('Ports', {})
@@ -11952,23 +11962,27 @@ def api_nginx_running_containers():
                         exposed_port = default_ports.get(name)
                     
                     if exposed_port:
-                        containers.append({
+                        container_info = {
                             'id': name,
                             'name': service_names[name]['name'],
                             'description': service_names[name]['desc'],
                             'port': int(exposed_port),
                             'websocket': service_names[name]['websocket'],
                             'status': 'running'
-                        })
+                        }
+                        containers.append(container_info)
+                        debug('API', f'Added container: {name} on port {exposed_port}')
         else:
             # Fallback: use docker ps
+            debug('API', 'docker_client not available, using docker ps fallback')
             result = subprocess.run(
                 ['docker', 'ps', '--format', '{{.Names}}|{{.Ports}}'],
                 capture_output=True, text=True, timeout=10
             )
             if result.returncode == 0:
+                debug('API', f'docker ps returned {len(result.stdout.strip().split(chr(10)))} lines')
                 for line in result.stdout.strip().split('\n'):
-                    if '|' in line:
+                    if line and '|' in line:
                         name, ports_str = line.split('|', 1)
                         if name in service_names:
                             # Try to extract port from ports string
@@ -11982,13 +11996,18 @@ def api_nginx_running_containers():
                                     'websocket': service_names[name]['websocket'],
                                     'status': 'running'
                                 })
+            else:
+                debug('API', f'docker ps failed: {result.stderr}')
     except Exception as e:
         import traceback
         error_trace = traceback.format_exc()
-        print(f"[Nginx Setup] Error getting running containers: {e}")
+        error_msg = f"Error getting running containers: {e}"
+        debug('API', error_msg, {'traceback': error_trace})
+        print(f"[Nginx Setup] {error_msg}")
         print(f"[Nginx Setup] Traceback: {error_trace}")
         return jsonify({'error': str(e), 'containers': []}), 500
     
+    debug('API', f'Returning {len(containers)} containers')
     return jsonify({'containers': containers})
 
 @app.route('/api/nginx/setup', methods=['POST'])

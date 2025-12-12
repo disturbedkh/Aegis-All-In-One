@@ -1364,11 +1364,17 @@ function navigateTo(page) {
         if (typeof loadPoracleStatus === 'function') loadPoracleStatus();
     } else if (page === 'nginx') {
         // Load running containers for nginx setup when navigating to the page
+        console.log('[Nginx Setup] Navigating to nginx page, loading containers...');
         setTimeout(() => {
+            const servicesList = document.getElementById('servicesList');
+            console.log('[Nginx Setup] servicesList element:', servicesList ? 'found' : 'NOT FOUND');
             if (typeof loadRunningContainers === 'function') {
+                console.log('[Nginx Setup] Calling loadRunningContainers()...');
                 loadRunningContainers();
+            } else {
+                console.error('[Nginx Setup] loadRunningContainers function not defined!');
             }
-        }, 100);
+        }, 200);
     }
 }
 
@@ -8341,38 +8347,63 @@ let runningContainers = [];
 
 // Load running containers for nginx setup
 async function loadRunningContainers() {
+    console.log('[Nginx Setup] loadRunningContainers() called');
     const servicesList = document.getElementById('servicesList');
     if (!servicesList) {
         console.error('[Nginx Setup] servicesList element not found');
+        // Try to find it with a delay in case DOM isn't ready
+        setTimeout(() => {
+            const retryList = document.getElementById('servicesList');
+            if (retryList) {
+                console.log('[Nginx Setup] Found servicesList on retry, loading...');
+                loadRunningContainers();
+            } else {
+                console.error('[Nginx Setup] servicesList still not found after retry');
+            }
+        }, 500);
         return;
     }
     
+    console.log('[Nginx Setup] Setting loading message...');
     servicesList.innerHTML = '<div class="loading">Loading running containers...</div>';
     
     try {
-        console.log('[Nginx Setup] Fetching running containers...');
+        console.log('[Nginx Setup] Fetching running containers from API...');
         const result = await fetchAPI('/api/nginx/running-containers', { force: true });
-        console.log('[Nginx Setup] API response:', result);
+        console.log('[Nginx Setup] API response received:', JSON.stringify(result, null, 2));
         
         // Check for API error response
-        if (result.error) {
-            servicesList.innerHTML = `<div class="text-danger">Error: ${result.error}</div>`;
+        if (result && result.error) {
+            const errorMsg = `Error: ${result.error}`;
             console.error('[Nginx Setup] API returned error:', result.error);
+            servicesList.innerHTML = `<div class="text-danger">${errorMsg}</div>`;
+            return;
+        }
+        
+        if (!result) {
+            console.error('[Nginx Setup] API returned null/undefined response');
+            servicesList.innerHTML = '<div class="text-danger">Error: No response from server</div>';
             return;
         }
         
         runningContainers = result.containers || [];
-        console.log('[Nginx Setup] Found containers:', runningContainers.length);
+        console.log('[Nginx Setup] Found containers:', runningContainers.length, runningContainers);
         
         if (runningContainers.length === 0) {
+            console.log('[Nginx Setup] No containers found');
             servicesList.innerHTML = '<div class="text-muted">No running containers found. Start your stack services first.</div>';
             return;
         }
         
+        console.log('[Nginx Setup] Rendering services list...');
         renderServicesList();
     } catch (e) {
         console.error('[Nginx Setup] Exception loading containers:', e);
-        servicesList.innerHTML = `<div class="text-danger">Error loading containers: ${e.message || 'Unknown error'}</div>`;
+        console.error('[Nginx Setup] Error stack:', e.stack);
+        const errorMsg = `Error loading containers: ${e.message || 'Unknown error'}`;
+        if (servicesList) {
+            servicesList.innerHTML = `<div class="text-danger">${errorMsg}</div>`;
+        }
     }
 }
 
