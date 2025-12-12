@@ -7976,6 +7976,7 @@ async function loadNginxSites() {
                         <div class="site-actions">
                             <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
                             <button class="btn btn-sm btn-warning" onclick="disableSite('${site.name}')" title="Disable">⏸️</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeSite('${site.name}')" title="Remove">🗑️</button>
                         </div>
                     </div>
                 `}).join('');
@@ -8002,6 +8003,7 @@ async function loadNginxSites() {
                         <div class="site-actions">
                             <button class="btn btn-sm" onclick="loadSiteConfig('${site.name}')" title="Edit">📝</button>
                             <button class="btn btn-sm btn-success" onclick="enableSite('${site.name}')" title="Enable">▶️</button>
+                            <button class="btn btn-sm btn-danger" onclick="removeSite('${site.name}')" title="Remove">🗑️</button>
                         </div>
                     </div>
                 `}).join('');
@@ -8108,6 +8110,129 @@ async function disableSite(name) {
         } else {
             showToast(`Failed: ${result.error}`, 'error');
         }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function removeSite(name) {
+    if (!confirm(`⚠️ WARNING: This will permanently delete site "${name}" from both sites-enabled and sites-available.\n\nThis action cannot be undone. Continue?`)) return;
+    
+    try {
+        const result = await fetchAPI(`/api/nginx/site/${name}/remove`, { method: 'POST', force: true });
+        if (result.success) {
+            showToast(`${name} removed successfully`, 'success');
+            loadNginxSites();
+            // Clear editor if this site was selected
+            const selector = document.getElementById('siteSelector');
+            if (selector && selector.value === name) {
+                selector.value = '';
+                const editor = document.getElementById('siteConfigEditor');
+                if (editor) editor.value = '';
+            }
+        } else {
+            showToast(`Failed to remove: ${result.error}`, 'error');
+        }
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function removeAllEnabledSites() {
+    try {
+        const data = await fetchAPI('/api/nginx/sites');
+        const enabledSites = data.enabled || [];
+        
+        if (enabledSites.length === 0) {
+            showToast('No enabled sites to remove', 'info');
+            return;
+        }
+        
+        const siteNames = enabledSites.map(s => s.name).join(', ');
+        if (!confirm(`⚠️ WARNING: This will permanently delete ALL ${enabledSites.length} enabled site(s):\n\n${siteNames}\n\nThis action cannot be undone. Continue?`)) return;
+        
+        let successCount = 0;
+        let failCount = 0;
+        const errors = [];
+        
+        for (const site of enabledSites) {
+            try {
+                const result = await fetchAPI(`/api/nginx/site/${site.name}/remove`, { method: 'POST', force: true });
+                if (result.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                    errors.push(`${site.name}: ${result.error}`);
+                }
+            } catch (e) {
+                failCount++;
+                errors.push(`${site.name}: ${e.message}`);
+            }
+        }
+        
+        if (failCount === 0) {
+            showToast(`All ${successCount} enabled site(s) removed successfully`, 'success');
+        } else {
+            showToast(`${successCount} removed, ${failCount} failed. Check console for details.`, 'warning');
+            console.error('Remove errors:', errors);
+        }
+        
+        loadNginxSites();
+        // Clear editor
+        const selector = document.getElementById('siteSelector');
+        if (selector) selector.value = '';
+        const editor = document.getElementById('siteConfigEditor');
+        if (editor) editor.value = '';
+    } catch (e) {
+        showToast(`Error: ${e.message}`, 'error');
+    }
+}
+
+async function removeAllAvailableSites() {
+    try {
+        const data = await fetchAPI('/api/nginx/sites');
+        const availableSites = (data.available || []).filter(s => !s.enabled);
+        
+        if (availableSites.length === 0) {
+            showToast('No available sites to remove', 'info');
+            return;
+        }
+        
+        const siteNames = availableSites.map(s => s.name).join(', ');
+        if (!confirm(`⚠️ WARNING: This will permanently delete ALL ${availableSites.length} available (disabled) site(s):\n\n${siteNames}\n\nThis action cannot be undone. Continue?`)) return;
+        
+        let successCount = 0;
+        let failCount = 0;
+        const errors = [];
+        
+        for (const site of availableSites) {
+            try {
+                const result = await fetchAPI(`/api/nginx/site/${site.name}/remove`, { method: 'POST', force: true });
+                if (result.success) {
+                    successCount++;
+                } else {
+                    failCount++;
+                    errors.push(`${site.name}: ${result.error}`);
+                }
+            } catch (e) {
+                failCount++;
+                errors.push(`${site.name}: ${e.message}`);
+            }
+        }
+        
+        if (failCount === 0) {
+            showToast(`All ${successCount} available site(s) removed successfully`, 'success');
+        } else {
+            showToast(`${successCount} removed, ${failCount} failed. Check console for details.`, 'warning');
+            console.error('Remove errors:', errors);
+        }
+        
+        loadNginxSites();
+        // Clear editor
+        const selector = document.getElementById('siteSelector');
+        if (selector) selector.value = '';
+        const editor = document.getElementById('siteConfigEditor');
+        if (editor) editor.value = '';
     } catch (e) {
         showToast(`Error: ${e.message}`, 'error');
     }

@@ -11843,6 +11843,46 @@ def api_nginx_site_disable(name):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)})
 
+@app.route('/api/nginx/site/<name>/remove', methods=['POST'])
+def api_nginx_site_remove(name):
+    """Remove a site completely (delete from sites-enabled and sites-available)"""
+    enabled = Path('/etc/nginx/sites-enabled') / name
+    available = Path('/etc/nginx/sites-available') / name
+    
+    errors = []
+    
+    # Remove from sites-enabled if it exists (symlink)
+    if enabled.exists():
+        try:
+            result = subprocess.run(
+                ['sudo', 'rm', str(enabled)],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                errors.append(f'Failed to remove from sites-enabled: {result.stderr}')
+        except Exception as e:
+            errors.append(f'Error removing from sites-enabled: {str(e)}')
+    
+    # Remove from sites-available if it exists (actual file)
+    if available.exists():
+        try:
+            result = subprocess.run(
+                ['sudo', 'rm', str(available)],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode != 0:
+                errors.append(f'Failed to remove from sites-available: {result.stderr}')
+        except Exception as e:
+            errors.append(f'Error removing from sites-available: {str(e)}')
+    
+    if errors:
+        return jsonify({'success': False, 'error': '; '.join(errors)})
+    
+    if not enabled.exists() and not available.exists():
+        return jsonify({'success': True, 'message': f'Site {name} removed successfully'})
+    else:
+        return jsonify({'success': False, 'error': 'Site files still exist after removal attempt'})
+
 @app.route('/api/nginx/logs')
 def api_nginx_logs():
     """Get nginx error logs"""
