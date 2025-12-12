@@ -10907,27 +10907,46 @@ def api_metrics_status():
             result['grafana']['running'] = True
             # Also verify HTTP access since it's exposed
             try:
-                resp = requests.get(f'{GRAFANA_URL}/api/health', timeout=3)
+                # Use GET to /api/health (not HEAD which returns 302)
+                resp = requests.get(f'{GRAFANA_URL}/api/health', timeout=5)
                 if resp.status_code == 200:
                     data = resp.json()
                     result['grafana']['version'] = data.get('version', 'unknown')
                     result['grafana']['accessible'] = True
                     
-                    # Check if dashboard exists
+                    # Check if dashboard exists using the search API (more reliable)
                     try:
-                        dash_resp = requests.get(
-                            f'{GRAFANA_URL}/api/dashboards/uid/dragonite-vm',
+                        search_resp = requests.get(
+                            f'{GRAFANA_URL}/api/search',
+                            params={'query': 'Dragonite', 'type': 'dash-db'},
                             timeout=5
                         )
-                        result['grafana']['dashboard_ready'] = dash_resp.status_code == 200
-                        if dash_resp.status_code == 200:
-                            result['grafana']['dashboard_uid'] = 'dragonite-vm'
-                            result['grafana']['dashboard_title'] = dash_resp.json().get('dashboard', {}).get('title', 'Dragonite')
-                    except:
+                        if search_resp.status_code == 200:
+                            dashboards = search_resp.json()
+                            # Look for our dashboard
+                            for dash in dashboards:
+                                if dash.get('uid') == 'dragonite-vm' or 'dragonite' in dash.get('title', '').lower():
+                                    result['grafana']['dashboard_ready'] = True
+                                    result['grafana']['dashboard_uid'] = dash.get('uid')
+                                    result['grafana']['dashboard_title'] = dash.get('title')
+                                    break
+                            else:
+                                result['grafana']['dashboard_ready'] = False
+                                result['grafana']['dashboard_note'] = 'Dashboard not found - check provisioning'
+                        else:
+                            result['grafana']['dashboard_ready'] = False
+                    except Exception as e:
                         result['grafana']['dashboard_ready'] = False
-            except:
+                        result['grafana']['dashboard_error'] = str(e)
+                else:
+                    result['grafana']['accessible'] = False
+                    result['grafana']['note'] = f'Health check returned {resp.status_code}'
+            except requests.exceptions.ConnectionError:
                 result['grafana']['accessible'] = False
                 result['grafana']['note'] = 'Container running but HTTP not responding yet'
+            except Exception as e:
+                result['grafana']['accessible'] = False
+                result['grafana']['note'] = f'Error: {str(e)}'
     except Exception as e:
         result['error'] = str(e)
     
@@ -11104,6 +11123,213 @@ def api_metrics_grafana_dashboards():
         return jsonify({'error': 'Grafana not reachable'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+
+@app.route('/api/grafana/setup-dashboard', methods=['POST'])
+def api_grafana_setup_dashboard():
+    """Import the Dragonite dashboard into Grafana via API"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    result = {
+        'success': False,
+        'steps': []
+    }
+    
+    # Find the dashboard JSON
+    dashboard_paths = [
+        os.path.join(aegis_root, 'grafana', 'dashboards', 'Dragonite-Emi-v5.json'),
+        os.path.join(aegis_root, 'grafana', 'Dragonite-Emi-v5.json'),
+    ]
+    
+    dashboard_json = None
+    dashboard_path = None
+    for path in dashboard_paths:
+        if os.path.exists(path):
+            dashboard_path = path
+            try:
+                with open(path, 'r') as f:
+                    dashboard_json = json.load(f)
+                result['steps'].append(f'✓ Found dashboard at {path}')
+                break
+            except Exception as e:
+                result['steps'].append(f'❌ Error reading {path}: {e}')
+    
+    if not dashboard_json:
+        result['steps'].append('❌ Dashboard JSON not found')
+        return jsonify(result)
+    
+    # Prepare dashboard for import
+    # Remove export-only fields and set proper values
+    if '__inputs' in dashboard_json:
+        del dashboard_json['__inputs']
+    if '__elements' in dashboard_json:
+        del dashboard_json['__elements']
+    if '__requires' in dashboard_json:
+        del dashboard_json['__requires']
+    
+    # Set UID if not present
+    if 'uid' not in dashboard_json:
+        dashboard_json['uid'] = 'dragonite-vm'
+    
+    # Set ID to null for new import
+    dashboard_json['id'] = None
+    
+    result['steps'].append('✓ Prepared dashboard for import')
+    
+    # Import via Grafana API
+    try:
+        import_payload = {
+            'dashboard': dashboard_json,
+            'overwrite': True,
+            'inputs': [
+                {
+                    'name': 'DS_PROMETHEUS',
+                    'type': 'datasource',
+                    'pluginId': 'prometheus',
+                    'value': 'VictoriaMetrics'
+                }
+            ],
+            'folderId': 0
+        }
+        
+        resp = requests.post(
+            f'{GRAFANA_URL}/api/dashboards/import',
+            json=import_payload,
+            headers={'Content-Type': 'application/json'},
+            auth=('admin', 'admin'),  # Default credentials
+            timeout=30
+        )
+        
+        if resp.status_code in [200, 201]:
+            result['success'] = True
+            result['steps'].append('✓ Dashboard imported successfully!')
+            result['dashboard_url'] = f'{GRAFANA_URL}/d/dragonite-vm/dragonite'
+        else:
+            # Try with password from .env
+            env_file = os.path.join(aegis_root, '.env')
+            grafana_password = 'admin'
+            if os.path.exists(env_file):
+                try:
+                    with open(env_file, 'r') as f:
+                        for line in f:
+                            if line.startswith('GRAFANA_ADMIN_PASSWORD='):
+                                grafana_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                                break
+                except:
+                    pass
+            
+            resp = requests.post(
+                f'{GRAFANA_URL}/api/dashboards/import',
+                json=import_payload,
+                headers={'Content-Type': 'application/json'},
+                auth=('admin', grafana_password),
+                timeout=30
+            )
+            
+            if resp.status_code in [200, 201]:
+                result['success'] = True
+                result['steps'].append('✓ Dashboard imported successfully!')
+                result['dashboard_url'] = f'{GRAFANA_URL}/d/dragonite-vm/dragonite'
+            else:
+                result['steps'].append(f'❌ Import failed: {resp.status_code} - {resp.text[:200]}')
+    except Exception as e:
+        result['steps'].append(f'❌ API error: {str(e)}')
+    
+    return jsonify(result)
+
+
+@app.route('/api/grafana/diagnose')
+def api_grafana_diagnose():
+    """Diagnose Grafana setup issues"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    result = {
+        'checks': [],
+        'recommendations': []
+    }
+    
+    # Check provisioning directories
+    prov_base = os.path.join(aegis_root, 'grafana', 'provisioning')
+    prov_ds = os.path.join(prov_base, 'datasources', 'victoriametrics.yml')
+    prov_dash = os.path.join(prov_base, 'dashboards', 'aegis.yml')
+    dash_dir = os.path.join(aegis_root, 'grafana', 'dashboards')
+    dash_json = os.path.join(dash_dir, 'Dragonite-Emi-v5.json')
+    
+    result['checks'].append({
+        'name': 'Provisioning base directory',
+        'path': prov_base,
+        'exists': os.path.isdir(prov_base)
+    })
+    result['checks'].append({
+        'name': 'Datasource config',
+        'path': prov_ds,
+        'exists': os.path.exists(prov_ds)
+    })
+    result['checks'].append({
+        'name': 'Dashboard config',
+        'path': prov_dash,
+        'exists': os.path.exists(prov_dash)
+    })
+    result['checks'].append({
+        'name': 'Dashboards directory',
+        'path': dash_dir,
+        'exists': os.path.isdir(dash_dir)
+    })
+    result['checks'].append({
+        'name': 'Dashboard JSON',
+        'path': dash_json,
+        'exists': os.path.exists(dash_json)
+    })
+    
+    # Check container mounts
+    try:
+        inspect_result = subprocess.run(
+            ['docker', 'inspect', 'grafana', '--format', '{{json .Mounts}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if inspect_result.returncode == 0:
+            mounts = json.loads(inspect_result.stdout)
+            result['mounts'] = mounts
+            
+            has_provisioning = any('/etc/grafana/provisioning' in m.get('Destination', '') for m in mounts)
+            has_dashboards = any('/var/lib/grafana/dashboards' in m.get('Destination', '') for m in mounts)
+            
+            result['checks'].append({
+                'name': 'Provisioning mount',
+                'mounted': has_provisioning
+            })
+            result['checks'].append({
+                'name': 'Dashboards mount',
+                'mounted': has_dashboards
+            })
+            
+            if not has_provisioning:
+                result['recommendations'].append('Restart Grafana with updated docker-compose.yaml that mounts provisioning directory')
+            if not has_dashboards:
+                result['recommendations'].append('Restart Grafana with updated docker-compose.yaml that mounts dashboards directory')
+    except Exception as e:
+        result['checks'].append({'name': 'Docker inspect', 'error': str(e)})
+    
+    # Check if files exist inside container
+    try:
+        check_result = subprocess.run(
+            ['docker', 'exec', 'grafana', 'ls', '-la', '/etc/grafana/provisioning/'],
+            capture_output=True, text=True, timeout=10
+        )
+        result['container_provisioning'] = check_result.stdout if check_result.returncode == 0 else check_result.stderr
+    except:
+        pass
+    
+    try:
+        check_result = subprocess.run(
+            ['docker', 'exec', 'grafana', 'ls', '-la', '/var/lib/grafana/dashboards/'],
+            capture_output=True, text=True, timeout=10
+        )
+        result['container_dashboards'] = check_result.stdout if check_result.returncode == 0 else check_result.stderr
+    except:
+        pass
+    
+    return jsonify(result)
 
 
 @app.route('/api/metrics/summary')

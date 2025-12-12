@@ -5030,19 +5030,19 @@ async function checkMetricsStatus() {
                 if (grafanaOffline) {
                     grafanaOffline.style.display = 'block';
                     grafanaOffline.innerHTML = `
-                        <h3>Dashboard Loading...</h3>
-                        <p>Grafana is running but the Dragonite dashboard is being provisioned.</p>
+                        <h3>📊 Dashboard Not Found</h3>
+                        <p>Grafana is running but the Dragonite dashboard needs to be imported.</p>
                         <div class="offline-actions">
-                            <button class="btn btn-primary" onclick="restartGrafanaContainer()">🔄 Restart Grafana</button>
-                            <button class="btn" onclick="checkMetricsStatus()">🔄 Retry</button>
+                            <button class="btn btn-primary" onclick="setupGrafanaDashboard()">📥 Import Dashboard</button>
+                            <button class="btn" onclick="restartGrafanaContainer()">🔄 Restart Grafana</button>
                             <button class="btn" onclick="openGrafanaExternal()">🔗 Open Grafana</button>
                         </div>
-                        <div class="offline-help">
-                            <p><strong>Dashboard Provisioning:</strong></p>
+                        <div class="offline-help" style="margin-top: 15px;">
+                            <p><strong>First Time Setup:</strong></p>
                             <ul>
-                                <li>Dashboards are auto-loaded from <code>grafana/dashboards/</code></li>
-                                <li>Try restarting: <code>docker compose restart grafana</code></li>
-                                <li>Check logs: <code>docker logs grafana</code></li>
+                                <li>Click "Import Dashboard" to automatically set up the Dragonite stats dashboard</li>
+                                <li>Default Grafana login: <code>admin</code> / <code>admin</code></li>
+                                <li>Or set <code>GRAFANA_ADMIN_PASSWORD</code> in your .env file</li>
                             </ul>
                         </div>
                     `;
@@ -5128,6 +5128,65 @@ async function restartGrafanaContainer() {
         }
     } catch (error) {
         showToast('Failed to restart Grafana: ' + error.message, 'error');
+    }
+}
+
+async function setupGrafanaDashboard() {
+    try {
+        showToast('Importing Dragonite dashboard...', 'info');
+        
+        const grafanaOffline = document.getElementById('grafanaOffline');
+        if (grafanaOffline) {
+            grafanaOffline.innerHTML = `
+                <h3>📊 Importing Dashboard...</h3>
+                <p>Please wait while the dashboard is being imported...</p>
+                <div class="loading-spinner"></div>
+            `;
+        }
+        
+        const result = await fetchAPI('/api/grafana/setup-dashboard', { method: 'POST' });
+        
+        if (result.success) {
+            showToast('Dashboard imported successfully!', 'success');
+            // Refresh status after a short delay
+            setTimeout(checkMetricsStatus, 2000);
+        } else {
+            showToast('Dashboard import had issues - check details', 'warning');
+            if (grafanaOffline) {
+                grafanaOffline.innerHTML = `
+                    <h3>⚠️ Import Status</h3>
+                    <div class="setup-log" style="text-align: left; font-family: monospace; font-size: 12px; max-height: 200px; overflow-y: auto; background: #1a1a1a; padding: 10px; border-radius: 4px;">
+                        ${result.steps ? result.steps.map(s => `<div>${s}</div>`).join('') : 'No details available'}
+                    </div>
+                    <div class="offline-actions" style="margin-top: 15px;">
+                        <button class="btn btn-primary" onclick="setupGrafanaDashboard()">🔄 Retry Import</button>
+                        <button class="btn" onclick="openGrafanaExternal()">🔗 Open Grafana Manually</button>
+                    </div>
+                    <div class="offline-help" style="margin-top: 10px;">
+                        <p>You can also import manually in Grafana:</p>
+                        <ol style="text-align: left; padding-left: 20px;">
+                            <li>Open Grafana at port 6006</li>
+                            <li>Go to Dashboards → Import</li>
+                            <li>Upload <code>grafana/Dragonite-Emi-v5.json</code></li>
+                            <li>Select VictoriaMetrics as datasource</li>
+                        </ol>
+                    </div>
+                `;
+            }
+        }
+    } catch (error) {
+        showToast('Failed to import dashboard: ' + error.message, 'error');
+        const grafanaOffline = document.getElementById('grafanaOffline');
+        if (grafanaOffline) {
+            grafanaOffline.innerHTML = `
+                <h3>❌ Import Failed</h3>
+                <p>Error: ${error.message}</p>
+                <div class="offline-actions">
+                    <button class="btn btn-primary" onclick="setupGrafanaDashboard()">🔄 Retry</button>
+                    <button class="btn" onclick="openGrafanaExternal()">🔗 Open Grafana Manually</button>
+                </div>
+            `;
+        }
     }
 }
 
