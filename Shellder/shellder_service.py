@@ -9122,6 +9122,83 @@ def api_container_check_update(name):
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
+@app.route('/api/containers/<name>/start', methods=['POST'])
+def api_container_start(name):
+    """Start a specific container using docker compose"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    try:
+        # Use docker compose to start the service
+        result = subprocess.run(
+            ['docker', 'compose', 'up', '-d', name],
+            capture_output=True, text=True, timeout=120, cwd=aegis_root
+        )
+        
+        if result.returncode == 0:
+            return jsonify({
+                'success': True,
+                'container': name,
+                'message': f'{name} started successfully',
+                'stdout': result.stdout,
+                'stderr': result.stderr
+            })
+        else:
+            return jsonify({
+                'success': False,
+                'container': name,
+                'error': result.stderr or 'Failed to start container',
+                'stdout': result.stdout
+            }), 500
+            
+    except subprocess.TimeoutExpired:
+        return jsonify({'success': False, 'error': 'Start timed out'}), 504
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/containers/<name>/stop', methods=['POST'])
+def api_container_stop(name):
+    """Stop a specific container"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', 'stop', name],
+            capture_output=True, text=True, timeout=60, cwd=aegis_root
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'container': name,
+            'message': f'{name} stopped' if result.returncode == 0 else 'Failed to stop',
+            'stdout': result.stdout,
+            'stderr': result.stderr
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
+@app.route('/api/containers/<name>/restart', methods=['POST'])
+def api_container_restart(name):
+    """Restart a specific container"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    try:
+        result = subprocess.run(
+            ['docker', 'compose', 'restart', name],
+            capture_output=True, text=True, timeout=120, cwd=aegis_root
+        )
+        
+        return jsonify({
+            'success': result.returncode == 0,
+            'container': name,
+            'message': f'{name} restarted' if result.returncode == 0 else 'Failed to restart',
+            'stdout': result.stdout,
+            'stderr': result.stderr
+        })
+        
+    except Exception as e:
+        return jsonify({'success': False, 'error': str(e)}), 500
+
 @app.route('/api/container/<name>/logs')
 def api_container_logs(name):
     """Get logs for a specific container"""
