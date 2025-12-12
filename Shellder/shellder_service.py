@@ -13217,21 +13217,11 @@ def api_mariadb_status():
         except:
             pass
     
-    # Check localhost:3306 first (host-installed MariaDB)
-    import socket
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        localhost_available = sock.connect_ex(('127.0.0.1', 3306)) == 0
-        sock.close()
-        status['localhost'] = {
-            'port_open': localhost_available,
-            'preferred': localhost_available  # Prefer localhost if available
-        }
-    except:
-        status['localhost'] = {'port_open': False, 'preferred': False}
+    # NOTE: Aegis AIO uses Docker container for MariaDB, not localhost:3306
+    # The container doesn't expose port 3306 to the host by design (security)
+    # All connections go through Docker's internal network or docker exec
     
-    # Check container status (fallback)
+    # Check container status (PRIMARY method for Aegis)
     try:
         result = subprocess.run(
             ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}|{{.Status}}'],
@@ -13250,53 +13240,42 @@ def api_mariadb_status():
     except:
         pass
     
-    # Test database connection via localhost:3306
-    import socket
-    
-    # First check if port 3306 is reachable
-    try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        port_open = sock.connect_ex(('localhost', 3306)) == 0
-        sock.close()
-        status['connection_test']['port_3306_open'] = port_open
-    except:
-        port_open = False
-        status['connection_test']['port_3306_open'] = False
-    
-    if port_open or status['container']['running']:
+    # Test database connection via Docker exec (Aegis uses containerized MariaDB)
+    if status['container']['running']:
         # Get credentials from env
         root_pass = None
         db_pass = None
+        db_user = None
         if os.path.exists(env_file):
             try:
                 with open(env_file) as f:
                     for line in f:
+                        line = line.strip()
                         if line.startswith('MYSQL_ROOT_PASSWORD='):
-                            root_pass = line.split('=', 1)[1].strip()
+                            root_pass = line.split('=', 1)[1].strip().strip('"').strip("'")
                         elif line.startswith('MYSQL_PASSWORD='):
-                            db_pass = line.split('=', 1)[1].strip()
+                            db_pass = line.split('=', 1)[1].strip().strip('"').strip("'")
+                        elif line.startswith('MYSQL_USER='):
+                            db_user = line.split('=', 1)[1].strip().strip('"').strip("'")
             except:
                 pass
         
-        # Find mysql CLI
-        mysql_cmd = shutil.which('mariadb') or shutil.which('mysql')
+        status['connection_test']['method'] = 'docker_exec'
         
-        # Test root connection via localhost:3306
-        if root_pass and mysql_cmd:
+        # Test root connection via docker exec
+        if root_pass:
             try:
                 result = subprocess.run(
-                    [mysql_cmd, '-u', 'root', f'-p{root_pass}', '-h', 'localhost', '-P', '3306', '-e', 'SELECT 1'],
+                    ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_pass}', '-e', 'SELECT 1'],
                     capture_output=True, text=True, timeout=10
                 )
                 if result.returncode == 0:
                     status['container']['accessible'] = True
                     status['connection_test']['root'] = True
-                    status['connection_test']['method'] = 'localhost:3306'
                     
-                    # Check databases via localhost
+                    # Check databases via docker exec
                     db_result = subprocess.run(
-                        [mysql_cmd, '-u', 'root', f'-p{root_pass}', '-h', 'localhost', '-P', '3306', '-N', '-e',
+                        ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_pass}', '-N', '-e',
                          "SELECT SCHEMA_NAME, ROUND(SUM(data_length + index_length)/1024/1024, 2) as size_mb "
                          "FROM information_schema.SCHEMATA s "
                          "LEFT JOIN information_schema.tables t ON s.SCHEMA_NAME = t.TABLE_SCHEMA "
@@ -13314,7 +13293,7 @@ def api_mariadb_status():
                     
                     # Check users
                     user_result = subprocess.run(
-                        [mysql_cmd, '-u', 'root', f'-p{root_pass}', '-h', 'localhost', '-P', '3306', '-N', '-e',
+                        ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_pass}', '-N', '-e',
                          "SELECT User, Host FROM mysql.user WHERE User NOT IN ('root', 'mariadb.sys', 'mysql', '')"],
                         capture_output=True, text=True, timeout=10
                     )
@@ -13326,34 +13305,11 @@ def api_mariadb_status():
                                     status['users'][parts[0]] = {'host': parts[1], 'exists': True}
             except:
                 pass
-        elif root_pass and status['container']['running']:
-            # Fallback to docker exec if no local mysql client
-            try:
-                result = subprocess.run(
-                    ['docker', 'exec', 'database', 'mariadb', '-u', 'root', f'-p{root_pass}', '-e', 'SELECT 1'],
-                    capture_output=True, text=True, timeout=10
-                )
-                if result.returncode == 0:
-                    status['container']['accessible'] = True
-                    status['connection_test']['root'] = True
-                    status['connection_test']['method'] = 'docker_exec'
-                    status['connection_test']['note'] = 'Install mysql-client for localhost:3306 testing'
-            except:
-                pass
         
-        # Test db_user connection via localhost:3306
-        db_user = status['credentials'].get('db_user')
-        if db_user and db_pass and mysql_cmd:
-            try:
-                result = subprocess.run(
-                    [mysql_cmd, '-u', db_user, f'-p{db_pass}', '-h', 'localhost', '-P', '3306', '-e', 'SELECT 1'],
-                    capture_output=True, text=True, timeout=10
-                )
-                status['connection_test']['db_user'] = result.returncode == 0
-            except:
-                pass
-        elif db_user and db_pass and status['container']['running']:
-            # Fallback to docker exec
+        # Test db_user connection via docker exec
+        if not db_user:
+            db_user = status['credentials'].get('db_user')
+        if db_user and db_pass:
             try:
                 result = subprocess.run(
                     ['docker', 'exec', 'database', 'mariadb', '-u', db_user, f'-p{db_pass}', '-e', 'SELECT 1'],
@@ -13816,102 +13772,65 @@ GRANT ALL PRIVILEGES ON *.* TO '{db_user}'@'%' WITH GRANT OPTION;
 
 @app.route('/api/mariadb/test-connection', methods=['POST'])
 def api_mariadb_test_connection():
-    """Test MariaDB connection directly via localhost:3306"""
+    """Test MariaDB connection via Docker container (Aegis uses containerized MariaDB)"""
     data = request.json or {}
     
     user = data.get('user', 'root')
     password = data.get('password', '')
-    host = data.get('host', 'localhost')
-    port = data.get('port', 3306)
     database = data.get('database', '')
     
     result = {
         'success': False,
         'message': '',
         'details': {
-            'host': host,
-            'port': port,
+            'method': 'docker_exec',
+            'container': 'database',
             'user': user
         }
     }
     
-    # First, try to connect directly using socket (fastest check)
-    import socket
+    # Check if container is running
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(5)
-        sock_result = sock.connect_ex((host, port))
-        sock.close()
-        
-        if sock_result != 0:
-            result['message'] = f'Cannot reach MariaDB on {host}:{port} - is the database running?'
-            result['details']['port_open'] = False
+        check_result = subprocess.run(
+            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if 'database' not in check_result.stdout:
+            result['message'] = 'Database container is not running. Start the stack first.'
+            result['details']['container_running'] = False
             return jsonify(result)
-        
-        result['details']['port_open'] = True
+        result['details']['container_running'] = True
     except Exception as e:
-        result['message'] = f'Network error: {e}'
+        result['message'] = f'Docker check failed: {e}'
         return jsonify(result)
     
-    # Find mysql/mariadb CLI
-    mysql_cmd = shutil.which('mariadb') or shutil.which('mysql')
+    # Build docker exec command
+    cmd = ['docker', 'exec', 'database', 'mariadb', '-u', user, f'-p{password}']
+    if database:
+        cmd.extend(['-D', database])
+    cmd.extend(['-e', 'SELECT VERSION() as version, NOW() as server_time'])
     
-    if mysql_cmd:
-        # Use local CLI to connect via localhost:3306
-        try:
-            cmd = [mysql_cmd, '-u', user, f'-p{password}', '-h', host, '-P', str(port)]
-            if database:
-                cmd.extend(['-D', database])
-            cmd.extend(['-e', 'SELECT VERSION() as version, NOW() as server_time'])
-            
-            test_result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
-            
-            if test_result.returncode == 0:
-                result['success'] = True
-                result['message'] = f'Connection successful to {host}:{port}!'
-                result['details']['method'] = 'local_cli'
-                # Parse output for version info
-                for line in test_result.stdout.strip().split('\n'):
-                    if 'MariaDB' in line or 'MySQL' in line or '-' in line:
-                        result['details']['version'] = line.strip()
-                        break
-            else:
-                # Clean up error message (remove password from output if present)
-                error = test_result.stderr or 'Connection failed'
-                if password in error:
-                    error = error.replace(password, '***')
-                result['message'] = error
-        except subprocess.TimeoutExpired:
-            result['message'] = 'Connection timed out'
-        except Exception as e:
-            result['message'] = str(e)
-    else:
-        # Fallback: Try using Python socket to do a basic MySQL handshake check
-        # This is a simplified check - just verifies MySQL protocol response
-        try:
-            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            sock.settimeout(5)
-            sock.connect((host, port))
-            
-            # Read initial handshake packet
-            data = sock.recv(1024)
-            sock.close()
-            
-            if len(data) > 5:
-                # MySQL/MariaDB sends a greeting packet
-                # Extract version from packet (starts at byte 5)
-                version_end = data.find(b'\x00', 5)
-                if version_end > 5:
-                    version = data[5:version_end].decode('utf-8', errors='ignore')
-                    result['success'] = True
-                    result['message'] = f'MariaDB server responding on {host}:{port}'
-                    result['details']['version'] = version
-                    result['details']['method'] = 'socket_handshake'
-                    result['details']['note'] = 'Install mysql-client for full authentication test'
-            else:
-                result['message'] = 'Invalid response from server'
-        except Exception as e:
-            result['message'] = f'Socket connection failed: {e}'
+    try:
+        test_result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        if test_result.returncode == 0:
+            result['success'] = True
+            result['message'] = f'Connection successful to Docker container!'
+            # Parse output for version info
+            for line in test_result.stdout.strip().split('\n'):
+                if 'MariaDB' in line or 'MySQL' in line or '-' in line:
+                    result['details']['version'] = line.strip()
+                    break
+        else:
+            # Clean up error message (remove password from output if present)
+            error = test_result.stderr or 'Connection failed'
+            if password and password in error:
+                error = error.replace(password, '***')
+            result['message'] = error.strip()
+    except subprocess.TimeoutExpired:
+        result['message'] = 'Connection timed out'
+    except Exception as e:
+        result['message'] = str(e)
     
     return jsonify(result)
 
