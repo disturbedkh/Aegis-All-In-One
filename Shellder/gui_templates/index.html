@@ -92,10 +92,6 @@
                         <span class="nav-icon">🔔</span>
                         <span>Poracle</span>
                     </a>
-                    <a href="#" class="nav-item" data-page="updates" onclick="navigateTo('updates'); return false;">
-                        <span class="nav-icon">🔄</span>
-                        <span>Updates</span>
-                    </a>
                 </div>
             </div>
             
@@ -2387,29 +2383,6 @@
                 </div>
             </div>
             
-            <!-- Updates Page -->
-            <div id="page-updates" class="page">
-                <div class="card">
-                    <div class="card-header">
-                        <h2>Updates</h2>
-                    </div>
-                    <div class="card-body">
-                        <div id="gitStatus" class="git-status">
-                            <div class="loading">Checking for updates...</div>
-                        </div>
-                        
-                        <div class="update-actions">
-                            <button class="btn btn-primary" onclick="gitPull()">
-                                <span>⬇️</span> Pull Updates
-                            </button>
-                        </div>
-                        
-                        <div id="updateOutput" class="update-output" style="display: none;">
-                            <pre></pre>
-                        </div>
-                    </div>
-                </div>
-            </div>
             
             <!-- Debug Page (AI-Friendly) -->
             <div id="page-debug" class="page">

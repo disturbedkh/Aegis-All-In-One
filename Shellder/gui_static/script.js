@@ -1318,7 +1318,6 @@ function navigateTo(page) {
         'logs': 'Logs',
         'fletchling': 'Fletchling - Nest Detection',
         'poracle': 'Poracle - Discord & Telegram Alerts',
-        'updates': 'Updates',
         'debug': 'Debug & Diagnostics'
     };
     document.getElementById('pageTitle').textContent = titles[page] || page;
@@ -1335,8 +1334,6 @@ function navigateTo(page) {
     } else if (page === 'logs') {
         currentLogSource = 'all';  // Reset to all stack logs
         loadStackLogs();
-    } else if (page === 'updates') {
-        checkGitStatus();
     } else if (page === 'containers') {
         loadContainerDetails();
     } else if (page === 'fletchling') {
