@@ -1366,8 +1366,8 @@ function navigateTo(page) {
         // Load running containers for nginx setup when navigating to the page
         console.log('[Nginx Setup] Navigating to nginx page, loading containers...');
         setTimeout(() => {
-            const servicesList = document.getElementById('servicesList');
-            console.log('[Nginx Setup] servicesList element:', servicesList ? 'found' : 'NOT FOUND');
+            const nginxServicesList = document.getElementById('nginxServicesList');
+            console.log('[Nginx Setup] nginxServicesList element:', nginxServicesList ? 'found' : 'NOT FOUND');
             if (typeof loadRunningContainers === 'function') {
                 console.log('[Nginx Setup] Calling loadRunningContainers()...');
                 loadRunningContainers();
@@ -8348,17 +8348,17 @@ let runningContainers = [];
 // Load running containers for nginx setup
 async function loadRunningContainers() {
     console.log('[Nginx Setup] loadRunningContainers() called');
-    const servicesList = document.getElementById('servicesList');
+    const servicesList = document.getElementById('nginxServicesList');
     if (!servicesList) {
-        console.error('[Nginx Setup] servicesList element not found');
+        console.error('[Nginx Setup] nginxServicesList element not found');
         // Try to find it with a delay in case DOM isn't ready
         setTimeout(() => {
-            const retryList = document.getElementById('servicesList');
+            const retryList = document.getElementById('nginxServicesList');
             if (retryList) {
-                console.log('[Nginx Setup] Found servicesList on retry, loading...');
+                console.log('[Nginx Setup] Found nginxServicesList on retry, loading...');
                 loadRunningContainers();
             } else {
-                console.error('[Nginx Setup] servicesList still not found after retry');
+                console.error('[Nginx Setup] nginxServicesList still not found after retry');
             }
         }, 500);
         return;
@@ -8370,7 +8370,7 @@ async function loadRunningContainers() {
     try {
         console.log('[Nginx Setup] Fetching running containers from API...');
         const result = await fetchAPI('/api/nginx/running-containers', { force: true });
-        console.log('[Nginx Setup] API response received:', JSON.stringify(result, null, 2));
+        console.log('[Nginx Setup] API response:', result ? 'received' : 'null');
         
         // Check for API error response
         if (result && result.error) {
@@ -8387,7 +8387,7 @@ async function loadRunningContainers() {
         }
         
         runningContainers = result.containers || [];
-        console.log('[Nginx Setup] Found containers:', runningContainers.length, runningContainers);
+        console.log('[Nginx Setup] Found containers:', runningContainers.length);
         
         if (runningContainers.length === 0) {
             console.log('[Nginx Setup] No containers found');
@@ -8409,7 +8409,7 @@ async function loadRunningContainers() {
 
 // Render the services configuration list
 function renderServicesList() {
-    const servicesList = document.getElementById('servicesList');
+    const servicesList = document.getElementById('nginxServicesList');
     if (!servicesList) return;
     
     const structure = document.getElementById('setupStructure')?.value || 'subdomain';
