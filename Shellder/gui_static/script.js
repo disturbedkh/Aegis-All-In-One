@@ -13818,8 +13818,9 @@ async function runMariaDBSetup() {
         return checkbox && (checkbox.checked || checkbox.disabled);
     });
     
-    showToast('Running MariaDB setup...', 'info');
+    showToast('Running MariaDB setup (may start container if needed)...', 'info');
     appendWizardOutput('\\n━━━━━━ Running MariaDB Setup ━━━━━━\\n');
+    appendWizardOutput('(Will auto-start database container if not running)\\n\\n');
     
     try {
         const response = await fetch('/api/mariadb/setup', {
