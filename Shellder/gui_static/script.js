@@ -1149,6 +1149,16 @@ function initWebSocket() {
         socket.on('action_result', (data) => {
             if (data.success) {
                 showToast(data.message, 'success');
+                
+                // Refresh container status if it was a container action
+                if (data.container_name && data.action) {
+                    const expectedState = data.action === 'start' ? 'running' : data.action === 'stop' ? 'stopped' : null;
+                    if (expectedState) {
+                        refreshContainerStatus(data.container_name, expectedState);
+                        // Also poll to ensure status updates
+                        pollContainerStatus(data.container_name, expectedState);
+                    }
+                }
             } else {
                 showToast(`Error: ${data.error}`, 'error');
             }
@@ -1667,8 +1677,10 @@ function updateContainerStats(containers) {
         else stopped++;
     });
     
-    document.getElementById('containersRunning').textContent = running;
-    document.getElementById('containersStopped').textContent = stopped;
+    const runningEl = document.getElementById('containersRunning');
+    const stoppedEl = document.getElementById('containersStopped');
+    if (runningEl) runningEl.textContent = running;
+    if (stoppedEl) stoppedEl.textContent = stopped;
     
     // Update container list
     const list = Object.values(containers);
@@ -2641,27 +2653,105 @@ function updateContainerDetailList(containers) {
 }
 
 async function checkContainerUpdate(name) {
-    showToast(`Checking for updates: ${name}...`, 'info');
+    // Show initial feedback with longer duration since this can take a while
+    showToast(`Checking for updates: ${name}... This may take a minute.`, 'info', 10000);
     
     try {
-        const result = await fetchAPI(`/api/containers/check-update/${name}`, { 
+        const response = await fetch(`/api/containers/check-update/${name}`, {
             method: 'POST',
-            force: true 
+            headers: {
+                'Content-Type': 'application/json'
+            }
         });
         
+        const result = await response.json();
+        
+        // Handle different response scenarios
+        if (!response.ok) {
+            // HTTP error status
+            const errorMsg = result.error || result.message || `HTTP ${response.status}: ${response.statusText}`;
+            showToast(`❌ Failed to check updates for ${name}: ${errorMsg}`, 'error', 8000);
+            return;
+        }
+        
+        if (result.success === false || result.error) {
+            // API returned error
+            const errorMsg = result.error || result.message || 'Unknown error';
+            showToast(`❌ Failed to check updates for ${name}: ${errorMsg}`, 'error', 8000);
+            return;
+        }
+        
         if (result.success) {
+            // Success - check if update is available
             if (result.update_available) {
-                showToast(`✨ New image available for ${name}! Restart container to apply.`, 'success');
+                showToast(`✨ New image available for ${name}! Restart container to apply the update.`, 'success', 10000);
+                
+                // Show detailed info in a modal
+                openModal(
+                    `Update Available: ${name}`,
+                    `
+                    <div class="update-info">
+                        <div class="update-status success">
+                            <h3>✨ New Image Available</h3>
+                            <p>A newer version of the container image is available.</p>
+                        </div>
+                        <div class="update-details">
+                            <p><strong>Container:</strong> ${escapeHtml(name)}</p>
+                            <p><strong>Image:</strong> ${escapeHtml(result.image || 'N/A')}</p>
+                            <p><strong>Current ID:</strong> <code>${escapeHtml(result.old_id || 'N/A')}</code></p>
+                            <p><strong>New ID:</strong> <code>${escapeHtml(result.new_id || 'N/A')}</code></p>
+                        </div>
+                        <div class="update-actions" style="margin-top: 20px; padding-top: 15px; border-top: 1px solid var(--border-color);">
+                            <p class="text-info">💡 <strong>To apply the update:</strong></p>
+                            <ol style="margin-left: 20px; margin-top: 10px;">
+                                <li>Stop the container</li>
+                                <li>Start the container (it will use the new image)</li>
+                                <li>Or restart the container directly</li>
+                            </ol>
+                        </div>
+                    </div>
+                    `
+                );
             } else {
-                showToast(`✓ ${name} is up to date`, 'success');
+                showToast(`✓ ${name} is up to date - no updates available.`, 'success', 5000);
+                
+                // Show confirmation in modal
+                openModal(
+                    `Update Check: ${name}`,
+                    `
+                    <div class="update-info">
+                        <div class="update-status success">
+                            <h3>✓ Up to Date</h3>
+                            <p>The container is using the latest available image.</p>
+                        </div>
+                        <div class="update-details">
+                            <p><strong>Container:</strong> ${escapeHtml(name)}</p>
+                            <p><strong>Image:</strong> ${escapeHtml(result.image || 'N/A')}</p>
+                            <p><strong>Image ID:</strong> <code>${escapeHtml(result.new_id || result.old_id || 'N/A')}</code></p>
+                            ${result.checked_at ? `<p><strong>Checked:</strong> ${new Date(result.checked_at).toLocaleString()}</p>` : ''}
+                        </div>
+                    </div>
+                    `
+                );
             }
-            // Refresh update info
+            
+            // Refresh update info to update badges
             await loadContainerUpdates();
+            
+            // Refresh container details if on containers page
+            if (currentPage === 'containers') {
+                loadContainerDetails();
+            }
         } else {
-            showToast(`Failed to check: ${result.error}`, 'error');
+            // Unexpected response format
+            showToast(`⚠️ Unexpected response format when checking ${name}`, 'warning', 5000);
+            console.warn('Unexpected check-update response:', result);
         }
     } catch (e) {
-        showToast(`Error checking updates: ${e.message}`, 'error');
+        // Network or parsing error
+        const errorMsg = e.message || 'Network error or timeout';
+        showToast(`❌ Error checking updates for ${name}: ${errorMsg}`, 'error', 8000);
+        console.error('Error checking container update:', e);
     }
 }
 
@@ -2757,9 +2847,17 @@ async function loadContainerDetails() {
 async function containerAction(name, action) {
     showToast(`${action}ing ${name}...`, 'info');
     
+    // Determine expected final state
+    const expectedState = action === 'start' ? 'running' : action === 'stop' ? 'stopped' : null;
+    
     // Use WebSocket if available
     if (socket && wsConnected) {
         socket.emit('container_action', { name, action });
+        // WebSocket handler will update status via action_result
+        // But we also poll to ensure status updates
+        if (expectedState) {
+            pollContainerStatus(name, expectedState);
+        }
         return;
     }
     
@@ -2771,17 +2869,146 @@ async function containerAction(name, action) {
         
         if (result.success) {
             showToast(`${name} ${action}ed successfully`, 'success');
-            setTimeout(() => {
-                refreshData();
-                if (currentPage === 'containers') {
-                    loadContainerDetails();
-                }
-            }, 1000);
+            
+            // Immediately refresh container status
+            refreshContainerStatus(name, expectedState);
+            
+            // Also refresh full data
+            refreshData();
+            if (currentPage === 'containers') {
+                loadContainerDetails();
+            }
         } else {
             showToast(`Failed to ${action} ${name}: ${result.error}`, 'error');
         }
     } catch (error) {
         showToast(`Failed to ${action} ${name}`, 'error');
+    }
+}
+
+// Poll container status until it reaches expected state or timeout
+async function pollContainerStatus(containerName, expectedState, maxAttempts = 10, interval = 500) {
+    let attempts = 0;
+    
+    const checkStatus = async () => {
+        attempts++;
+        
+        try {
+            const containers = await fetchAPI('/api/containers');
+            const container = containers.find(c => c.name === containerName);
+            
+            if (container) {
+                const currentState = (container.status || container.state || '').toLowerCase();
+                const isExpected = currentState.includes(expectedState) || 
+                                 (expectedState === 'running' && currentState === 'up') ||
+                                 (expectedState === 'stopped' && (currentState === 'exited' || currentState === 'stopped' || currentState === 'created'));
+                
+                if (isExpected || attempts >= maxAttempts) {
+                    // Update container status in UI
+                    refreshContainerStatus(containerName, expectedState);
+                    refreshData();
+                    if (currentPage === 'containers') {
+                        loadContainerDetails();
+                    }
+                    return;
+                }
+            }
+            
+            // Continue polling if not reached expected state yet
+            if (attempts < maxAttempts) {
+                setTimeout(checkStatus, interval);
+            }
+        } catch (error) {
+            console.error('Error polling container status:', error);
+            // Still try to refresh once more
+            if (attempts === 1) {
+                refreshContainerStatus(containerName, expectedState);
+            }
+        }
+    };
+    
+    // Start polling after a brief delay
+    setTimeout(checkStatus, interval);
+}
+
+// Refresh container status in the UI immediately
+async function refreshContainerStatus(containerName, expectedState) {
+    try {
+        // Refresh the containers list
+        const containers = await fetchAPI('/api/containers');
+        
+        // Update dashboard container list if on dashboard/overview
+        if (currentPage === 'dashboard' || currentPage === 'overview') {
+            const statusData = await fetchAPI('/api/status', { force: true });
+            if (statusData && statusData.containers) {
+                updateContainerList(statusData.containers.list);
+            }
+        }
+        
+        // Update containers page detail list if on containers page
+        if (currentPage === 'containers') {
+            updateContainerDetailList(containers);
+        }
+        
+        // Also update the specific container in any visible lists by finding elements with container name
+        const container = containers.find(c => c.name === containerName);
+        if (container) {
+            const containerState = container.status || container.state || '';
+            
+            // Update container status in detail list (containers page)
+            const detailItems = document.querySelectorAll('.container-detail');
+            detailItems.forEach(item => {
+                const nameEl = item.querySelector('.container-name');
+                if (nameEl && nameEl.textContent.includes(containerName)) {
+                    const statusEl = item.querySelector('.container-status');
+                    const stateEl = item.querySelector('.container-status-text');
+                    if (statusEl) {
+                        statusEl.className = `container-status ${containerState}`;
+                    }
+                    if (stateEl) {
+                        const imageInfo = container.image ? `<span class="container-image" title="${container.image}">${container.image.split(':')[0].split('/').pop()}</span>` : '';
+                        stateEl.innerHTML = `${containerState} ${imageInfo}`;
+                    }
+                    
+                    // Update action buttons based on state
+                    const actionsEl = item.querySelector('.container-actions');
+                    if (actionsEl) {
+                        if (containerState === 'running') {
+                            actionsEl.innerHTML = `
+                                <button class="btn btn-sm" onclick="containerAction('${containerName}', 'restart')" title="Restart">🔄</button>
+                                <button class="btn btn-sm btn-danger" onclick="containerAction('${containerName}', 'stop')" title="Stop">⏹️</button>
+                                <button class="btn btn-sm" onclick="viewContainerLogs('${containerName}')" title="View Logs">📋</button>
+                                <button class="btn btn-sm" onclick="checkContainerUpdate('${containerName}')" title="Check for Updates">⬆️</button>
+                            `;
+                        } else {
+                            actionsEl.innerHTML = `
+                                <button class="btn btn-sm btn-success" onclick="containerAction('${containerName}', 'start')" title="Start">▶️</button>
+                                <button class="btn btn-sm" onclick="viewContainerLogs('${containerName}')" title="View Logs">📋</button>
+                                <button class="btn btn-sm" onclick="checkContainerUpdate('${containerName}')" title="Check for Updates">⬆️</button>
+                            `;
+                        }
+                    }
+                }
+            });
+            
+            // Update container status in dashboard list
+            const listItems = document.querySelectorAll('.container-item');
+            listItems.forEach(item => {
+                const nameEl = item.querySelector('.container-name');
+                if (nameEl && nameEl.textContent.includes(containerName)) {
+                    const statusEl = item.querySelector('.container-status');
+                    const stateEl = item.querySelector('.container-state');
+                    if (statusEl) {
+                        statusEl.className = `container-status ${containerState}`;
+                    }
+                    if (stateEl) {
+                        stateEl.textContent = containerState;
+                    }
+                }
+            });
+        }
+    } catch (error) {
+        console.error('Error refreshing container status:', error);
     }
 }
 
@@ -4740,8 +4967,13 @@ document.addEventListener('keydown', (e) => {
 // TOAST NOTIFICATIONS
 // =============================================================================
 
-function showToast(message, type = 'info') {
+function showToast(message, type = 'info', duration = 5000) {
     const container = document.getElementById('toastContainer');
+    if (!container) {
+        console.warn('Toast container not found');
+        return null;
+    }
+    
     const toast = document.createElement('div');
     toast.className = `toast ${type}`;
     
@@ -4759,11 +4991,15 @@ function showToast(message, type = 'info') {
     
     container.appendChild(toast);
     
-    // Auto remove after 5 seconds
-    setTimeout(() => {
+    // Auto remove after specified duration
+    const timeoutId = setTimeout(() => {
         toast.style.animation = 'toastOut 0.3s ease forwards';
         setTimeout(() => toast.remove(), 300);
-    }, 5000);
+    }, duration);
+    
+    // Return toast element for potential manual removal
+    toast._timeoutId = timeoutId;
+    return toast;
 }
 
 // =============================================================================
