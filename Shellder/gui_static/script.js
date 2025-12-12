@@ -2643,6 +2643,7 @@ function updateContainerDetailList(containers) {
                         <button class="btn btn-sm btn-danger" onclick="containerAction('${c.name}', 'stop')" title="Stop">⏹️</button>
                     ` : `
                         <button class="btn btn-sm btn-success" onclick="containerAction('${c.name}', 'start')" title="Start">▶️</button>
+                        <button class="btn btn-sm btn-danger" onclick="removeContainer('${c.name}')" title="Remove Container">🗑️</button>
                     `}
                     <button class="btn btn-sm" onclick="viewContainerLogs('${c.name}')" title="View Logs">📋</button>
                     <button class="btn btn-sm" onclick="checkContainerUpdate('${c.name}')" title="Check for Updates">⬆️</button>
@@ -2983,6 +2984,7 @@ async function refreshContainerStatus(containerName, expectedState) {
                         } else {
                             actionsEl.innerHTML = `
                                 <button class="btn btn-sm btn-success" onclick="containerAction('${containerName}', 'start')" title="Start">▶️</button>
+                                <button class="btn btn-sm btn-danger" onclick="removeContainer('${containerName}')" title="Remove Container">🗑️</button>
                                 <button class="btn btn-sm" onclick="viewContainerLogs('${containerName}')" title="View Logs">📋</button>
                                 <button class="btn btn-sm" onclick="checkContainerUpdate('${containerName}')" title="Check for Updates">⬆️</button>
                             `;
@@ -3032,6 +3034,57 @@ async function viewContainerLogs(name) {
     } catch (error) {
         document.getElementById('modalBody').innerHTML = 
             '<div class="text-danger">Failed to load logs</div>';
+    }
+}
+
+async function removeContainer(name) {
+    // Confirm removal
+    const confirmed = confirm(
+        `⚠️ Remove Container: ${name}\n\n` +
+        `This will permanently delete the container.\n` +
+        `The container must be stopped first.\n\n` +
+        `This action cannot be undone.\n\n` +
+        `Continue?`
+    );
+    
+    if (!confirmed) {
+        return;
+    }
+    
+    showToast(`Removing container: ${name}...`, 'info');
+    
+    try {
+        const response = await fetch(`/api/containers/${name}/remove`, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json'
+            }
+        });
+        
+        const result = await response.json();
+        
+        if (!response.ok || !result.success) {
+            const errorMsg = result.error || result.message || `HTTP ${response.status}: ${response.statusText}`;
+            showToast(`❌ Failed to remove ${name}: ${errorMsg}`, 'error', 8000);
+            return;
+        }
+        
+        showToast(`✓ Container ${name} removed successfully`, 'success', 5000);
+        
+        // Refresh container list
+        if (currentPage === 'containers') {
+            loadContainerDetails();
+        }
+        
+        // Also refresh dashboard if visible
+        if (currentPage === 'dashboard' || currentPage === 'overview') {
+            refreshData();
+        }
+        
+    } catch (error) {
+        const errorMsg = error.message || 'Network error or timeout';
+        showToast(`❌ Error removing container ${name}: ${errorMsg}`, 'error', 8000);
+        console.error('Error removing container:', error);
     }
 }
 

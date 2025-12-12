@@ -9312,6 +9312,47 @@ def api_container_restart(name):
     except Exception as e:
         return jsonify({'success': False, 'error': str(e)}), 500
 
+@app.route('/api/containers/<name>/remove', methods=['POST'])
+def api_container_remove(name):
+    """Remove a stopped container"""
+    if LOCAL_MODE or docker_client is None:
+        return jsonify({'error': 'Docker not available'}), 503
+    
+    try:
+        # Check if container exists and is stopped
+        container = docker_client.containers.get(name)
+        container_status = container.status.lower()
+        
+        # Only allow removal of stopped containers
+        if 'running' in container_status or 'up' in container_status:
+            return jsonify({
+                'success': False,
+                'error': f'Container {name} is running. Stop it first before removing.',
+                'container': name
+            }), 400
+        
+        # Remove the container
+        container.remove()
+        
+        return jsonify({
+            'success': True,
+            'container': name,
+            'message': f'{name} removed successfully'
+        })
+        
+    except docker.errors.NotFound:
+        return jsonify({
+            'success': False,
+            'error': f'Container {name} not found',
+            'container': name
+        }), 404
+    except Exception as e:
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'container': name
+        }), 500
+
 @app.route('/api/container/<name>/logs')
 def api_container_logs(name):
     """Get logs for a specific container"""
