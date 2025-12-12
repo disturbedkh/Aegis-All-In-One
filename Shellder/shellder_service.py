@@ -10670,9 +10670,44 @@ def api_xilriws_proxy_reset_all():
 # VICTORIAMETRICS / GRAFANA METRICS ENDPOINTS
 # =============================================================================
 
-VICTORIAMETRICS_URL = 'http://victoriametrics:8428'
-GRAFANA_URL = 'http://grafana:3000'
-GRAFANA_EXTERNAL_PORT = 6006  # External port from docker-compose
+# Internal Docker network URLs (for container-to-container communication)
+VICTORIAMETRICS_INTERNAL_URL = 'http://victoriametrics:8428'
+GRAFANA_INTERNAL_URL = 'http://grafana:3000'
+
+# External URLs (for host access - note: VM not exposed by default)
+GRAFANA_EXTERNAL_PORT = 6006
+GRAFANA_URL = f'http://localhost:{GRAFANA_EXTERNAL_PORT}'
+
+# VictoriaMetrics - we'll query via docker exec since it's not exposed to host
+VICTORIAMETRICS_URL = VICTORIAMETRICS_INTERNAL_URL  # Used for docker exec queries
+
+def query_victoriametrics(query, timeout=10):
+    """Query VictoriaMetrics via docker exec (since port not exposed to host)"""
+    try:
+        # Use curl inside the container to query the API
+        cmd = [
+            'docker', 'exec', 'victoriametrics',
+            'wget', '-q', '-O', '-',
+            f'http://localhost:8428/api/v1/query?query={requests.utils.quote(query)}'
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0 and result.stdout:
+            return json.loads(result.stdout)
+        return None
+    except:
+        return None
+
+def query_victoriametrics_range(query, start, end, step, timeout=30):
+    """Query VictoriaMetrics range API via docker exec"""
+    try:
+        url = f'http://localhost:8428/api/v1/query_range?query={requests.utils.quote(query)}&start={start}&end={end}&step={step}'
+        cmd = ['docker', 'exec', 'victoriametrics', 'wget', '-q', '-O', '-', url]
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout)
+        if result.returncode == 0 and result.stdout:
+            return json.loads(result.stdout)
+        return None
+    except:
+        return None
 
 
 @app.route('/api/metrics/diagnose')
@@ -10841,55 +10876,70 @@ def api_metrics_fix_prometheus():
 def api_metrics_status():
     """Check if VictoriaMetrics and Grafana are running"""
     result = {
-        'victoriametrics': {'running': False, 'url': VICTORIAMETRICS_URL},
+        'victoriametrics': {'running': False, 'url': 'http://victoriametrics:8428 (internal)'},
         'grafana': {'running': False, 'url': f'http://localhost:{GRAFANA_EXTERNAL_PORT}'}
     }
     
-    # Check VictoriaMetrics
+    # Check container status via Docker (more reliable than HTTP from host)
     try:
-        resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/status/buildinfo', timeout=3)
-        if resp.status_code == 200:
+        ps_result = subprocess.run(
+            ['docker', 'ps', '--format', '{{.Names}}'],
+            capture_output=True, text=True, timeout=5
+        )
+        running_containers = ps_result.stdout.strip().split('\n') if ps_result.returncode == 0 else []
+        
+        # VictoriaMetrics container check
+        if 'victoriametrics' in running_containers:
             result['victoriametrics']['running'] = True
-            result['victoriametrics']['version'] = resp.json().get('data', {}).get('version', 'unknown')
-    except:
-        pass
-    
-    # Check Grafana
-    try:
-        resp = requests.get(f'{GRAFANA_URL}/api/health', timeout=3)
-        if resp.status_code == 200:
+            # Try to get version via docker exec
+            try:
+                ver_result = subprocess.run(
+                    ['docker', 'exec', 'victoriametrics', 'cat', '/etc/victoria-metrics-version'],
+                    capture_output=True, text=True, timeout=5
+                )
+                if ver_result.returncode == 0:
+                    result['victoriametrics']['version'] = ver_result.stdout.strip()
+            except:
+                result['victoriametrics']['version'] = 'running'
+        
+        # Grafana container check
+        if 'grafana' in running_containers:
             result['grafana']['running'] = True
-            data = resp.json()
-            result['grafana']['version'] = data.get('version', 'unknown')
-    except:
-        pass
+            # Also verify HTTP access since it's exposed
+            try:
+                resp = requests.get(f'{GRAFANA_URL}/api/health', timeout=3)
+                if resp.status_code == 200:
+                    data = resp.json()
+                    result['grafana']['version'] = data.get('version', 'unknown')
+                    result['grafana']['accessible'] = True
+            except:
+                result['grafana']['accessible'] = False
+                result['grafana']['note'] = 'Container running but HTTP not responding yet'
+    except Exception as e:
+        result['error'] = str(e)
     
     return jsonify(result)
 
 
 @app.route('/api/metrics/query')
 def api_metrics_query():
-    """Proxy to VictoriaMetrics instant query API"""
+    """Proxy to VictoriaMetrics instant query API via docker exec"""
     try:
         query = request.args.get('query')
         if not query:
             return jsonify({'error': 'Missing query parameter'}), 400
         
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': query},
-            timeout=10
-        )
-        return jsonify(resp.json())
-    except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'VictoriaMetrics not reachable', 'status': 'error'}), 503
+        result = query_victoriametrics(query)
+        if result:
+            return jsonify(result)
+        return jsonify({'error': 'VictoriaMetrics not reachable or query failed', 'status': 'error'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
 
 @app.route('/api/metrics/query_range')
 def api_metrics_query_range():
-    """Proxy to VictoriaMetrics range query API"""
+    """Proxy to VictoriaMetrics range query API via docker exec"""
     try:
         query = request.args.get('query')
         start = request.args.get('start', 'now-1h')
@@ -10899,14 +10949,10 @@ def api_metrics_query_range():
         if not query:
             return jsonify({'error': 'Missing query parameter'}), 400
         
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query_range',
-            params={'query': query, 'start': start, 'end': end, 'step': step},
-            timeout=30
-        )
-        return jsonify(resp.json())
-    except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'VictoriaMetrics not reachable', 'status': 'error'}), 503
+        result = query_victoriametrics_range(query, start, end, step)
+        if result:
+            return jsonify(result)
+        return jsonify({'error': 'VictoriaMetrics not reachable or query failed', 'status': 'error'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -10923,33 +10969,19 @@ def api_metrics_workers():
         }
         
         # Get active workers
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum(rotom_workers_active)'},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('data', {}).get('result'):
-                result['active'] = int(float(data['data']['result'][0]['value'][1]))
+        data = query_victoriametrics('sum(rotom_workers_active)')
+        if data and data.get('data', {}).get('result'):
+            result['active'] = int(float(data['data']['result'][0]['value'][1]))
         
         # Get total workers
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum(rotom_workers_total)'},
-            timeout=5
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('data', {}).get('result'):
-                result['total'] = int(float(data['data']['result'][0]['value'][1]))
+        data = query_victoriametrics('sum(rotom_workers_total)')
+        if data and data.get('data', {}).get('result'):
+            result['total'] = int(float(data['data']['result'][0]['value'][1]))
         
         result['inactive'] = result['total'] - result['active']
         result['utilization'] = round((result['active'] / result['total'] * 100) if result['total'] > 0 else 0, 1)
         
         return jsonify(result)
-    except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'VictoriaMetrics not reachable'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -10967,13 +10999,8 @@ def api_metrics_rpc():
         }
         
         # Get RPC counts by status (last 5 minutes)
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum by (status) (increase(dragonite_rpc_response[5m]))'},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            data = resp.json()
+        data = query_victoriametrics('sum by (status) (increase(dragonite_rpc_response[5m]))')
+        if data:
             for item in data.get('data', {}).get('result', []):
                 status = item['metric'].get('status', 'Unknown')
                 count = int(float(item['value'][1]))
@@ -10987,8 +11014,6 @@ def api_metrics_rpc():
         result['success_rate'] = round((result['success'] / result['total'] * 100) if result['total'] > 0 else 0, 1)
         
         return jsonify(result)
-    except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'VictoriaMetrics not reachable'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -11005,13 +11030,8 @@ def api_metrics_accounts():
         }
         
         # Get account status counts (last 5 minutes)
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum by (status) (increase(dragonite_account_status[5m]))'},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            data = resp.json()
+        data = query_victoriametrics('sum by (status) (increase(dragonite_account_status[5m]))')
+        if data:
             for item in data.get('data', {}).get('result', []):
                 status = item['metric'].get('status', 'Unknown')
                 count = int(float(item['value'][1]))
@@ -11023,8 +11043,6 @@ def api_metrics_accounts():
                     result['problematic'] += count
         
         return jsonify(result)
-    except requests.exceptions.ConnectionError:
-        return jsonify({'error': 'VictoriaMetrics not reachable'}), 503
     except Exception as e:
         return jsonify({'error': str(e)}), 500
 
@@ -11039,28 +11057,16 @@ def api_metrics_pokemon():
         }
         
         # Get IV scanning rate
-        resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum(increase(golbat_pokemon_count_iv[5m]))'},
-            timeout=10
-        )
-        if resp.status_code == 200:
-            data = resp.json()
-            if data.get('data', {}).get('result'):
-                result['pokemon_seen_5m'] = int(float(data['data']['result'][0]['value'][1]))
+        data = query_victoriametrics('sum(increase(golbat_pokemon_count_iv[5m]))')
+        if data and data.get('data', {}).get('result'):
+            result['pokemon_seen_5m'] = int(float(data['data']['result'][0]['value'][1]))
         
         # Calculate IV rate per worker
-        workers_resp = requests.get(
-            f'{VICTORIAMETRICS_URL}/api/v1/query',
-            params={'query': 'sum(rotom_workers_active)'},
-            timeout=5
-        )
-        if workers_resp.status_code == 200:
-            data = workers_resp.json()
-            if data.get('data', {}).get('result'):
-                active_workers = int(float(data['data']['result'][0]['value'][1]))
-                if active_workers > 0:
-                    result['iv_rate'] = round(result['pokemon_seen_5m'] / active_workers, 1)
+        workers_data = query_victoriametrics('sum(rotom_workers_active)')
+        if workers_data and workers_data.get('data', {}).get('result'):
+            active_workers = int(float(workers_data['data']['result'][0]['value'][1]))
+            if active_workers > 0:
+                result['iv_rate'] = round(result['pokemon_seen_5m'] / active_workers, 1)
         
         return jsonify(result)
     except requests.exceptions.ConnectionError:
@@ -11100,19 +11106,17 @@ def api_metrics_summary():
         
         # Workers
         try:
-            resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/query', 
-                              params={'query': 'sum(rotom_workers_active)'}, timeout=3)
-            if resp.status_code == 200 and resp.json().get('data', {}).get('result'):
-                summary['workers']['active'] = int(float(resp.json()['data']['result'][0]['value'][1]))
+            data = query_victoriametrics('sum(rotom_workers_active)')
+            if data and data.get('data', {}).get('result'):
+                summary['workers']['active'] = int(float(data['data']['result'][0]['value'][1]))
                 summary['available'] = True
         except:
             pass
         
         try:
-            resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/query',
-                              params={'query': 'sum(rotom_workers_total)'}, timeout=3)
-            if resp.status_code == 200 and resp.json().get('data', {}).get('result'):
-                summary['workers']['total'] = int(float(resp.json()['data']['result'][0]['value'][1]))
+            data = query_victoriametrics('sum(rotom_workers_total)')
+            if data and data.get('data', {}).get('result'):
+                summary['workers']['total'] = int(float(data['data']['result'][0]['value'][1]))
         except:
             pass
         
@@ -11122,28 +11126,24 @@ def api_metrics_summary():
         
         # RPC Success Rate
         try:
-            resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/query',
-                              params={'query': 'sum(increase(dragonite_rpc_response{status="Success"}[5m])) / sum(increase(dragonite_rpc_response[5m])) * 100'},
-                              timeout=5)
-            if resp.status_code == 200 and resp.json().get('data', {}).get('result'):
-                summary['rpc']['success_rate'] = round(float(resp.json()['data']['result'][0]['value'][1]), 1)
+            data = query_victoriametrics('sum(increase(dragonite_rpc_response{status="Success"}[5m])) / sum(increase(dragonite_rpc_response[5m])) * 100')
+            if data and data.get('data', {}).get('result'):
+                summary['rpc']['success_rate'] = round(float(data['data']['result'][0]['value'][1]), 1)
         except:
             pass
         
         try:
-            resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/query',
-                              params={'query': 'sum(increase(dragonite_rpc_response[5m]))'}, timeout=3)
-            if resp.status_code == 200 and resp.json().get('data', {}).get('result'):
-                summary['rpc']['total_5m'] = int(float(resp.json()['data']['result'][0]['value'][1]))
+            data = query_victoriametrics('sum(increase(dragonite_rpc_response[5m]))')
+            if data and data.get('data', {}).get('result'):
+                summary['rpc']['total_5m'] = int(float(data['data']['result'][0]['value'][1]))
         except:
             pass
         
         # Pokemon IV rate
         try:
-            resp = requests.get(f'{VICTORIAMETRICS_URL}/api/v1/query',
-                              params={'query': 'sum(increase(golbat_pokemon_count_iv[5m]))'}, timeout=3)
-            if resp.status_code == 200 and resp.json().get('data', {}).get('result'):
-                summary['pokemon']['count_5m'] = int(float(resp.json()['data']['result'][0]['value'][1]))
+            data = query_victoriametrics('sum(increase(golbat_pokemon_count_iv[5m]))')
+            if data and data.get('data', {}).get('result'):
+                summary['pokemon']['count_5m'] = int(float(data['data']['result'][0]['value'][1]))
                 if summary['workers']['active'] > 0:
                     summary['pokemon']['iv_rate'] = round(
                         summary['pokemon']['count_5m'] / summary['workers']['active'], 1)
