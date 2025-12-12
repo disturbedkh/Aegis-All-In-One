@@ -12470,20 +12470,34 @@ def api_wizard_status():
     except:
         pass
     
-    # Check if databases are created
+    # Check if databases are created (need root password from .env)
     databases_created = False
     if db_container_running:
-        try:
-            result = subprocess.run(
-                ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e', 'SHOW DATABASES'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                db_accessible = True
-                output = result.stdout
-                databases_created = all(db in output for db in ['dragonite', 'golbat', 'reactmap'])
-        except:
-            pass
+        # Get root password from .env
+        root_password = ''
+        env_file = os.path.join(aegis_root, '.env')
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, 'r') as f:
+                    for line in f:
+                        if line.startswith('MYSQL_ROOT_PASSWORD='):
+                            root_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                            break
+            except:
+                pass
+        
+        # Try with password first, then without (for fresh installs)
+        for password_arg in ([f'-p{root_password}'] if root_password else [], []):
+            try:
+                cmd = ['docker', 'exec', 'database', 'mysql', '-u', 'root'] + password_arg + ['-e', 'SHOW DATABASES']
+                result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+                if result.returncode == 0:
+                    db_accessible = True
+                    output = result.stdout
+                    databases_created = all(db in output for db in ['dragonite', 'golbat', 'reactmap'])
+                    break
+            except:
+                pass
     
     status['steps']['mariadb_setup'] = {
         'name': 'MariaDB Setup',
