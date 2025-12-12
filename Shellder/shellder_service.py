@@ -12308,22 +12308,37 @@ def api_wizard_status():
         'ready_to_start': False
     }
     
-    # Step 1: Docker
+    # Step 1: Docker & Docker Compose
     docker_installed = shutil.which('docker') is not None
-    compose_installed = shutil.which('docker') is not None  # docker compose is now built-in
     docker_running = False
+    compose_available = False
+    
     try:
+        # Check if Docker daemon is running
         result = subprocess.run(['docker', 'info'], capture_output=True, timeout=5)
         docker_running = result.returncode == 0
     except:
         pass
     
+    try:
+        # Check if docker compose is available (modern integrated version)
+        result = subprocess.run(['docker', 'compose', 'version'], capture_output=True, timeout=5)
+        compose_available = result.returncode == 0
+    except:
+        pass
+    
+    # Docker is complete when both docker AND compose are available and running
+    docker_complete = docker_installed and docker_running and compose_available
+    
     status['steps']['docker'] = {
         'name': 'Docker & Compose',
         'description': 'Container runtime environment',
-        'installed': docker_installed and compose_installed,
+        'docker_installed': docker_installed,
+        'docker_running': docker_running,
+        'compose_available': compose_available,
+        'installed': docker_installed and compose_available,
         'configured': docker_running,
-        'complete': docker_installed and docker_running
+        'complete': docker_complete
     }
     
     # Step 2: Docker Logging
@@ -12927,38 +12942,50 @@ innodb_flush_method = O_DIRECT
 
 @app.route('/api/wizard/copy-configs', methods=['POST'])
 def api_wizard_copy_configs():
-    """Copy default config files from examples"""
+    """Copy default config files from templates"""
     aegis_root = str(AEGIS_ROOT)
     
     copied = []
+    skipped = []
     errors = []
     
     # Config files to copy (source -> dest)
+    # Using actual -default naming convention used in this repo
     configs = [
-        ('unown/dragonite_config.toml.example', 'unown/dragonite_config.toml'),
-        ('unown/golbat_config.toml.example', 'unown/golbat_config.toml'),
-        ('unown/rotom_config.json.example', 'unown/rotom_config.json'),
-        ('reactmap/local.json.example', 'reactmap/local.json'),
-        ('fletchling.toml.example', 'fletchling.toml'),
-        ('.env.example', '.env'),
+        ('unown/dragonite_config-default.toml', 'unown/dragonite_config.toml'),
+        ('unown/golbat_config-default.toml', 'unown/golbat_config.toml'),
+        ('unown/rotom_config-default.json', 'unown/rotom_config.json'),
+        ('reactmap/local-default.json', 'reactmap/local.json'),
+        ('env-default', '.env'),
     ]
     
     for src, dest in configs:
         src_path = os.path.join(aegis_root, src)
         dest_path = os.path.join(aegis_root, dest)
         
-        if os.path.exists(src_path) and not os.path.exists(dest_path):
-            try:
-                os.makedirs(os.path.dirname(dest_path), exist_ok=True)
-                shutil.copy2(src_path, dest_path)
-                copied.append(dest)
-            except Exception as e:
-                errors.append({'file': dest, 'error': str(e)})
+        if not os.path.exists(src_path):
+            errors.append({'file': dest, 'error': f'Source template not found: {src}'})
+            continue
+            
+        if os.path.exists(dest_path):
+            skipped.append({'file': dest, 'reason': 'Already exists'})
+            continue
+            
+        try:
+            os.makedirs(os.path.dirname(dest_path) if os.path.dirname(dest_path) else '.', exist_ok=True)
+            shutil.copy2(src_path, dest_path)
+            # Fix file ownership on Unix
+            fix_file_ownership(dest_path)
+            copied.append(dest)
+        except Exception as e:
+            errors.append({'file': dest, 'error': str(e)})
     
     return jsonify({
         'success': len(errors) == 0,
         'copied': copied,
-        'errors': errors
+        'skipped': skipped,
+        'errors': errors,
+        'message': f'Copied {len(copied)} files, skipped {len(skipped)} existing'
     })
 
 @app.route('/api/wizard/start-stack', methods=['POST'])

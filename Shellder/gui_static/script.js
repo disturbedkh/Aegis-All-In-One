@@ -12706,9 +12706,23 @@ function updateWizardUI() {
     if (progressFill) progressFill.style.width = `${wizardStatus.overall_progress}%`;
     if (progressText) progressText.textContent = `${wizardStatus.overall_progress}% Complete`;
     
-    // Update Docker step
-    updateStepStatus('docker', wizardStatus.steps.docker?.complete, 
-        wizardStatus.steps.docker?.complete ? 'Docker is running' : 'Docker not installed or not running');
+    // Update Docker step - show detailed status
+    const dockerStep = wizardStatus.steps.docker;
+    let dockerDetails = '';
+    if (dockerStep) {
+        if (dockerStep.complete) {
+            dockerDetails = 'Docker & Compose ready ✓';
+        } else if (!dockerStep.docker_installed) {
+            dockerDetails = 'Docker not installed';
+        } else if (!dockerStep.docker_running) {
+            dockerDetails = 'Docker installed but not running';
+        } else if (!dockerStep.compose_available) {
+            dockerDetails = 'Docker running, Compose not found';
+        } else {
+            dockerDetails = 'Docker not ready';
+        }
+    }
+    updateStepStatus('docker', dockerStep?.complete, dockerDetails);
     
     // Update ports step - preserve check result if already checked
     if (portCheckResult !== null) {
@@ -13109,29 +13123,48 @@ async function detectResourcesStep() {
 }
 
 async function copyConfigsStep() {
-    appendWizardOutput('Copying configuration files from examples...\\n');
+    appendWizardOutput('Copying configuration files from templates...\\n');
+    appendWizardOutput('\\nLooking for -default template files to copy...\\n');
     
     const response = await fetch('/api/wizard/copy-configs', { method: 'POST' });
     if (!response.ok) throw new Error('Failed to copy configs');
     const data = await response.json();
     
-    if (data.copied.length > 0) {
+    if (data.copied && data.copied.length > 0) {
         appendWizardOutput('\\n✅ Copied files:\\n', 'success');
         for (const file of data.copied) {
-            appendWizardOutput(`  • ${file}\\n`);
+            appendWizardOutput(`  ✓ ${file}\\n`);
         }
-    } else {
-        appendWizardOutput('\\nℹ️ All config files already exist.\\n', 'info');
     }
     
-    if (data.errors.length > 0) {
+    if (data.skipped && data.skipped.length > 0) {
+        appendWizardOutput('\\nℹ️ Skipped (already exist):\\n', 'info');
+        for (const item of data.skipped) {
+            appendWizardOutput(`  → ${item.file}\\n`);
+        }
+    }
+    
+    if (data.errors && data.errors.length > 0) {
         appendWizardOutput('\\n⚠️ Errors:\\n', 'warning');
         for (const err of data.errors) {
-            appendWizardOutput(`  • ${err.file}: ${err.error}\\n`);
+            appendWizardOutput(`  ✗ ${err.file}: ${err.error}\\n`);
         }
     }
     
-    updateStepStatus('configs', true, 'Config files ready');
+    // Summary
+    const copiedCount = data.copied?.length || 0;
+    const skippedCount = data.skipped?.length || 0;
+    const errorCount = data.errors?.length || 0;
+    
+    if (copiedCount === 0 && errorCount === 0) {
+        appendWizardOutput('\\n✅ All configuration files are already in place!\\n', 'success');
+    } else if (errorCount > 0) {
+        appendWizardOutput(`\\n⚠️ Completed with ${errorCount} error(s)\\n`, 'warning');
+    } else {
+        appendWizardOutput(`\\n✅ Successfully copied ${copiedCount} file(s)\\n`, 'success');
+    }
+    
+    updateStepStatus('configs', errorCount === 0, errorCount === 0 ? 'Config files ready' : 'Some errors occurred');
 }
 
 async function generatePasswordsStep() {
@@ -13608,18 +13641,18 @@ function showMariaDBSetupPanel(status, credentials) {
                     </div>
                     
                     <div class="config-field-item">
-                        <label class="field-label">Application Username</label>
-                        <div class="field-description">Username for Aegis services (Dragonite, Golbat, etc.)</div>
+                        <label class="field-label">Non-root Username</label>
+                        <div class="field-description">Application user for Aegis services (Dragonite, Golbat, etc.) - NOT the root account</div>
                         <input type="text" id="mariadb-db-user" class="form-input" 
                                value="${credentials.db_user || 'dbuser'}" placeholder="dbuser">
                     </div>
                     
                     <div class="config-field-item">
-                        <label class="field-label">Application Password</label>
-                        <div class="field-description">From password setup step (MYSQL_PASSWORD)</div>
+                        <label class="field-label">Non-root Password</label>
+                        <div class="field-description">Auto-imported from MYSQL_PASSWORD in Passwords step</div>
                         <input type="text" id="mariadb-db-password" class="form-input" 
                                value="${credentials.db_password || ''}" 
-                               placeholder="Set in Passwords step">
+                               placeholder="Set in Passwords step first">
                     </div>
                     
                     <h5 style="margin: 15px 0 10px 0;">Databases to Create</h5>
@@ -14645,3 +14678,4 @@ Add to Cursor settings (mcpServers):
         showToast('Failed to copy instructions', 'error');
     });
 }
+
