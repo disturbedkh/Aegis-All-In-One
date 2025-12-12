@@ -8327,6 +8327,304 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 });
 
 // =============================================================================
+// MULTI-SERVICE NGINX SETUP
+// =============================================================================
+
+let runningContainers = [];
+
+// Load running containers for nginx setup
+async function loadRunningContainers() {
+    const servicesList = document.getElementById('servicesList');
+    if (!servicesList) return;
+    
+    servicesList.innerHTML = '<div class="loading">Loading running containers...</div>';
+    
+    try {
+        const result = await fetchAPI('/api/nginx/running-containers');
+        runningContainers = result.containers || [];
+        
+        if (runningContainers.length === 0) {
+            servicesList.innerHTML = '<div class="text-muted">No running containers found. Start your stack services first.</div>';
+            return;
+        }
+        
+        renderServicesList();
+    } catch (e) {
+        servicesList.innerHTML = `<div class="text-danger">Error loading containers: ${e.message}</div>`;
+    }
+}
+
+// Render the services configuration list
+function renderServicesList() {
+    const servicesList = document.getElementById('servicesList');
+    if (!servicesList) return;
+    
+    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
+    const baseDomain = document.getElementById('setupBaseDomain')?.value || 'example.com';
+    
+    let html = '<div class="services-config-list">';
+    
+    runningContainers.forEach(container => {
+        const serviceId = container.id;
+        const isSubdomain = structure === 'subdomain';
+        const defaultPath = isSubdomain ? `${serviceId}.${baseDomain}` : `/${serviceId}/`;
+        
+        html += `
+            <div class="service-config-item">
+                <div class="service-config-header">
+                    <label class="service-checkbox">
+                        <input type="checkbox" 
+                               id="service_${serviceId}" 
+                               checked 
+                               onchange="updateServicePreview('${serviceId}')">
+                        <span class="service-name">${container.name}</span>
+                    </label>
+                    <span class="service-desc">${container.description} (Port ${container.port})</span>
+                </div>
+                <div class="service-config-details" id="details_${serviceId}">
+                    <div class="form-group-inline" style="margin-bottom: 12px;">
+                        <label>
+                            <input type="checkbox" 
+                                   id="usebase_${serviceId}" 
+                                   onchange="updateServicePreview('${serviceId}')">
+                            <span style="margin-left: 6px;">Use base domain (${baseDomain})</span>
+                        </label>
+                        <small class="text-muted">
+                            ${isSubdomain 
+                                ? 'Check to use base domain, or enter custom subdomain below' 
+                                : 'Check to use root path (/), or enter custom path below'}
+                        </small>
+                    </div>
+                    <div class="form-group-inline">
+                        <label>${isSubdomain ? 'Custom Subdomain' : 'Custom Path'} (optional):</label>
+                        <input type="text" 
+                               id="path_${serviceId}" 
+                               class="form-input-sm" 
+                               placeholder="${defaultPath}"
+                               oninput="updateServicePreview('${serviceId}')"
+                               disabled>
+                        <small class="text-muted">
+                            ${isSubdomain 
+                                ? `Enter custom subdomain (e.g., "map" for map.${baseDomain})` 
+                                : `Enter custom path (e.g., "dashboard" for /dashboard/)`}
+                        </small>
+                    </div>
+                    <div class="service-preview" id="preview_${serviceId}">
+                        <small class="text-muted">Preview: <code>${isSubdomain ? `https://${serviceId}.${baseDomain}` : `https://${baseDomain}/${serviceId}/`}</code></small>
+                    </div>
+                </div>
+            </div>
+        `;
+    });
+    
+    html += '</div>';
+    servicesList.innerHTML = html;
+}
+
+// Update service preview when input changes
+function updateServicePreview(serviceId) {
+    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
+    const baseDomain = document.getElementById('setupBaseDomain')?.value || 'example.com';
+    const customPath = document.getElementById(`path_${serviceId}`)?.value.trim() || '';
+    const useBase = document.getElementById(`usebase_${serviceId}`)?.checked || false;
+    const previewEl = document.getElementById(`preview_${serviceId}`);
+    const detailsEl = document.getElementById(`details_${serviceId}`);
+    const checkbox = document.getElementById(`service_${serviceId}`);
+    const pathInput = document.getElementById(`path_${serviceId}`);
+    
+    if (!previewEl || !detailsEl || !checkbox) return;
+    
+    // Show/hide details based on checkbox state
+    if (checkbox.checked) {
+        detailsEl.style.display = 'block';
+    } else {
+        detailsEl.style.display = 'none';
+        return;
+    }
+    
+    // Enable/disable path input based on useBase checkbox
+    if (pathInput) {
+        pathInput.disabled = useBase;
+        if (useBase) {
+            pathInput.value = '';
+        }
+    }
+    
+    let preview = '';
+    if (useBase) {
+        // Use base domain
+        preview = `https://${baseDomain}${structure === 'directory' ? '/' : ''}`;
+    } else if (structure === 'subdomain') {
+        if (customPath) {
+            preview = `https://${customPath}`;
+        } else {
+            preview = `https://${serviceId}.${baseDomain}`;
+        }
+    } else {
+        if (customPath) {
+            const cleanPath = customPath.startsWith('/') ? customPath : `/${customPath}`;
+            if (!cleanPath.endsWith('/')) {
+                preview = `https://${baseDomain}${cleanPath}/`;
+            } else {
+                preview = `https://${baseDomain}${cleanPath}`;
+            }
+        } else {
+            preview = `https://${baseDomain}/${serviceId}/`;
+        }
+    }
+    
+    previewEl.innerHTML = `<small class="text-muted">Preview: <code>${preview}</code></small>`;
+}
+
+// Update UI when structure changes
+function updateServiceConfigUI() {
+    renderServicesList();
+}
+
+// Run multi-service nginx setup
+async function runMultiServiceNginxSetup() {
+    const baseDomain = document.getElementById('setupBaseDomain')?.value.trim();
+    const email = document.getElementById('setupEmail')?.value.trim();
+    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
+    
+    if (!baseDomain) {
+        showToast('Base domain is required', 'warning');
+        return;
+    }
+    
+    if (!email) {
+        if (!confirm('No email provided. SSL certificates will not be configured.\n\nContinue without SSL?')) {
+            return;
+        }
+    }
+    
+    // Collect service configurations
+    const services = [];
+    runningContainers.forEach(container => {
+        const serviceId = container.id;
+        const checkbox = document.getElementById(`service_${serviceId}`);
+        const pathInput = document.getElementById(`path_${serviceId}`);
+        const useBase = document.getElementById(`usebase_${serviceId}`)?.checked || false;
+        
+        if (checkbox && checkbox.checked) {
+            services.push({
+                id: serviceId,
+                port: container.port,
+                domain: useBase ? baseDomain : (pathInput?.value.trim() || ''),
+                enabled: true,
+                websocket: container.websocket || false,
+                use_base: useBase
+            });
+        }
+    });
+    
+    if (services.length === 0) {
+        showToast('Please select at least one service to configure', 'warning');
+        return;
+    }
+    
+    const outputEl = document.getElementById('nginxSetupOutput');
+    const preEl = outputEl.querySelector('pre');
+    outputEl.style.display = 'block';
+    preEl.textContent = 'Setting up nginx for multiple services...\n\n';
+    
+    try {
+        const result = await fetchAPI('/api/nginx/setup', {
+            method: 'POST',
+            body: JSON.stringify({
+                base_domain: baseDomain,
+                email: email,
+                structure: structure,
+                services: services
+            }),
+            force: true
+        });
+        
+        if (result.success) {
+            let output = `✓ Nginx setup completed successfully!\n\n`;
+            output += `Base Domain: ${baseDomain}\n`;
+            output += `Structure: ${structure === 'subdomain' ? 'Subdomain' : 'Directory'}\n`;
+            output += `Services Configured: ${result.results?.length || 0}\n\n`;
+            
+            if (result.results) {
+                output += 'Service Results:\n';
+                result.results.forEach(r => {
+                    if (r.success) {
+                        output += `  ✓ ${r.service}: ${r.domain} (Port ${r.port})\n`;
+                    } else {
+                        output += `  ✗ ${r.service}: ${r.error || 'Failed'}\n`;
+                    }
+                });
+            }
+            
+            if (result.ssl) {
+                output += `\nSSL Configuration: ${result.ssl_success ? '✓ Success' : '⚠ Failed'}\n`;
+                if (result.ssl_output) {
+                    output += `\nSSL Output:\n${result.ssl_output}\n`;
+                }
+            }
+            
+            preEl.textContent = output;
+            showToast('Nginx setup completed successfully!', 'success');
+            loadNginxSites();
+        } else {
+            let output = `✗ Setup failed: ${result.error}\n\n`;
+            if (result.results) {
+                output += 'Partial Results:\n';
+                result.results.forEach(r => {
+                    if (r.success) {
+                        output += `  ✓ ${r.service}: ${r.domain}\n`;
+                    } else {
+                        output += `  ✗ ${r.service}: ${r.error || 'Failed'}\n`;
+                    }
+                });
+            }
+            if (result.ssl_output) {
+                output += `\nSSL Output:\n${result.ssl_output}\n`;
+            }
+            preEl.textContent = output;
+            showToast('Setup completed with errors', 'warning');
+        }
+    } catch (e) {
+        preEl.textContent = `Error: ${e.message}`;
+        showToast('Setup failed', 'error');
+    }
+}
+
+// Auto-load containers when Sites & Security tab is opened
+document.addEventListener('DOMContentLoaded', function() {
+    // Load containers when tab is shown
+    const sitesTab = document.querySelector('[data-tab="sites"]');
+    if (sitesTab) {
+        sitesTab.addEventListener('click', function() {
+            setTimeout(() => {
+                if (document.getElementById('servicesList')) {
+                    loadRunningContainers();
+                }
+            }, 100);
+        });
+    }
+    
+    // Also load on initial page load if tab is active
+    if (document.getElementById('servicesList')) {
+        loadRunningContainers();
+    }
+    
+    // Update previews when base domain changes
+    const baseDomainInput = document.getElementById('setupBaseDomain');
+    if (baseDomainInput) {
+        baseDomainInput.addEventListener('input', function() {
+            // Update all service previews
+            if (runningContainers.length > 0) {
+                runningContainers.forEach(container => {
+                    updateServicePreview(container.id);
+                });
+            }
+        });
+    }
+});
+
+// =============================================================================
 // SECURITY SERVICES
 // =============================================================================
 

@@ -11901,61 +11901,266 @@ def api_nginx_logs():
     except Exception as e:
         return jsonify({'logs': f'Error reading logs: {e}', 'lines': 0})
 
+@app.route('/api/nginx/running-containers')
+def api_nginx_running_containers():
+    """Get running containers with exposed ports for nginx setup"""
+    # Service name mapping to friendly names
+    service_names = {
+        'reactmap': {'name': 'ReactMap', 'desc': 'Map Frontend', 'websocket': False},
+        'admin': {'name': 'Dragonite Admin', 'desc': 'Scanner Admin UI', 'websocket': False},
+        'rotom': {'name': 'Rotom', 'desc': 'Device Manager', 'websocket': True},
+        'koji': {'name': 'Koji', 'desc': 'Geofence Editor', 'websocket': False},
+        'pma': {'name': 'phpMyAdmin', 'desc': 'Database Admin', 'websocket': False},
+        'grafana': {'name': 'Grafana', 'desc': 'Monitoring Dashboard', 'websocket': False},
+        'shellder': {'name': 'Shellder', 'desc': 'Control Panel', 'websocket': True},
+        'xilriws': {'name': 'Xilriws', 'desc': 'Auth Proxy', 'websocket': False},
+    }
+    
+    # Default port mapping (from docker-compose.yaml)
+    default_ports = {
+        'reactmap': 6001,
+        'admin': 6002,
+        'rotom': 6003,
+        'koji': 6004,
+        'pma': 6005,
+        'grafana': 6006,
+        'shellder': 5000,
+        'xilriws': 5090,
+    }
+    
+    containers = []
+    
+    try:
+        # Get running containers
+        if docker_client:
+            running = docker_client.containers.list(filters={'status': 'running'})
+            for container in running:
+                name = container.name
+                if name in service_names:
+                    # Get exposed ports from container
+                    ports = container.attrs.get('NetworkSettings', {}).get('Ports', {})
+                    exposed_port = None
+                    
+                    # Try to find the host port mapping
+                    for container_port, host_mappings in ports.items():
+                        if host_mappings:
+                            exposed_port = host_mappings[0].get('HostPort')
+                            break
+                    
+                    # Fallback to default port if not found
+                    if not exposed_port:
+                        exposed_port = default_ports.get(name)
+                    
+                    if exposed_port:
+                        containers.append({
+                            'id': name,
+                            'name': service_names[name]['name'],
+                            'description': service_names[name]['desc'],
+                            'port': int(exposed_port),
+                            'websocket': service_names[name]['websocket'],
+                            'status': 'running'
+                        })
+        else:
+            # Fallback: use docker ps
+            result = subprocess.run(
+                ['docker', 'ps', '--format', '{{.Names}}|{{.Ports}}'],
+                capture_output=True, text=True, timeout=10
+            )
+            if result.returncode == 0:
+                for line in result.stdout.strip().split('\n'):
+                    if '|' in line:
+                        name, ports_str = line.split('|', 1)
+                        if name in service_names:
+                            # Try to extract port from ports string
+                            port = default_ports.get(name)
+                            if port:
+                                containers.append({
+                                    'id': name,
+                                    'name': service_names[name]['name'],
+                                    'description': service_names[name]['desc'],
+                                    'port': port,
+                                    'websocket': service_names[name]['websocket'],
+                                    'status': 'running'
+                                })
+    except Exception as e:
+        return jsonify({'error': str(e), 'containers': []})
+    
+    return jsonify({'containers': containers})
+
 @app.route('/api/nginx/setup', methods=['POST'])
 def api_nginx_setup():
-    """Run nginx setup for a domain"""
+    """Run nginx setup for a domain - supports single or multiple services"""
     data = request.get_json()
-    domain = data.get('domain')
+    base_domain = data.get('base_domain')
     email = data.get('email')
-    service = data.get('service', 'reactmap:6001')
-    custom_port = data.get('custom_port')
+    structure = data.get('structure', 'subdomain')  # 'subdomain' or 'directory'
+    services = data.get('services', [])  # List of service configs
     
-    if not domain:
-        return jsonify({'success': False, 'error': 'Domain is required'})
+    # Legacy single service support
+    if not services:
+        domain = data.get('domain') or base_domain
+        service = data.get('service', 'reactmap:6001')
+        custom_port = data.get('custom_port')
+        
+        if not domain:
+            return jsonify({'success': False, 'error': 'Domain is required'})
+        
+        # Parse service
+        if service == 'custom' and custom_port:
+            port = custom_port
+        else:
+            port = service.split(':')[-1] if ':' in service else '6001'
+        
+        services = [{
+            'id': service.split(':')[0] if ':' in service else 'custom',
+            'port': port,
+            'domain': domain,
+            'enabled': True
+        }]
+        base_domain = domain
     
-    # Parse service
-    if service == 'custom' and custom_port:
-        port = custom_port
-    else:
-        port = service.split(':')[-1] if ':' in service else '6001'
+    if not base_domain:
+        return jsonify({'success': False, 'error': 'Base domain is required'})
     
-    # Generate nginx config
-    config = f"""server {{
-    listen 80;
-    server_name {domain};
+    if not services:
+        return jsonify({'success': False, 'error': 'At least one service must be configured'})
     
-    location / {{
-        proxy_pass http://localhost:{port};
+    results = []
+    ssl_domains = []
+    
+    try:
+        # Ensure nginx directories exist
+        subprocess.run(['sudo', 'mkdir', '-p', '/etc/nginx/sites-available'], timeout=5)
+        subprocess.run(['sudo', 'mkdir', '-p', '/etc/nginx/sites-enabled'], timeout=5)
+        
+        # Group services by server_name to handle base domain conflicts
+        configs_by_server = {}
+        
+        # Generate configs for each service
+        for service_config in services:
+            if not service_config.get('enabled', True):
+                continue
+            
+            service_id = service_config.get('id')
+            port = service_config.get('port')
+            custom_domain = service_config.get('domain', '')
+            websocket = service_config.get('websocket', False)
+            use_base = service_config.get('use_base', False)
+            
+            if not port:
+                continue
+            
+            # Determine domain/subdomain/path
+            if structure == 'subdomain':
+                if custom_domain:
+                    server_name = custom_domain
+                elif use_base:
+                    server_name = base_domain
+                else:
+                    server_name = f"{service_id}.{base_domain}"
+                location = "/"
+            else:  # directory
+                server_name = base_domain
+                if custom_domain:
+                    location = f"/{custom_domain}/"
+                elif use_base:
+                    location = "/"
+                else:
+                    location = f"/{service_id}/"
+            
+            # Group by server_name
+            if server_name not in configs_by_server:
+                configs_by_server[server_name] = []
+            
+            configs_by_server[server_name].append({
+                'service_id': service_id,
+                'port': port,
+                'location': location,
+                'websocket': websocket
+            })
+        
+        # Generate nginx configs (combine services with same server_name)
+        for server_name, service_configs in configs_by_server.items():
+            # Generate location blocks
+            location_blocks = []
+            for svc in service_configs:
+                ws_block = ""
+                if svc['websocket']:
+                    ws_block = """
         proxy_http_version 1.1;
         proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection "upgrade";
+        proxy_set_header Connection "upgrade";"""
+                
+                location_blocks.append(f"""    location {svc['location']} {{
+        proxy_pass http://localhost:{svc['port']}/;
         proxy_set_header Host $host;
         proxy_set_header X-Real-IP $remote_addr;
         proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
         proxy_set_header X-Forwarded-Proto $scheme;
-    }}
+        proxy_connect_timeout 60s;
+        proxy_send_timeout 60s;
+        proxy_read_timeout 60s;{ws_block}
+    }}""")
+            
+            # Combine into single server block
+            config = f"""# Nginx reverse proxy configuration
+# Generated by Aegis All-in-One Shellder
+# Server: {server_name}
+# Services: {', '.join([s['service_id'] for s in service_configs])}
+
+server {{
+    listen 80;
+    server_name {server_name};
+
+{chr(10).join(location_blocks)}
 }}
 """
-    
-    try:
-        # Save config
-        site_path = f'/etc/nginx/sites-available/{domain}'
-        result = subprocess.run(
-            ['sudo', 'tee', site_path],
-            input=config,
-            capture_output=True, text=True, timeout=10
-        )
+            
+            # Create unique config filename
+            if server_name == base_domain:
+                config_name = f"aegis-{base_domain.replace('.', '-')}"
+            else:
+                # Use first service ID or sanitize server_name
+                first_service = service_configs[0]['service_id']
+                config_name = f"aegis-{first_service}"
+            
+            site_path = f'/etc/nginx/sites-available/{config_name}'
+            
+            # Save config
+            result = subprocess.run(
+                ['sudo', 'tee', site_path],
+                input=config,
+                capture_output=True, text=True, timeout=10
+            )
+            
+            if result.returncode != 0:
+                for svc in service_configs:
+                    results.append({
+                        'service': svc['service_id'],
+                        'success': False,
+                        'error': f'Failed to save config: {result.stderr}'
+                    })
+                continue
+            
+            # Enable site
+            subprocess.run(
+                ['sudo', 'ln', '-sf', site_path, f'/etc/nginx/sites-enabled/{config_name}'],
+                capture_output=True, timeout=10
+            )
+            
+            ssl_domains.append(server_name)
+            for svc in service_configs:
+                results.append({
+                    'service': svc['service_id'],
+                    'domain': server_name,
+                    'port': svc['port'],
+                    'success': True
+                })
         
-        if result.returncode != 0:
-            return jsonify({'success': False, 'error': f'Failed to save config: {result.stderr}'})
+        if not results:
+            return jsonify({'success': False, 'error': 'No services were configured'})
         
-        # Enable site
-        subprocess.run(
-            ['sudo', 'ln', '-sf', site_path, f'/etc/nginx/sites-enabled/{domain}'],
-            capture_output=True, timeout=10
-        )
-        
-        # Test config
+        # Test nginx config
         test_result = subprocess.run(
             ['sudo', 'nginx', '-t'],
             capture_output=True, text=True, timeout=10
@@ -11963,40 +12168,60 @@ def api_nginx_setup():
         
         if test_result.returncode != 0:
             return jsonify({
-                'success': False, 
+                'success': False,
                 'error': f'Nginx config test failed: {test_result.stderr}',
-                'stage': 'test'
+                'stage': 'test',
+                'results': results
             })
         
         # Reload nginx
-        subprocess.run(['sudo', 'systemctl', 'reload', 'nginx'], timeout=10)
+        reload_result = subprocess.run(
+            ['sudo', 'systemctl', 'reload', 'nginx'],
+            capture_output=True, text=True, timeout=10
+        )
         
-        # Try to get SSL cert if email provided
+        if reload_result.returncode != 0:
+            return jsonify({
+                'success': False,
+                'error': f'Failed to reload nginx: {reload_result.stderr}',
+                'stage': 'reload',
+                'results': results
+            })
+        
+        # Setup SSL if email provided
         ssl_output = ''
-        if email:
+        ssl_success = True
+        if email and ssl_domains:
+            # Get unique domains
+            unique_domains = list(set(ssl_domains))
+            domain_args = []
+            for domain in unique_domains:
+                domain_args.extend(['-d', domain])
+            
             ssl_result = subprocess.run(
-                ['sudo', 'certbot', '--nginx', '-d', domain, '--non-interactive', 
-                 '--agree-tos', '-m', email, '--redirect'],
-                capture_output=True, text=True, timeout=120
+                ['sudo', 'certbot', '--nginx', '--non-interactive', 
+                 '--agree-tos', '-m', email, '--redirect'] + domain_args,
+                capture_output=True, text=True, timeout=180
             )
             ssl_output = ssl_result.stdout + ssl_result.stderr
-            if ssl_result.returncode != 0:
-                return jsonify({
-                    'success': True,
-                    'warning': 'Site configured but SSL failed',
-                    'ssl_output': ssl_output
-                })
+            ssl_success = ssl_result.returncode == 0
         
         return jsonify({
             'success': True,
-            'domain': domain,
-            'port': port,
+            'base_domain': base_domain,
+            'structure': structure,
             'ssl': bool(email),
-            'ssl_output': ssl_output
+            'ssl_success': ssl_success,
+            'ssl_output': ssl_output,
+            'results': results
         })
         
     except Exception as e:
-        return jsonify({'success': False, 'error': str(e)})
+        return jsonify({
+            'success': False,
+            'error': str(e),
+            'results': results
+        })
 
 # =============================================================================
 # SETUP & CONFIG MANAGER API

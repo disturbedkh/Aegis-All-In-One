@@ -3010,38 +3010,45 @@
                 <div class="card">
                     <div class="card-header">
                         <h2>🚀 Quick Nginx Setup</h2>
-                        <span class="text-muted">Create SSL certificates and configure sites</span>
+                        <span class="text-muted">Setup Nginx and SSL for all running stack containers</span>
                     </div>
                     <div class="card-body">
-                        <div class="nginx-setup-form">
-                            <div class="form-group">
-                                <label>Domain Name:</label>
-                                <input type="text" id="setupDomain" placeholder="example.com" class="form-input">
+                        <div class="nginx-setup-form" id="multiServiceSetupForm">
+                            <!-- Step 1: Base Configuration -->
+                            <div class="setup-step">
+                                <h3>Step 1: Base Configuration</h3>
+                                <div class="form-group">
+                                    <label>Base Domain:</label>
+                                    <input type="text" id="setupBaseDomain" placeholder="example.com" class="form-input">
+                                    <small class="text-muted">Your main domain (e.g., example.com)</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>URL Structure:</label>
+                                    <select id="setupStructure" class="form-input" onchange="updateServiceConfigUI()">
+                                        <option value="subdomain">Subdomain (e.g., reactmap.example.com)</option>
+                                        <option value="directory">Directory (e.g., example.com/reactmap)</option>
+                                    </select>
+                                    <small class="text-muted">Choose how services are accessed</small>
+                                </div>
+                                <div class="form-group">
+                                    <label>Email (for SSL Certificate):</label>
+                                    <input type="email" id="setupEmail" placeholder="admin@example.com" class="form-input">
+                                    <small class="text-muted">Required for Let's Encrypt SSL certificates</small>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label>Email (for SSL):</label>
-                                <input type="email" id="setupEmail" placeholder="admin@example.com" class="form-input">
+                            
+                            <!-- Step 2: Service Configuration -->
+                            <div class="setup-step">
+                                <h3>Step 2: Configure Services</h3>
+                                <p class="text-muted">Select which services to configure and customize their domains/paths:</p>
+                                <div id="servicesList" class="services-list">
+                                    <div class="loading">Loading running containers...</div>
+                                </div>
                             </div>
-                            <div class="form-group">
-                                <label>Service to Proxy:</label>
-                                <select id="setupService" class="form-input">
-                                    <option value="reactmap:6001">ReactMap - Map Frontend (Port 6001)</option>
-                                    <option value="admin:6002">Admin - Dragonite UI (Port 6002)</option>
-                                    <option value="rotom:6003">Rotom - Device Manager (Port 6003)</option>
-                                    <option value="koji:6004">Koji - Geofence Editor (Port 6004)</option>
-                                    <option value="pma:6005">phpMyAdmin - Database Admin (Port 6005)</option>
-                                    <option value="grafana:6006">Grafana - Monitoring (Port 6006)</option>
-                                    <option value="shellder:5000">Shellder - Control Panel (Port 5000)</option>
-                                    <option value="custom">Custom Port...</option>
-                                </select>
-                            </div>
-                            <div class="form-group" id="customPortGroup" style="display: none;">
-                                <label>Custom Port:</label>
-                                <input type="number" id="setupCustomPort" placeholder="8080" class="form-input">
-                            </div>
+                            
                             <div class="form-actions">
-                                <button class="btn btn-primary" onclick="runNginxSetup()">🔧 Setup Site with SSL</button>
-                                <button class="btn btn-sm" onclick="generateConfigPreview()">👁️ Preview Config</button>
+                                <button class="btn btn-primary" onclick="runMultiServiceNginxSetup()">🔧 Setup All Services with SSL</button>
+                                <button class="btn btn-sm" onclick="loadRunningContainers()">🔄 Refresh Services</button>
                             </div>
                         </div>
                         <div id="nginxSetupOutput" class="setup-output" style="display: none;">
