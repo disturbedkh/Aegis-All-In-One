@@ -13,6 +13,8 @@
 
 ## Quick Reference
 
+### Core Debug Endpoints
+
 | Endpoint | Method | Purpose |
 |----------|--------|---------|
 | `/api/ai-debug/help` | GET | API documentation |
@@ -24,6 +26,31 @@
 | `/api/ai-debug/docker` | GET | Docker operations |
 | `/api/ai-debug/sql` | POST | Database queries |
 | `/api/ai-debug/logs` | GET | Log retrieval |
+
+### MariaDB Diagnostic Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/mariadb/test-container` | GET | Test MariaDB container connection |
+| `/api/mariadb/setup` | POST | Create databases and users |
+| `/api/mariadb/status` | GET | Check MariaDB status and databases |
+
+### Config Diagnostic Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/config/debug-variable/<name>` | GET | Debug how a config variable is parsed |
+| `/api/config/sync-from-env` | POST | Sync all .env variables to config files |
+| `/api/config/variables/status` | GET | Check if config variables are aligned |
+
+### Metrics Endpoints
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/metrics/status` | GET | Check VictoriaMetrics/Grafana connectivity |
+| `/api/metrics/query` | GET | Proxy PromQL queries to VictoriaMetrics |
+| `/api/metrics/diagnose` | GET | Check Prometheus config status |
+| `/api/metrics/fix-prometheus` | POST | Auto-enable Prometheus in configs |
 
 ---
 
@@ -357,6 +384,114 @@ curl -X POST -H "Content-Type: application/json" \
 curl -X POST -H "Content-Type: application/json" \
   -d '{"cmd":"docker ps"}' \
   http://localhost:5050/api/ai-debug/exec
+```
+
+---
+
+## MariaDB Diagnostic Endpoints
+
+### GET /api/mariadb/test-container
+
+Test MariaDB container connection step by step. Useful for diagnosing setup issues.
+
+**Response:**
+```json
+{
+  "success": true,
+  "mysql_cmd": "mariadb",
+  "tests": [
+    "✓ Read password from .env (length=10)",
+    "✓ Container \"database\" is running",
+    "✓ MariaDB client found: mariadb Ver 15.1 Distrib 10.11.6-MariaDB",
+    "Running: docker exec database mariadb -u root -p*** -e \"SELECT 1\"",
+    "Return code: 0",
+    "stdout: test\n1",
+    "stderr: (empty)",
+    "✓ Connection successful!"
+  ]
+}
+```
+
+**Note:** Newer MariaDB images (10.5+) use `mariadb` client command, not `mysql`.
+
+---
+
+### GET /api/mariadb/status
+
+Get MariaDB container status including database sizes.
+
+**Response:**
+```json
+{
+  "container_running": true,
+  "accessible": true,
+  "version": "12.1.2-MariaDB",
+  "databases": {
+    "dragonite": {"exists": true, "size_mb": 25.5},
+    "golbat": {"exists": true, "size_mb": 150.2},
+    "reactmap": {"exists": true, "size_mb": 1.2},
+    "koji": {"exists": true, "size_mb": 0.5}
+  }
+}
+```
+
+---
+
+### POST /api/mariadb/setup
+
+Create databases and users for Aegis AIO stack.
+
+**Request Body:**
+```json
+{
+  "root_password": "from_env",
+  "db_user": "dbuser",
+  "db_password": "from_env"
+}
+```
+
+**Note:** Passwords are typically read from `.env` file automatically.
+
+---
+
+## Config Diagnostic Endpoints
+
+### GET /api/config/debug-variable/<variable_name>
+
+Debug how a specific config variable is parsed from each config file.
+
+**Example:**
+```
+GET /api/config/debug-variable/golbat_api_secret
+```
+
+**Response:**
+```json
+{
+  "variable": "golbat_api_secret",
+  "env_value": "abc123secret",
+  "file_values": {
+    ".env": "abc123secret",
+    "unown/golbat_config.toml": "abc123secret",
+    "unown/dragonite_config.toml": "abc123secret"
+  },
+  "aligned": true
+}
+```
+
+---
+
+### POST /api/config/sync-from-env
+
+Sync all shared config variables from `.env` to their respective config files.
+
+**Response:**
+```json
+{
+  "success": true,
+  "synced": ["golbat_api_secret", "koji_bearer_token"],
+  "errors": []
+}
 ```
 
 ---
