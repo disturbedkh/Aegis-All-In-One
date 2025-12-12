@@ -13177,6 +13177,10 @@ async function copyConfigsStep() {
     }
     
     updateStepStatus('configs', errorCount === 0, errorCount === 0 ? 'Config files ready' : 'Some errors occurred');
+    
+    // Refresh config variables status card at top of page (new configs may have been created)
+    cachedConfigVarsData = null;  // Invalidate cache to force fresh fetch
+    await loadConfigVarsQuickStatus();
 }
 
 async function generatePasswordsStep() {
