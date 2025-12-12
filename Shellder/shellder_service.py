@@ -11193,46 +11193,56 @@ def api_grafana_setup_dashboard():
             'folderId': 0
         }
         
-        resp = requests.post(
-            f'{GRAFANA_URL}/api/dashboards/import',
-            json=import_payload,
-            headers={'Content-Type': 'application/json'},
-            auth=('admin', 'admin'),  # Default credentials
-            timeout=30
-        )
+        # Collect possible passwords to try
+        env_file = os.path.join(aegis_root, '.env')
+        passwords_to_try = ['admin']  # Default Grafana password
         
-        if resp.status_code in [200, 201]:
-            result['success'] = True
-            result['steps'].append('✓ Dashboard imported successfully!')
-            result['dashboard_url'] = f'{GRAFANA_URL}/d/dragonite-vm/dragonite'
-        else:
-            # Try with password from .env
-            env_file = os.path.join(aegis_root, '.env')
-            grafana_password = 'admin'
-            if os.path.exists(env_file):
-                try:
-                    with open(env_file, 'r') as f:
-                        for line in f:
-                            if line.startswith('GRAFANA_ADMIN_PASSWORD='):
-                                grafana_password = line.split('=', 1)[1].strip().strip('"').strip("'")
-                                break
-                except:
-                    pass
-            
-            resp = requests.post(
-                f'{GRAFANA_URL}/api/dashboards/import',
-                json=import_payload,
-                headers={'Content-Type': 'application/json'},
-                auth=('admin', grafana_password),
-                timeout=30
-            )
-            
-            if resp.status_code in [200, 201]:
-                result['success'] = True
-                result['steps'].append('✓ Dashboard imported successfully!')
-                result['dashboard_url'] = f'{GRAFANA_URL}/d/dragonite-vm/dragonite'
-            else:
-                result['steps'].append(f'❌ Import failed: {resp.status_code} - {resp.text[:200]}')
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, 'r') as f:
+                    for line in f:
+                        line = line.strip()
+                        if line.startswith('GRAFANA_ADMIN_PASSWORD='):
+                            pw = line.split('=', 1)[1].strip().strip('"').strip("'")
+                            if pw and pw not in passwords_to_try:
+                                passwords_to_try.insert(0, pw)  # Try this first
+                        elif line.startswith('MYSQL_PASSWORD='):
+                            # Some users might use same password
+                            pw = line.split('=', 1)[1].strip().strip('"').strip("'")
+                            if pw and pw not in passwords_to_try:
+                                passwords_to_try.append(pw)
+            except:
+                pass
+        
+        import_success = False
+        last_error = ''
+        
+        for password in passwords_to_try:
+            try:
+                resp = requests.post(
+                    f'{GRAFANA_URL}/api/dashboards/import',
+                    json=import_payload,
+                    headers={'Content-Type': 'application/json'},
+                    auth=('admin', password),
+                    timeout=30
+                )
+                
+                if resp.status_code in [200, 201]:
+                    import_success = True
+                    result['success'] = True
+                    result['steps'].append('✓ Dashboard imported successfully!')
+                    result['dashboard_url'] = f'{GRAFANA_URL}/d/dragonite-vm/dragonite'
+                    break
+                else:
+                    last_error = f'{resp.status_code} - {resp.text[:100]}'
+            except Exception as e:
+                last_error = str(e)
+        
+        if not import_success:
+            result['steps'].append(f'❌ Import failed with all passwords tried')
+            result['steps'].append(f'   Last error: {last_error}')
+            result['steps'].append(f'   💡 Tip: Try logging into Grafana at http://your-ip:6006 with admin/admin')
+            result['steps'].append(f'   Then re-run this import, or manually import the dashboard')
     except Exception as e:
         result['steps'].append(f'❌ API error: {str(e)}')
     
@@ -11813,6 +11823,19 @@ AEGIS_SECRETS = {
         'generate_length': 32,
         'targets': [
             {'file': '.env', 'pattern': 'MYSQL_ROOT_PASSWORD=(.*)'},
+        ]
+    },
+    
+    # Grafana
+    'GRAFANA_ADMIN_PASSWORD': {
+        'label': 'Grafana Admin Password',
+        'desc': 'Password for Grafana admin user (for metrics dashboards)',
+        'default_placeholder': 'admin',
+        'category': 'services',
+        'color': '#f97316',
+        'generate_length': 16,
+        'targets': [
+            {'file': '.env', 'pattern': 'GRAFANA_ADMIN_PASSWORD=(.*)'},
         ]
     },
     
