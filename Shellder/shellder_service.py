@@ -13411,6 +13411,101 @@ def api_mariadb_credentials():
     
     return jsonify(credentials)
 
+@app.route('/api/mariadb/test-container')
+def api_mariadb_test_container():
+    """Test MariaDB container connection - diagnostic endpoint"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    result = {
+        'tests': [],
+        'success': False
+    }
+    
+    # Read password from .env
+    root_password = ''
+    if os.path.exists(env_file):
+        try:
+            with open(env_file, 'r') as f:
+                for line in f:
+                    line = line.strip()
+                    if line.startswith('MYSQL_ROOT_PASSWORD='):
+                        root_password = line.split('=', 1)[1].strip().strip('"').strip("'")
+                        break
+        except Exception as e:
+            result['tests'].append(f'❌ Failed to read .env: {e}')
+            return jsonify(result)
+    
+    result['tests'].append(f'✓ Read password from .env (length={len(root_password)})')
+    
+    # Test 1: Check container exists
+    try:
+        check_result = subprocess.run(
+            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+            capture_output=True, text=True, timeout=10
+        )
+        if 'database' in check_result.stdout:
+            result['tests'].append('✓ Container "database" is running')
+        else:
+            result['tests'].append(f'❌ Container not found. Output: {check_result.stdout}')
+            return jsonify(result)
+    except Exception as e:
+        result['tests'].append(f'❌ docker ps failed: {e}')
+        return jsonify(result)
+    
+    # Test 2: Check mysql client in container
+    try:
+        mysql_ver = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '--version'],
+            capture_output=True, text=True, timeout=10
+        )
+        if mysql_ver.returncode == 0:
+            result['tests'].append(f'✓ MySQL client: {mysql_ver.stdout.strip()[:60]}')
+        else:
+            result['tests'].append(f'❌ mysql --version failed: {mysql_ver.stderr}')
+    except Exception as e:
+        result['tests'].append(f'❌ docker exec mysql --version failed: {e}')
+    
+    # Test 3: Try connection with password
+    try:
+        # Build command exactly as we do in setup
+        cmd = ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1 as test']
+        result['tests'].append(f'Running: docker exec database mysql -u root -p*** -e "SELECT 1"')
+        
+        conn_result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+        
+        result['tests'].append(f'Return code: {conn_result.returncode}')
+        result['tests'].append(f'stdout: {conn_result.stdout[:200] if conn_result.stdout else "(empty)"}')
+        result['tests'].append(f'stderr: {conn_result.stderr[:200] if conn_result.stderr else "(empty)"}')
+        
+        if conn_result.returncode == 0:
+            result['tests'].append('✓ Connection successful!')
+            result['success'] = True
+        else:
+            result['tests'].append('❌ Connection failed')
+    except subprocess.TimeoutExpired:
+        result['tests'].append('❌ Command timed out after 15 seconds')
+    except Exception as e:
+        result['tests'].append(f'❌ Exception: {type(e).__name__}: {e}')
+    
+    # Test 4: Try without password (in case container has no root password)
+    if not result['success']:
+        try:
+            cmd_no_pass = ['docker', 'exec', 'database', 'mysql', '-u', 'root', '-e', 'SELECT 1 as test']
+            result['tests'].append('Trying without password...')
+            no_pass_result = subprocess.run(cmd_no_pass, capture_output=True, text=True, timeout=15)
+            
+            if no_pass_result.returncode == 0:
+                result['tests'].append('✓ Connection without password works! (container may not have root password set)')
+                result['success'] = True
+                result['no_password'] = True
+            else:
+                result['tests'].append(f'Without password also failed: {no_pass_result.stderr[:100]}')
+        except Exception as e:
+            result['tests'].append(f'Without password exception: {e}')
+    
+    return jsonify(result)
+
 @app.route('/api/mariadb/setup', methods=['POST'])
 def api_mariadb_setup():
     """Perform MariaDB setup: create databases and users"""
@@ -13548,6 +13643,7 @@ def api_mariadb_setup():
     
     # Helper function to run mysql commands via Docker container
     def run_mysql(user, password, query, check_db=None):
+        # Note: -p has no space before password (mysql quirk)
         cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
         if check_db:
             cmd.extend(['-D', check_db])
@@ -13557,14 +13653,39 @@ def api_mariadb_setup():
     # Show which password source we're using (for debugging)
     results['steps'].append(f'ℹ️ Using credentials from .env file')
     
+    # First verify container has mysql client and is responding
+    try:
+        verify_result = subprocess.run(
+            ['docker', 'exec', 'database', 'mysql', '--version'],
+            capture_output=True, text=True, timeout=10
+        )
+        if verify_result.returncode == 0:
+            results['steps'].append(f'✓ MySQL client: {verify_result.stdout.strip()[:50]}')
+        else:
+            results['errors'].append(f'MySQL client check failed: {verify_result.stderr}')
+    except Exception as e:
+        results['errors'].append(f'Container exec failed: {e}')
+    
     # Test root connection
     try:
         test_result = run_mysql('root', root_password, 'SELECT 1')
         if test_result.returncode != 0:
-            error_msg = test_result.stderr.strip() if test_result.stderr else 'Unknown error (no stderr)'
-            results['errors'].append(f'Root connection failed: {error_msg}')
+            # Capture both stdout and stderr - MariaDB may output to either
+            error_msg = test_result.stderr.strip() if test_result.stderr else ''
+            stdout_msg = test_result.stdout.strip() if test_result.stdout else ''
+            combined_error = error_msg or stdout_msg or 'No output from command'
+            results['errors'].append(f'Root connection failed: {combined_error}')
             # Add debugging info
-            results['errors'].append(f'Debug: Password length={len(root_password)}, first 3 chars={root_password[:3] if len(root_password) >= 3 else "too short"}...')
+            results['errors'].append(f'Debug: Return code={test_result.returncode}, Password length={len(root_password)}, first 3 chars={root_password[:3] if len(root_password) >= 3 else "short"}...')
+            # Try to verify the container is actually responding
+            try:
+                ping_result = subprocess.run(
+                    ['docker', 'exec', 'database', 'mysqladmin', '-u', 'root', f'-p{root_password}', 'ping'],
+                    capture_output=True, text=True, timeout=10
+                )
+                results['errors'].append(f'Ping test: {ping_result.stdout or ping_result.stderr}')
+            except Exception as pe:
+                results['errors'].append(f'Ping test failed: {pe}')
             results['success'] = False
             return jsonify(results)
         results['steps'].append('✓ Root connection verified')
