@@ -12,6 +12,13 @@
   ],
   "_NOTE": "JSON files don't support real comments, so explanations are in these _ fields",
 
+  "prometheus": {
+    "_description": "Prometheus/VictoriaMetrics metrics for Grafana dashboards",
+    
+    "enabled": true,
+    "_enabled_explanation": "Enable metrics endpoint at /metrics for monitoring. Required for Grafana dashboards to show worker stats."
+  },
+
   "deviceListener": {
     "_description": "Settings for incoming device connections (phones running Aegis)",
     

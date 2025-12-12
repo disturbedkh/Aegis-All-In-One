@@ -49,6 +49,7 @@ except Exception as e:
 import os
 import sys
 import json
+import toml
 import time
 import threading
 import re
@@ -10447,6 +10448,169 @@ def api_xilriws_proxy_reset_all():
 VICTORIAMETRICS_URL = 'http://victoriametrics:8428'
 GRAFANA_URL = 'http://grafana:3000'
 GRAFANA_EXTERNAL_PORT = 6006  # External port from docker-compose
+
+
+@app.route('/api/metrics/diagnose')
+def api_metrics_diagnose():
+    """Diagnose prometheus configuration issues in service configs"""
+    results = {
+        'golbat': {'file': 'unown/golbat_config.toml', 'exists': False, 'prometheus_enabled': False, 'needs_fix': False},
+        'dragonite': {'file': 'unown/dragonite_config.toml', 'exists': False, 'prometheus_enabled': False, 'needs_fix': False},
+        'rotom': {'file': 'unown/rotom_config.json', 'exists': False, 'prometheus_enabled': False, 'needs_fix': False},
+        'vmagent': {'file': 'vmagent/prometheus.yml', 'exists': False, 'config_ok': False},
+        'summary': {'all_ok': False, 'issues': []}
+    }
+    
+    aegis_root = Path('/opt/Aegis-All-In-One')
+    if not aegis_root.exists():
+        aegis_root = Path.cwd()
+    
+    # Check Golbat config
+    golbat_path = aegis_root / 'unown' / 'golbat_config.toml'
+    if golbat_path.exists():
+        results['golbat']['exists'] = True
+        try:
+            config = toml.load(golbat_path)
+            prom_enabled = config.get('prometheus', {}).get('enabled', False)
+            results['golbat']['prometheus_enabled'] = prom_enabled
+            if not prom_enabled:
+                results['golbat']['needs_fix'] = True
+                results['summary']['issues'].append('Golbat: prometheus not enabled')
+        except Exception as e:
+            results['golbat']['error'] = str(e)
+            results['summary']['issues'].append(f'Golbat: config parse error - {e}')
+    else:
+        results['summary']['issues'].append('Golbat: config file not found')
+    
+    # Check Dragonite config
+    dragonite_path = aegis_root / 'unown' / 'dragonite_config.toml'
+    if dragonite_path.exists():
+        results['dragonite']['exists'] = True
+        try:
+            config = toml.load(dragonite_path)
+            prom_enabled = config.get('prometheus', {}).get('enabled', False)
+            results['dragonite']['prometheus_enabled'] = prom_enabled
+            if not prom_enabled:
+                results['dragonite']['needs_fix'] = True
+                results['summary']['issues'].append('Dragonite: prometheus not enabled')
+        except Exception as e:
+            results['dragonite']['error'] = str(e)
+            results['summary']['issues'].append(f'Dragonite: config parse error - {e}')
+    else:
+        results['summary']['issues'].append('Dragonite: config file not found')
+    
+    # Check Rotom config
+    rotom_path = aegis_root / 'unown' / 'rotom_config.json'
+    if rotom_path.exists():
+        results['rotom']['exists'] = True
+        try:
+            with open(rotom_path) as f:
+                config = json.load(f)
+            prom_config = config.get('prometheus', {})
+            prom_enabled = prom_config.get('enabled', False)
+            results['rotom']['prometheus_enabled'] = prom_enabled
+            results['rotom']['has_prometheus_section'] = 'prometheus' in config
+            if not prom_enabled or 'prometheus' not in config:
+                results['rotom']['needs_fix'] = True
+                results['summary']['issues'].append('Rotom: prometheus not enabled or missing section')
+        except Exception as e:
+            results['rotom']['error'] = str(e)
+            results['summary']['issues'].append(f'Rotom: config parse error - {e}')
+    else:
+        results['summary']['issues'].append('Rotom: config file not found')
+    
+    # Check vmagent prometheus.yml
+    vmagent_path = aegis_root / 'vmagent' / 'prometheus.yml'
+    if vmagent_path.exists():
+        results['vmagent']['exists'] = True
+        results['vmagent']['config_ok'] = True
+    else:
+        results['summary']['issues'].append('VMAgent: prometheus.yml not found')
+    
+    # Overall status
+    results['summary']['all_ok'] = len(results['summary']['issues']) == 0
+    
+    return jsonify(results)
+
+
+@app.route('/api/metrics/fix-prometheus', methods=['POST'])
+def api_metrics_fix_prometheus():
+    """Fix prometheus configuration in all service configs"""
+    fixed = []
+    errors = []
+    
+    aegis_root = Path('/opt/Aegis-All-In-One')
+    if not aegis_root.exists():
+        aegis_root = Path.cwd()
+    
+    # Fix Golbat config
+    golbat_path = aegis_root / 'unown' / 'golbat_config.toml'
+    if golbat_path.exists():
+        try:
+            config = toml.load(golbat_path)
+            if not config.get('prometheus', {}).get('enabled', False):
+                config['prometheus'] = {'enabled': True}
+                with open(golbat_path, 'w') as f:
+                    toml.dump(config, f)
+                fixed.append('golbat_config.toml')
+        except Exception as e:
+            errors.append(f'golbat: {e}')
+    
+    # Fix Dragonite config
+    dragonite_path = aegis_root / 'unown' / 'dragonite_config.toml'
+    if dragonite_path.exists():
+        try:
+            config = toml.load(dragonite_path)
+            if not config.get('prometheus', {}).get('enabled', False):
+                config['prometheus'] = {'enabled': True}
+                with open(dragonite_path, 'w') as f:
+                    toml.dump(config, f)
+                fixed.append('dragonite_config.toml')
+        except Exception as e:
+            errors.append(f'dragonite: {e}')
+    
+    # Fix Rotom config - needs special handling for JSON
+    rotom_path = aegis_root / 'unown' / 'rotom_config.json'
+    if rotom_path.exists():
+        try:
+            with open(rotom_path) as f:
+                config = json.load(f)
+            
+            if 'prometheus' not in config or not config.get('prometheus', {}).get('enabled', False):
+                # Add prometheus section at the beginning (after _README fields)
+                new_config = {}
+                for key, value in config.items():
+                    new_config[key] = value
+                    # Insert prometheus after the _NOTE field
+                    if key == '_NOTE':
+                        new_config['prometheus'] = {
+                            '_description': 'Prometheus/VictoriaMetrics metrics for Grafana dashboards',
+                            'enabled': True,
+                            '_enabled_explanation': 'Enable metrics endpoint at /metrics for monitoring. Required for Grafana dashboards to show worker stats.'
+                        }
+                
+                # If _NOTE wasn't found, just add it
+                if 'prometheus' not in new_config:
+                    new_config['prometheus'] = {'enabled': True}
+                
+                with open(rotom_path, 'w') as f:
+                    json.dump(new_config, f, indent=2)
+                fixed.append('rotom_config.json')
+        except Exception as e:
+            errors.append(f'rotom: {e}')
+    
+    # Suggest restart
+    restart_needed = len(fixed) > 0
+    
+    return jsonify({
+        'success': len(errors) == 0,
+        'fixed': fixed,
+        'errors': errors,
+        'restart_needed': restart_needed,
+        'restart_command': 'docker compose restart golbat dragonite rotom' if restart_needed else None,
+        'message': f'Fixed {len(fixed)} config(s). Restart services to apply changes.' if fixed else 'No fixes needed or errors occurred.'
+    })
+
 
 @app.route('/api/metrics/status')
 def api_metrics_status():
