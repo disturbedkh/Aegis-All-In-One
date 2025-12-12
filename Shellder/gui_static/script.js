@@ -4970,17 +4970,11 @@ async function loadMetricsPage() {
     // Check status of metrics services
     await checkMetricsStatus();
     
-    // Load metric widgets
-    await loadMetricsSummary();
-    
-    // Load historical stats (from old stats page)
-    loadHistoricalStats();
-    
-    // Start auto-refresh for widgets (every 30s)
+    // Start auto-refresh (every 30s)
     if (metricsRefreshInterval) clearInterval(metricsRefreshInterval);
     metricsRefreshInterval = setInterval(() => {
         if (currentPage === 'metrics') {
-            loadMetricsSummary();
+            checkMetricsStatus();
         }
     }, 30000);
 }
@@ -5004,75 +4998,86 @@ async function checkMetricsStatus() {
             grafanaStatus.classList.toggle('offline', !status.grafana?.running);
         }
         
-        // Handle Grafana iframe
+        // Handle Grafana display states
         const grafanaLoading = document.getElementById('grafanaLoading');
+        const grafanaSetup = document.getElementById('grafanaSetup');
         const grafanaOffline = document.getElementById('grafanaOffline');
         const grafanaFrame = document.getElementById('grafanaFrame');
         
+        // Hide all first
+        if (grafanaLoading) grafanaLoading.style.display = 'none';
+        if (grafanaSetup) grafanaSetup.style.display = 'none';
+        if (grafanaOffline) grafanaOffline.style.display = 'none';
+        if (grafanaFrame) grafanaFrame.style.display = 'none';
+        
         if (status.grafana?.running && status.grafana?.accessible) {
-            // Grafana is running
+            // Grafana is running and accessible
             if (status.grafana?.dashboard_ready) {
-                // Dashboard is provisioned - show it
-                if (grafanaLoading) grafanaLoading.style.display = 'none';
-                if (grafanaOffline) grafanaOffline.style.display = 'none';
+                // Dashboard ready - show iframe
                 if (grafanaFrame) {
-                    // Build Grafana URL with dashboard
                     const timeRange = document.getElementById('grafanaTimeRange')?.value || 'now-6h';
                     const grafanaUrl = buildGrafanaUrl(timeRange, status.grafana.dashboard_uid);
-                    if (!grafanaFrame.src || grafanaFrame.src !== grafanaUrl) {
+                    if (!grafanaFrame.src || !grafanaFrame.src.includes(status.grafana.dashboard_uid)) {
                         grafanaFrame.src = grafanaUrl;
                     }
                     grafanaFrame.style.display = 'block';
                 }
             } else {
-                // Grafana running but dashboard not provisioned yet
-                if (grafanaLoading) grafanaLoading.style.display = 'none';
-                if (grafanaOffline) {
-                    grafanaOffline.style.display = 'block';
-                    grafanaOffline.innerHTML = `
-                        <h3>📊 Dashboard Not Found</h3>
-                        <p>Grafana is running but the Dragonite dashboard needs to be imported.</p>
-                        <div class="offline-actions">
-                            <button class="btn btn-primary" onclick="setupGrafanaDashboard()">📥 Import Dashboard</button>
-                            <button class="btn" onclick="restartGrafanaContainer()">🔄 Restart Grafana</button>
-                            <button class="btn" onclick="openGrafanaExternal()">🔗 Open Grafana</button>
-                        </div>
-                        <div class="offline-help" style="margin-top: 15px;">
-                            <p><strong>First Time Setup:</strong></p>
-                            <ul>
-                                <li>Click "Import Dashboard" to automatically set up the Dragonite stats dashboard</li>
-                                <li>Default Grafana login: <code>admin</code> / <code>admin</code></li>
-                                <li>Or set <code>GRAFANA_ADMIN_PASSWORD</code> in your .env file</li>
-                            </ul>
-                        </div>
-                    `;
+                // Grafana running but dashboard needs setup
+                if (grafanaSetup) {
+                    grafanaSetup.style.display = 'block';
+                    updateSetupSteps('ready');
                 }
-                if (grafanaFrame) grafanaFrame.style.display = 'none';
             }
         } else if (status.grafana?.running) {
-            // Container running but not accessible yet
+            // Container running but not accessible yet (starting up)
             if (grafanaLoading) {
                 grafanaLoading.style.display = 'block';
-                grafanaLoading.textContent = 'Grafana starting up...';
             }
-            if (grafanaOffline) grafanaOffline.style.display = 'none';
-            if (grafanaFrame) grafanaFrame.style.display = 'none';
         } else {
-            // Show offline state
-            if (grafanaLoading) grafanaLoading.style.display = 'none';
-            if (grafanaOffline) grafanaOffline.style.display = 'block';
-            if (grafanaFrame) grafanaFrame.style.display = 'none';
+            // Grafana not running
+            if (grafanaOffline) {
+                grafanaOffline.style.display = 'block';
+            }
         }
         
         return status;
     } catch (error) {
         console.error('Failed to check metrics status:', error);
-        // Show offline state on error
         const grafanaLoading = document.getElementById('grafanaLoading');
         const grafanaOffline = document.getElementById('grafanaOffline');
         if (grafanaLoading) grafanaLoading.style.display = 'none';
         if (grafanaOffline) grafanaOffline.style.display = 'block';
         return null;
+    }
+}
+
+function updateSetupSteps(state) {
+    const step1 = document.getElementById('step1Status');
+    const step2 = document.getElementById('step2Status');
+    const step3 = document.getElementById('step3Status');
+    
+    if (state === 'ready') {
+        if (step1) step1.textContent = '✓';
+        if (step2) step2.textContent = '⏳';
+        if (step3) step3.textContent = '⏳';
+    } else if (state === 'importing') {
+        if (step1) step1.textContent = '✓';
+        if (step2) step2.textContent = '⏳';
+        if (step3) step3.textContent = '⏳';
+    } else if (state === 'complete') {
+        if (step1) step1.textContent = '✓';
+        if (step2) step2.textContent = '✓';
+        if (step3) step3.textContent = '✓';
+    } else if (state === 'error') {
+        if (step2) step2.textContent = '❌';
+    }
+}
+
+function toggleGrafanaFullscreen() {
+    const container = document.getElementById('grafanaContainer');
+    if (container) {
+        container.classList.toggle('fullscreen');
     }
 }
 
@@ -5131,7 +5136,83 @@ async function restartGrafanaContainer() {
     }
 }
 
+async function runGrafanaSetup() {
+    // Show credentials form first time
+    const loginForm = document.getElementById('grafanaLoginForm');
+    const setupLog = document.getElementById('grafanaSetupLog');
+    const logOutput = document.getElementById('setupLogOutput');
+    
+    // Show the log area
+    if (setupLog) setupLog.style.display = 'block';
+    if (logOutput) logOutput.innerHTML = '<span class="log-info">Starting setup...</span><br>';
+    
+    // Get credentials
+    const username = document.getElementById('grafanaUsername')?.value || 'admin';
+    const password = document.getElementById('grafanaPassword')?.value || 'admin';
+    
+    addSetupLog('Checking Grafana connection...', 'info');
+    updateSetupSteps('importing');
+    
+    try {
+        // First check if dashboard exists with these credentials
+        const result = await fetchAPI('/api/grafana/setup-dashboard', { 
+            method: 'POST',
+            body: JSON.stringify({ username, password })
+        });
+        
+        if (result.success) {
+            addSetupLog('✓ Dashboard imported successfully!', 'success');
+            updateSetupSteps('complete');
+            showToast('Dashboard ready!', 'success');
+            
+            // Wait and refresh to show dashboard
+            setTimeout(() => {
+                checkMetricsStatus();
+            }, 2000);
+        } else {
+            // Check if it's an auth error
+            const steps = result.steps || [];
+            steps.forEach(step => {
+                if (step.includes('✓')) {
+                    addSetupLog(step, 'success');
+                } else if (step.includes('❌')) {
+                    addSetupLog(step, 'error');
+                } else {
+                    addSetupLog(step, 'info');
+                }
+            });
+            
+            // If auth failed, show login form
+            if (steps.some(s => s.includes('401') || s.includes('password'))) {
+                if (loginForm) loginForm.style.display = 'block';
+                addSetupLog('Please enter correct Grafana credentials above', 'error');
+            }
+            
+            updateSetupSteps('error');
+        }
+    } catch (error) {
+        addSetupLog('Error: ' + error.message, 'error');
+        updateSetupSteps('error');
+    }
+}
+
+function addSetupLog(message, type = 'info') {
+    const logOutput = document.getElementById('setupLogOutput');
+    if (logOutput) {
+        const line = document.createElement('div');
+        line.className = `log-${type}`;
+        line.textContent = message;
+        logOutput.appendChild(line);
+        logOutput.scrollTop = logOutput.scrollHeight;
+    }
+}
+
 async function setupGrafanaDashboard() {
+    // Legacy function - redirect to new one
+    return runGrafanaSetup();
+}
+
+async function setupGrafanaDashboardLegacy() {
     try {
         showToast('Importing Dragonite dashboard...', 'info');
         
@@ -5254,8 +5335,6 @@ async function loadMetricsSummary() {
 
 function refreshMetrics() {
     checkMetricsStatus();
-    loadMetricsSummary();
-    loadHistoricalStats();
     showToast('Metrics refreshed', 'success');
 }
 

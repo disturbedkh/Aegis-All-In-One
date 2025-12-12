@@ -3792,151 +3792,111 @@
                 </div>
             </div>
             
-            <!-- Metrics Page - VictoriaMetrics & Grafana Integration (replaces Statistics) -->
+            <!-- Metrics Page - Grafana Dashboard -->
             <div id="page-metrics" class="page">
-                <!-- Quick Stats Widgets -->
-                <div class="metrics-widgets">
-                    <div class="metric-widget" id="metricWorkers">
-                        <div class="metric-icon">👥</div>
-                        <div class="metric-content">
-                            <div class="metric-value"><span id="workersActive">--</span> / <span id="workersTotal">--</span></div>
-                            <div class="metric-label">Active Workers</div>
-                            <div class="metric-bar">
-                                <div class="metric-bar-fill" id="workersBar" style="width: 0%"></div>
-                            </div>
-                        </div>
+                <!-- Status Bar -->
+                <div class="metrics-status-bar">
+                    <div class="status-item">
+                        <span class="status-indicator-dot" id="vmStatus"></span>
+                        <span>VictoriaMetrics</span>
                     </div>
-                    <div class="metric-widget" id="metricRpc">
-                        <div class="metric-icon">📡</div>
-                        <div class="metric-content">
-                            <div class="metric-value"><span id="rpcRate">--</span>%</div>
-                            <div class="metric-label">RPC Success Rate (5m)</div>
-                            <div class="metric-bar">
-                                <div class="metric-bar-fill success" id="rpcBar" style="width: 0%"></div>
-                            </div>
-                        </div>
+                    <div class="status-item">
+                        <span class="status-indicator-dot" id="grafanaStatus"></span>
+                        <span>Grafana</span>
                     </div>
-                    <div class="metric-widget" id="metricPokemon">
-                        <div class="metric-icon">🔍</div>
-                        <div class="metric-content">
-                            <div class="metric-value"><span id="ivRate">--</span></div>
-                            <div class="metric-label">IV/Worker (5m)</div>
-                            <div class="metric-subtext"><span id="pokemonCount">--</span> Pokemon scanned</div>
-                        </div>
-                    </div>
-                    <div class="metric-widget" id="metricStatus">
-                        <div class="metric-icon">🔗</div>
-                        <div class="metric-content">
-                            <div class="metric-status-row">
-                                <span class="status-indicator-dot" id="vmStatus"></span>
-                                <span>VictoriaMetrics</span>
-                            </div>
-                            <div class="metric-status-row">
-                                <span class="status-indicator-dot" id="grafanaStatus"></span>
-                                <span>Grafana</span>
-                            </div>
-                        </div>
+                    <div class="status-actions">
+                        <select id="grafanaTimeRange" onchange="updateGrafanaTimeRange()">
+                            <option value="now-1h">Last 1 hour</option>
+                            <option value="now-3h">Last 3 hours</option>
+                            <option value="now-6h" selected>Last 6 hours</option>
+                            <option value="now-12h">Last 12 hours</option>
+                            <option value="now-24h">Last 24 hours</option>
+                            <option value="now-7d">Last 7 days</option>
+                        </select>
+                        <button class="btn btn-sm" onclick="refreshMetrics()" title="Refresh">🔄</button>
+                        <button class="btn btn-sm" onclick="openGrafanaExternal()" title="Open in new tab">🔗</button>
+                        <button class="btn btn-sm" onclick="toggleGrafanaFullscreen()" title="Toggle fullscreen">⛶</button>
                     </div>
                 </div>
                 
-                <!-- Grafana Embed Card -->
-                <div class="card grafana-card">
-                    <div class="card-header">
-                        <h2>📊 Grafana Dashboard</h2>
-                        <div class="card-actions">
-                            <select id="grafanaTimeRange" onchange="updateGrafanaTimeRange()">
-                                <option value="now-1h">Last 1 hour</option>
-                                <option value="now-3h">Last 3 hours</option>
-                                <option value="now-6h" selected>Last 6 hours</option>
-                                <option value="now-12h">Last 12 hours</option>
-                                <option value="now-24h">Last 24 hours</option>
-                                <option value="now-7d">Last 7 days</option>
-                            </select>
-                            <button class="btn btn-sm" onclick="refreshMetrics()" title="Refresh metrics">🔄 Refresh</button>
-                            <button class="btn btn-sm btn-primary" onclick="openGrafanaExternal()" title="Open Grafana in new tab">
-                                🔗 Open Grafana
+                <!-- Grafana Full-Page Embed -->
+                <div class="grafana-fullpage-container" id="grafanaContainer">
+                    <div id="grafanaLoading" class="grafana-loading">
+                        <div class="loading-spinner"></div>
+                        <p>Connecting to Grafana...</p>
+                        <p class="loading-hint">Dashboard loading on port 6006</p>
+                    </div>
+                    
+                    <div id="grafanaSetup" class="grafana-setup" style="display: none;">
+                        <div class="setup-icon">📊</div>
+                        <h3>Grafana Dashboard Setup</h3>
+                        <p>Set up the Dragonite metrics dashboard to monitor your scanner performance.</p>
+                        
+                        <div class="setup-steps">
+                            <div class="setup-step" id="setupStep1">
+                                <span class="step-number">1</span>
+                                <span class="step-text">Check Grafana Status</span>
+                                <span class="step-status" id="step1Status">⏳</span>
+                            </div>
+                            <div class="setup-step" id="setupStep2">
+                                <span class="step-number">2</span>
+                                <span class="step-text">Configure Dashboard</span>
+                                <span class="step-status" id="step2Status">⏳</span>
+                            </div>
+                            <div class="setup-step" id="setupStep3">
+                                <span class="step-number">3</span>
+                                <span class="step-text">Connect Datasource</span>
+                                <span class="step-status" id="step3Status">⏳</span>
+                            </div>
+                        </div>
+                        
+                        <div class="setup-form" id="grafanaLoginForm" style="display: none;">
+                            <h4>🔐 Grafana Credentials</h4>
+                            <p class="form-hint">Enter your Grafana admin credentials to import the dashboard</p>
+                            <div class="form-group">
+                                <label>Username</label>
+                                <input type="text" id="grafanaUsername" value="admin" placeholder="admin">
+                            </div>
+                            <div class="form-group">
+                                <label>Password</label>
+                                <input type="password" id="grafanaPassword" placeholder="Enter password (default: admin)">
+                            </div>
+                        </div>
+                        
+                        <div class="setup-actions">
+                            <button class="btn btn-primary btn-lg" onclick="runGrafanaSetup()">
+                                🚀 Auto-Setup Dashboard
                             </button>
+                            <button class="btn" onclick="startGrafanaContainer()">▶️ Start Grafana</button>
+                            <button class="btn" onclick="checkMetricsStatus()">🔄 Retry</button>
                         </div>
-                    </div>
-                    <div class="card-body grafana-embed-container">
-                        <div id="grafanaLoading" class="grafana-loading">
-                            <div class="loading-spinner"></div>
-                            <p>Checking Grafana connection...</p>
-                            <p class="loading-hint">Grafana runs on port 6006</p>
-                        </div>
-                        <div id="grafanaOffline" class="grafana-offline" style="display: none;">
-                            <div class="offline-icon">📊</div>
-                            <h3>Grafana Not Available</h3>
-                            <p>The Grafana container doesn't appear to be running or reachable.</p>
-                            <div class="offline-actions">
-                                <button class="btn btn-primary" onclick="startGrafanaContainer()">▶️ Start Grafana</button>
-                                <button class="btn" onclick="checkMetricsStatus()">🔄 Retry Connection</button>
-                            </div>
-                            <div class="offline-help">
-                                <p><strong>Troubleshooting:</strong></p>
-                                <ul>
-                                    <li>Check if Grafana container is running: <code>docker ps | grep grafana</code></li>
-                                    <li>Start Grafana: <code>docker compose up -d grafana</code></li>
-                                    <li>Grafana default credentials: admin / admin</li>
-                                </ul>
-                            </div>
-                        </div>
-                        <iframe 
-                            id="grafanaFrame" 
-                            src="" 
-                            style="display: none;"
-                            frameborder="0"
-                            allowfullscreen
-                        ></iframe>
-                    </div>
-                </div>
-                
-                <!-- Historical Stats Section (from old Statistics page) -->
-                <div class="dashboard-grid">
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>📈 Shellder Historical Stats</h2>
-                            <div class="card-actions">
-                                <select id="statsTimeRange" onchange="loadHistoricalStats()">
-                                    <option value="1">Last 24 hours</option>
-                                    <option value="7" selected>Last 7 days</option>
-                                    <option value="30">Last 30 days</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="card-body">
-                            <div class="stats-chart-container">
-                                <canvas id="statsChart"></canvas>
-                            </div>
+                        
+                        <div class="setup-log" id="grafanaSetupLog" style="display: none;">
+                            <h4>Setup Progress</h4>
+                            <div class="log-output" id="setupLogOutput"></div>
                         </div>
                     </div>
                     
-                    <div class="card">
-                        <div class="card-header">
-                            <h2>🔐 All-Time Proxy Stats</h2>
-                        </div>
-                        <div class="card-body">
-                            <div id="allTimeProxyStats" class="stats-table-container">
-                                <table class="stats-table">
-                                    <thead>
-                                        <tr>
-                                            <th>Proxy</th>
-                                            <th>Total</th>
-                                            <th>Success</th>
-                                            <th>Failed</th>
-                                            <th>Rate</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="proxyStatsBody">
-                                        <tr><td colspan="5" class="loading">Loading...</td></tr>
-                                    </tbody>
-                                </table>
-                            </div>
+                    <div id="grafanaOffline" class="grafana-offline" style="display: none;">
+                        <div class="offline-icon">📊</div>
+                        <h3>Grafana Not Running</h3>
+                        <p>Start the Grafana container to view metrics dashboards.</p>
+                        <div class="offline-actions">
+                            <button class="btn btn-primary" onclick="startGrafanaContainer()">▶️ Start Grafana</button>
+                            <button class="btn" onclick="checkMetricsStatus()">🔄 Retry</button>
                         </div>
                     </div>
+                    
+                    <iframe 
+                        id="grafanaFrame" 
+                        src="" 
+                        style="display: none;"
+                        frameborder="0"
+                        allowfullscreen
+                    ></iframe>
                 </div>
                 
-                <!-- Custom Query Card -->
+                <!-- Custom Query Card (collapsible) -->
                 <div class="card">
                     <div class="card-header">
                         <h2>🔎 Custom PromQL Query</h2>

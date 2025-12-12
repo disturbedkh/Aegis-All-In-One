@@ -11131,6 +11131,16 @@ def api_grafana_setup_dashboard():
     """Import the Dragonite dashboard into Grafana via API"""
     aegis_root = str(AEGIS_ROOT)
     
+    # Get credentials from request if provided
+    req_data = {}
+    try:
+        req_data = request.get_json() or {}
+    except:
+        pass
+    
+    provided_username = req_data.get('username', 'admin')
+    provided_password = req_data.get('password', '')
+    
     result = {
         'success': False,
         'steps': []
@@ -11193,10 +11203,19 @@ def api_grafana_setup_dashboard():
             'folderId': 0
         }
         
-        # Collect possible passwords to try
-        env_file = os.path.join(aegis_root, '.env')
-        passwords_to_try = ['admin']  # Default Grafana password
+        # Build list of passwords to try
+        passwords_to_try = []
         
+        # If password provided in request, try it first
+        if provided_password:
+            passwords_to_try.append(provided_password)
+        
+        # Add default password
+        if 'admin' not in passwords_to_try:
+            passwords_to_try.append('admin')
+        
+        # Try passwords from .env file
+        env_file = os.path.join(aegis_root, '.env')
         if os.path.exists(env_file):
             try:
                 with open(env_file, 'r') as f:
@@ -11205,9 +11224,8 @@ def api_grafana_setup_dashboard():
                         if line.startswith('GRAFANA_ADMIN_PASSWORD='):
                             pw = line.split('=', 1)[1].strip().strip('"').strip("'")
                             if pw and pw not in passwords_to_try:
-                                passwords_to_try.insert(0, pw)  # Try this first
+                                passwords_to_try.insert(1, pw)  # Try after provided, before admin
                         elif line.startswith('MYSQL_PASSWORD='):
-                            # Some users might use same password
                             pw = line.split('=', 1)[1].strip().strip('"').strip("'")
                             if pw and pw not in passwords_to_try:
                                 passwords_to_try.append(pw)

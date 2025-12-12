@@ -10377,17 +10377,59 @@ select:focus {
     background: #ef4444;
 }
 
-/* Grafana Card */
-.grafana-card {
-    min-height: 600px;
+/* Metrics Status Bar */
+.metrics-status-bar {
+    display: flex;
+    align-items: center;
+    gap: 24px;
+    padding: 12px 20px;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    margin-bottom: 16px;
+    border: 1px solid var(--border-color);
 }
 
-.grafana-embed-container {
+.metrics-status-bar .status-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.metrics-status-bar .status-actions {
+    margin-left: auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.metrics-status-bar select {
+    padding: 6px 12px;
+    font-size: 13px;
+}
+
+/* Grafana Full-Page Container */
+.grafana-fullpage-container {
     position: relative;
-    height: 550px;
     background: var(--bg-tertiary);
     border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
     overflow: hidden;
+    min-height: calc(100vh - 200px);
+    height: calc(100vh - 200px);
+}
+
+.grafana-fullpage-container.fullscreen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    z-index: 1000;
+    border-radius: 0;
+    height: 100vh;
+    min-height: 100vh;
 }
 
 #grafanaFrame {
@@ -10396,13 +10438,15 @@ select:focus {
     border: none;
 }
 
-.grafana-loading, .grafana-offline {
+.grafana-loading, .grafana-offline, .grafana-setup {
     position: absolute;
     top: 50%;
     left: 50%;
     transform: translate(-50%, -50%);
     text-align: center;
     padding: 40px;
+    max-width: 600px;
+    width: 90%;
 }
 
 .grafana-loading .loading-spinner {
@@ -10423,6 +10467,159 @@ select:focus {
 .grafana-loading .loading-hint {
     font-size: 12px;
     color: var(--text-muted);
+}
+
+/* Grafana Setup Screen */
+.grafana-setup .setup-icon {
+    font-size: 64px;
+    margin-bottom: 16px;
+}
+
+.grafana-setup h3 {
+    color: var(--text-primary);
+    margin-bottom: 8px;
+    font-size: 24px;
+}
+
+.grafana-setup > p {
+    color: var(--text-secondary);
+    margin-bottom: 24px;
+}
+
+.setup-steps {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    margin-bottom: 24px;
+    text-align: left;
+    background: var(--bg-secondary);
+    padding: 16px;
+    border-radius: var(--radius-md);
+}
+
+.setup-step {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 8px 0;
+}
+
+.setup-step .step-number {
+    width: 28px;
+    height: 28px;
+    border-radius: 50%;
+    background: var(--accent-primary);
+    color: white;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-weight: bold;
+    font-size: 14px;
+}
+
+.setup-step .step-text {
+    flex: 1;
+    color: var(--text-primary);
+}
+
+.setup-step .step-status {
+    font-size: 18px;
+}
+
+.setup-step.complete .step-number {
+    background: var(--color-success);
+}
+
+.setup-step.error .step-number {
+    background: var(--color-error);
+}
+
+.setup-form {
+    background: var(--bg-secondary);
+    padding: 20px;
+    border-radius: var(--radius-md);
+    margin-bottom: 20px;
+    text-align: left;
+}
+
+.setup-form h4 {
+    margin-bottom: 8px;
+    color: var(--text-primary);
+}
+
+.setup-form .form-hint {
+    font-size: 13px;
+    color: var(--text-muted);
+    margin-bottom: 16px;
+}
+
+.setup-form .form-group {
+    margin-bottom: 12px;
+}
+
+.setup-form .form-group label {
+    display: block;
+    margin-bottom: 4px;
+    font-size: 13px;
+    color: var(--text-secondary);
+}
+
+.setup-form .form-group input {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-primary);
+    color: var(--text-primary);
+    font-size: 14px;
+}
+
+.setup-actions {
+    display: flex;
+    gap: 12px;
+    justify-content: center;
+    flex-wrap: wrap;
+}
+
+.setup-actions .btn-lg {
+    padding: 14px 28px;
+    font-size: 16px;
+}
+
+.setup-log {
+    margin-top: 20px;
+    text-align: left;
+    background: var(--bg-secondary);
+    border-radius: var(--radius-md);
+    padding: 16px;
+}
+
+.setup-log h4 {
+    margin-bottom: 12px;
+    color: var(--text-primary);
+}
+
+.setup-log .log-output {
+    background: var(--bg-primary);
+    padding: 12px;
+    border-radius: var(--radius-sm);
+    font-family: monospace;
+    font-size: 13px;
+    max-height: 200px;
+    overflow-y: auto;
+    color: var(--text-secondary);
+}
+
+.setup-log .log-output .log-success {
+    color: var(--color-success);
+}
+
+.setup-log .log-error {
+    color: var(--color-error);
+}
+
+.setup-log .log-info {
+    color: var(--accent-primary);
 }
 
 .grafana-offline .offline-icon {
