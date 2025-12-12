@@ -1311,7 +1311,7 @@ function navigateTo(page) {
         'devices': 'Devices',
         'stack': 'Stack Data',
         'xilriws': 'Xilriws Auth Proxy',
-        'stats': 'Statistics',
+        'metrics': 'Metrics & Analytics',
         'nginx': 'Nginx & Security',
         'files': 'File Manager',
         'scripts': 'Scripts',
@@ -1327,7 +1327,9 @@ function navigateTo(page) {
     currentPage = page;
     
     // Load page-specific data
-    if (page === 'xilriws') {
+    if (page === 'metrics') {
+        loadMetricsPage();
+    } else if (page === 'xilriws') {
         loadXilriwsStats();
         loadXilriwsLogs();
     } else if (page === 'logs') {
@@ -4952,6 +4954,271 @@ function formatDuration(seconds) {
     if (days > 0) return `${days}d ${hours}h`;
     if (hours > 0) return `${hours}h ${mins}m`;
     return `${mins}m`;
+}
+
+// =============================================================================
+// METRICS PAGE FUNCTIONS - VictoriaMetrics & Grafana Integration
+// =============================================================================
+
+let metricsStatus = { victoriametrics: false, grafana: false };
+let metricsRefreshInterval = null;
+const GRAFANA_PORT = 6006;
+
+async function loadMetricsPage() {
+    console.log('Loading metrics page...');
+    
+    // Check status of metrics services
+    await checkMetricsStatus();
+    
+    // Load metric widgets
+    await loadMetricsSummary();
+    
+    // Load historical stats (from old stats page)
+    loadHistoricalStats();
+    
+    // Start auto-refresh for widgets (every 30s)
+    if (metricsRefreshInterval) clearInterval(metricsRefreshInterval);
+    metricsRefreshInterval = setInterval(() => {
+        if (currentPage === 'metrics') {
+            loadMetricsSummary();
+        }
+    }, 30000);
+}
+
+async function checkMetricsStatus() {
+    try {
+        const status = await fetchAPI('/api/metrics/status');
+        metricsStatus = status;
+        
+        // Update status indicators
+        const vmStatus = document.getElementById('vmStatus');
+        const grafanaStatus = document.getElementById('grafanaStatus');
+        
+        if (vmStatus) {
+            vmStatus.classList.toggle('online', status.victoriametrics?.running);
+            vmStatus.classList.toggle('offline', !status.victoriametrics?.running);
+        }
+        
+        if (grafanaStatus) {
+            grafanaStatus.classList.toggle('online', status.grafana?.running);
+            grafanaStatus.classList.toggle('offline', !status.grafana?.running);
+        }
+        
+        // Handle Grafana iframe
+        const grafanaLoading = document.getElementById('grafanaLoading');
+        const grafanaOffline = document.getElementById('grafanaOffline');
+        const grafanaFrame = document.getElementById('grafanaFrame');
+        
+        if (status.grafana?.running) {
+            // Show Grafana iframe
+            if (grafanaLoading) grafanaLoading.style.display = 'none';
+            if (grafanaOffline) grafanaOffline.style.display = 'none';
+            if (grafanaFrame) {
+                // Build Grafana URL with dashboard
+                const timeRange = document.getElementById('grafanaTimeRange')?.value || 'now-6h';
+                const grafanaUrl = buildGrafanaUrl(timeRange);
+                if (!grafanaFrame.src || grafanaFrame.src !== grafanaUrl) {
+                    grafanaFrame.src = grafanaUrl;
+                }
+                grafanaFrame.style.display = 'block';
+            }
+        } else {
+            // Show offline state
+            if (grafanaLoading) grafanaLoading.style.display = 'none';
+            if (grafanaOffline) grafanaOffline.style.display = 'block';
+            if (grafanaFrame) grafanaFrame.style.display = 'none';
+        }
+        
+        return status;
+    } catch (error) {
+        console.error('Failed to check metrics status:', error);
+        // Show offline state on error
+        const grafanaLoading = document.getElementById('grafanaLoading');
+        const grafanaOffline = document.getElementById('grafanaOffline');
+        if (grafanaLoading) grafanaLoading.style.display = 'none';
+        if (grafanaOffline) grafanaOffline.style.display = 'block';
+        return null;
+    }
+}
+
+function buildGrafanaUrl(timeRange = 'now-6h') {
+    // Get the current host and build Grafana URL
+    const host = window.location.hostname;
+    const baseUrl = `http://${host}:${GRAFANA_PORT}`;
+    
+    // Dragonite dashboard UID from the JSON
+    const dashboardUid = 'dragonite-vm';
+    
+    // Build URL with time range and kiosk mode for embedding
+    return `${baseUrl}/d/${dashboardUid}/dragonite?orgId=1&from=${timeRange}&to=now&kiosk`;
+}
+
+function updateGrafanaTimeRange() {
+    const timeRange = document.getElementById('grafanaTimeRange')?.value || 'now-6h';
+    const grafanaFrame = document.getElementById('grafanaFrame');
+    
+    if (grafanaFrame && metricsStatus.grafana?.running) {
+        grafanaFrame.src = buildGrafanaUrl(timeRange);
+    }
+}
+
+function openGrafanaExternal() {
+    const host = window.location.hostname;
+    const url = `http://${host}:${GRAFANA_PORT}`;
+    window.open(url, '_blank');
+}
+
+async function startGrafanaContainer() {
+    try {
+        const result = await fetchAPI('/api/containers/grafana/start', { method: 'POST' });
+        if (result.success) {
+            showToast('Starting Grafana container...', 'success');
+            // Wait a bit then check status
+            setTimeout(checkMetricsStatus, 5000);
+        } else {
+            showToast('Failed to start Grafana: ' + (result.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        showToast('Failed to start Grafana: ' + error.message, 'error');
+    }
+}
+
+async function loadMetricsSummary() {
+    try {
+        const summary = await fetchAPI('/api/metrics/summary');
+        
+        if (!summary.available) {
+            // VictoriaMetrics not available - show dashes
+            document.getElementById('workersActive')?.textContent && (document.getElementById('workersActive').textContent = '--');
+            document.getElementById('workersTotal')?.textContent && (document.getElementById('workersTotal').textContent = '--');
+            document.getElementById('rpcRate')?.textContent && (document.getElementById('rpcRate').textContent = '--');
+            document.getElementById('ivRate')?.textContent && (document.getElementById('ivRate').textContent = '--');
+            return;
+        }
+        
+        // Update workers widget
+        const workersActive = document.getElementById('workersActive');
+        const workersTotal = document.getElementById('workersTotal');
+        const workersBar = document.getElementById('workersBar');
+        
+        if (workersActive) workersActive.textContent = summary.workers.active;
+        if (workersTotal) workersTotal.textContent = summary.workers.total;
+        if (workersBar) {
+            workersBar.style.width = `${summary.workers.utilization}%`;
+            // Color based on utilization
+            workersBar.classList.remove('success', 'warning', 'danger');
+            if (summary.workers.utilization >= 80) {
+                workersBar.classList.add('success');
+            } else if (summary.workers.utilization >= 50) {
+                workersBar.classList.add('warning');
+            } else {
+                workersBar.classList.add('danger');
+            }
+        }
+        
+        // Update RPC widget
+        const rpcRate = document.getElementById('rpcRate');
+        const rpcBar = document.getElementById('rpcBar');
+        
+        if (rpcRate) rpcRate.textContent = summary.rpc.success_rate || 0;
+        if (rpcBar) {
+            rpcBar.style.width = `${summary.rpc.success_rate || 0}%`;
+            rpcBar.classList.remove('success', 'warning', 'danger');
+            if (summary.rpc.success_rate >= 90) {
+                rpcBar.classList.add('success');
+            } else if (summary.rpc.success_rate >= 70) {
+                rpcBar.classList.add('warning');
+            } else {
+                rpcBar.classList.add('danger');
+            }
+        }
+        
+        // Update Pokemon widget
+        const ivRate = document.getElementById('ivRate');
+        const pokemonCount = document.getElementById('pokemonCount');
+        
+        if (ivRate) ivRate.textContent = summary.pokemon.iv_rate || 0;
+        if (pokemonCount) pokemonCount.textContent = (summary.pokemon.count_5m || 0).toLocaleString();
+        
+    } catch (error) {
+        console.error('Failed to load metrics summary:', error);
+    }
+}
+
+function refreshMetrics() {
+    checkMetricsStatus();
+    loadMetricsSummary();
+    loadHistoricalStats();
+    showToast('Metrics refreshed', 'success');
+}
+
+function toggleQueryHelp() {
+    const help = document.getElementById('queryHelp');
+    if (help) {
+        help.style.display = help.style.display === 'none' ? 'block' : 'none';
+    }
+}
+
+function setQuery(queryText) {
+    const input = document.getElementById('metricsQuery');
+    if (input) {
+        input.value = queryText;
+        input.focus();
+    }
+}
+
+async function executeQuery() {
+    const input = document.getElementById('metricsQuery');
+    const results = document.getElementById('queryResults');
+    
+    if (!input || !results) return;
+    
+    const query = input.value.trim();
+    if (!query) {
+        results.innerHTML = '<p class="query-placeholder">Please enter a query</p>';
+        return;
+    }
+    
+    results.innerHTML = '<div class="loading">Executing query...</div>';
+    
+    try {
+        const response = await fetchAPI(`/api/metrics/query?query=${encodeURIComponent(query)}`);
+        
+        if (response.error) {
+            results.innerHTML = `<div class="query-error">Error: ${escapeHtml(response.error)}</div>`;
+            return;
+        }
+        
+        if (response.status === 'error') {
+            results.innerHTML = `<div class="query-error">Query error: ${escapeHtml(response.error || response.errorType || 'Unknown error')}</div>`;
+            return;
+        }
+        
+        const data = response.data;
+        if (!data || !data.result || data.result.length === 0) {
+            results.innerHTML = '<p class="query-placeholder">No results found</p>';
+            return;
+        }
+        
+        // Display results
+        const resultHtml = data.result.map(item => {
+            const metric = item.metric ? JSON.stringify(item.metric) : 'value';
+            const value = item.value ? item.value[1] : 'N/A';
+            const formattedValue = typeof value === 'number' ? value.toLocaleString() : value;
+            
+            return `
+                <div class="query-result-item">
+                    <span class="query-result-metric">${escapeHtml(metric)}</span>
+                    <span class="query-result-value">${escapeHtml(formattedValue)}</span>
+                </div>
+            `;
+        }).join('');
+        
+        results.innerHTML = resultHtml || '<p class="query-placeholder">No results</p>';
+        
+    } catch (error) {
+        results.innerHTML = `<div class="query-error">Failed to execute query: ${escapeHtml(error.message)}</div>`;
+    }
 }
 
 // =============================================================================
