@@ -96,3 +96,12 @@ GOLBAT_API_SECRET=SuperSecureGolbatApiSecret
 #   - Dragonite uses this when sending Pokemon encounters to be processed.
 #   - Ensures only your scanner can write data to your database.
 GOLBAT_RAW_SECRET=SuperSecureGolbatRawSecret
+
+# -----------------------------------------------------------------------------
+# GRAFANA SETTINGS - Stats Dashboard
+# -----------------------------------------------------------------------------
+# GRAFANA_ADMIN_PASSWORD: Password for the Grafana admin account.
+#   - Default username is "admin", this is the password.
+#   - Used to log into Grafana at http://yourserver:6006
+#   - If not set, defaults to "admin" (you should change this!)
+GRAFANA_ADMIN_PASSWORD=SuperSecureGrafanaPassword

@@ -1,0 +1,14 @@
+# Grafana datasource provisioning for VictoriaMetrics
+apiVersion: 1
+
+datasources:
+  - name: VictoriaMetrics
+    type: prometheus
+    uid: victoriametrics
+    access: proxy
+    url: http://victoriametrics:8428
+    isDefault: true
+    editable: false
+    jsonData:
+      timeInterval: "15s"
+

@@ -10912,6 +10912,19 @@ def api_metrics_status():
                     data = resp.json()
                     result['grafana']['version'] = data.get('version', 'unknown')
                     result['grafana']['accessible'] = True
+                    
+                    # Check if dashboard exists
+                    try:
+                        dash_resp = requests.get(
+                            f'{GRAFANA_URL}/api/dashboards/uid/dragonite-vm',
+                            timeout=5
+                        )
+                        result['grafana']['dashboard_ready'] = dash_resp.status_code == 200
+                        if dash_resp.status_code == 200:
+                            result['grafana']['dashboard_uid'] = 'dragonite-vm'
+                            result['grafana']['dashboard_title'] = dash_resp.json().get('dashboard', {}).get('title', 'Dragonite')
+                    except:
+                        result['grafana']['dashboard_ready'] = False
             except:
                 result['grafana']['accessible'] = False
                 result['grafana']['note'] = 'Container running but HTTP not responding yet'

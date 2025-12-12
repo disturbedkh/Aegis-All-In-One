@@ -5009,19 +5009,54 @@ async function checkMetricsStatus() {
         const grafanaOffline = document.getElementById('grafanaOffline');
         const grafanaFrame = document.getElementById('grafanaFrame');
         
-        if (status.grafana?.running) {
-            // Show Grafana iframe
-            if (grafanaLoading) grafanaLoading.style.display = 'none';
-            if (grafanaOffline) grafanaOffline.style.display = 'none';
-            if (grafanaFrame) {
-                // Build Grafana URL with dashboard
-                const timeRange = document.getElementById('grafanaTimeRange')?.value || 'now-6h';
-                const grafanaUrl = buildGrafanaUrl(timeRange);
-                if (!grafanaFrame.src || grafanaFrame.src !== grafanaUrl) {
-                    grafanaFrame.src = grafanaUrl;
+        if (status.grafana?.running && status.grafana?.accessible) {
+            // Grafana is running
+            if (status.grafana?.dashboard_ready) {
+                // Dashboard is provisioned - show it
+                if (grafanaLoading) grafanaLoading.style.display = 'none';
+                if (grafanaOffline) grafanaOffline.style.display = 'none';
+                if (grafanaFrame) {
+                    // Build Grafana URL with dashboard
+                    const timeRange = document.getElementById('grafanaTimeRange')?.value || 'now-6h';
+                    const grafanaUrl = buildGrafanaUrl(timeRange, status.grafana.dashboard_uid);
+                    if (!grafanaFrame.src || grafanaFrame.src !== grafanaUrl) {
+                        grafanaFrame.src = grafanaUrl;
+                    }
+                    grafanaFrame.style.display = 'block';
                 }
-                grafanaFrame.style.display = 'block';
+            } else {
+                // Grafana running but dashboard not provisioned yet
+                if (grafanaLoading) grafanaLoading.style.display = 'none';
+                if (grafanaOffline) {
+                    grafanaOffline.style.display = 'block';
+                    grafanaOffline.innerHTML = `
+                        <h3>Dashboard Loading...</h3>
+                        <p>Grafana is running but the Dragonite dashboard is being provisioned.</p>
+                        <div class="offline-actions">
+                            <button class="btn btn-primary" onclick="restartGrafanaContainer()">🔄 Restart Grafana</button>
+                            <button class="btn" onclick="checkMetricsStatus()">🔄 Retry</button>
+                            <button class="btn" onclick="openGrafanaExternal()">🔗 Open Grafana</button>
+                        </div>
+                        <div class="offline-help">
+                            <p><strong>Dashboard Provisioning:</strong></p>
+                            <ul>
+                                <li>Dashboards are auto-loaded from <code>grafana/dashboards/</code></li>
+                                <li>Try restarting: <code>docker compose restart grafana</code></li>
+                                <li>Check logs: <code>docker logs grafana</code></li>
+                            </ul>
+                        </div>
+                    `;
+                }
+                if (grafanaFrame) grafanaFrame.style.display = 'none';
             }
+        } else if (status.grafana?.running) {
+            // Container running but not accessible yet
+            if (grafanaLoading) {
+                grafanaLoading.style.display = 'block';
+                grafanaLoading.textContent = 'Grafana starting up...';
+            }
+            if (grafanaOffline) grafanaOffline.style.display = 'none';
+            if (grafanaFrame) grafanaFrame.style.display = 'none';
         } else {
             // Show offline state
             if (grafanaLoading) grafanaLoading.style.display = 'none';
@@ -5041,13 +5076,10 @@ async function checkMetricsStatus() {
     }
 }
 
-function buildGrafanaUrl(timeRange = 'now-6h') {
+function buildGrafanaUrl(timeRange = 'now-6h', dashboardUid = 'dragonite-vm') {
     // Get the current host and build Grafana URL
     const host = window.location.hostname;
     const baseUrl = `http://${host}:${GRAFANA_PORT}`;
-    
-    // Dragonite dashboard UID from the JSON
-    const dashboardUid = 'dragonite-vm';
     
     // Build URL with time range and kiosk mode for embedding
     return `${baseUrl}/d/${dashboardUid}/dragonite?orgId=1&from=${timeRange}&to=now&kiosk`;
@@ -5080,6 +5112,22 @@ async function startGrafanaContainer() {
         }
     } catch (error) {
         showToast('Failed to start Grafana: ' + error.message, 'error');
+    }
+}
+
+async function restartGrafanaContainer() {
+    try {
+        showToast('Restarting Grafana to reload dashboards...', 'info');
+        const result = await fetchAPI('/api/containers/grafana/restart', { method: 'POST' });
+        if (result.success) {
+            showToast('Grafana restarting - dashboards will reload in ~10 seconds', 'success');
+            // Wait a bit then check status
+            setTimeout(checkMetricsStatus, 10000);
+        } else {
+            showToast('Failed to restart Grafana: ' + (result.error || 'Unknown error'), 'error');
+        }
+    } catch (error) {
+        showToast('Failed to restart Grafana: ' + error.message, 'error');
     }
 }
 

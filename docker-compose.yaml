@@ -199,6 +199,15 @@ services:
     environment:
       # PUID/PGID for file permissions - set in .env or defaults to 1000
       GF_SECURITY_ALLOW_EMBEDDING: "true"
+      # Allow anonymous access for embedding (read-only)
+      GF_AUTH_ANONYMOUS_ENABLED: "true"
+      GF_AUTH_ANONYMOUS_ORG_ROLE: "Viewer"
+      # Admin password - set in .env as GRAFANA_ADMIN_PASSWORD
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-admin}
+      # Disable login requirement for viewing dashboards
+      GF_AUTH_DISABLE_LOGIN_FORM: "false"
+      # Provisioning paths
+      GF_PATHS_PROVISIONING: /etc/grafana/provisioning
     container_name: grafana
     restart: unless-stopped
     user: "${PUID:-1000}:${PGID:-1000}"
@@ -206,6 +215,8 @@ services:
       - victoriametrics
     volumes:
       - ./grafana:/var/lib/grafana
+      - ./grafana/provisioning:/etc/grafana/provisioning
+      - ./grafana/dashboards:/var/lib/grafana/dashboards
       - /etc/localtime:/etc/localtime:ro
     ports:
       - 6006:3000
