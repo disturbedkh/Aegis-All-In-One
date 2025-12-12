@@ -11923,7 +11923,9 @@ AEGIS_SECRETS = {
             {'file': '.env', 'pattern': 'MYSQL_USER=(.*)'},
             {'file': 'unown/dragonite_config.toml', 'pattern': 'user = "(.*)"', 'section': 'db.dragonite'},
             {'file': 'unown/golbat_config.toml', 'pattern': 'user = "(.*)"', 'section': 'database'},
-            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[*].username'},
+            # ReactMap has two DB schemas that need username: golbat (index 1) and reactmap (index 2)
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas.1.username', 'desc': 'golbat db'},
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas.2.username', 'desc': 'reactmap db'},
             {'file': 'Poracle/config/local.json', 'json_path': 'database.client.user'},
             {'file': 'init/01.sql', 'pattern': "'dbuser'@", 'replace_with': "'{value}'@"},
         ]
@@ -11939,7 +11941,9 @@ AEGIS_SECRETS = {
             {'file': '.env', 'pattern': 'MYSQL_PASSWORD=(.*)'},
             {'file': 'unown/dragonite_config.toml', 'pattern': 'password = "(.*)"', 'section': 'db.dragonite'},
             {'file': 'unown/golbat_config.toml', 'pattern': 'password = "(.*)"', 'section': 'database'},
-            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[*].password'},
+            # ReactMap has two DB schemas that need password: golbat (index 1) and reactmap (index 2)
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas.1.password', 'desc': 'golbat db'},
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas.2.password', 'desc': 'reactmap db'},
             {'file': 'Poracle/config/local.json', 'json_path': 'database.client.password'},
             {'file': 'init/01.sql', 'pattern': "IDENTIFIED BY '(.*)'"},
         ]
@@ -11997,7 +12001,8 @@ AEGIS_SECRETS = {
             {'file': '.env', 'pattern': 'GOLBAT_API_SECRET=(.*)'},
             {'file': 'unown/dragonite_config.toml', 'pattern': 'golbat_api_secret = "(.*)"', 'section': 'processors'},
             {'file': 'unown/golbat_config.toml', 'pattern': 'api_secret = "(.*)"'},
-            {'file': 'reactmap/local.json', 'json_path': 'database.schemas[type=golbat].secret'},
+            # ReactMap: Schema index 0 is the Golbat API entry (type: "golbat")
+            {'file': 'reactmap/local.json', 'json_path': 'database.schemas.0.secret', 'desc': 'golbat api'},
         ]
     },
     'GOLBAT_RAW_SECRET': {
@@ -12211,12 +12216,19 @@ CONFIG_VARIABLE_CATEGORIES = {
 
 # Mapping of where shared variables appear in each config file (from setup.sh)
 # These are the ONLY variables that MUST be set - they are replaced by sed in setup.sh
+#
+# ReactMap local.json database.schemas structure:
+#   [0] = Golbat API config (type: "golbat", endpoint, secret)
+#   [1] = Golbat DB config (database: "golbat", username, password)
+#   [2] = ReactMap DB config (database: "reactmap", username, password)
+#
 SHARED_VARIABLE_PATHS = {
     'MYSQL_USER': {
         '.env': 'MYSQL_USER',
         'unown/dragonite_config.toml': 'db.dragonite.user',
         'unown/golbat_config.toml': 'database.user',
-        'reactmap/local.json': 'database.schemas.1.username',  # schemas[1] has DB config
+        'reactmap/local.json (golbat db)': 'database.schemas.1.username',  # Golbat DB schema
+        'reactmap/local.json (reactmap db)': 'database.schemas.2.username',  # ReactMap DB schema
         'unown/rotom_config.json': None,  # Rotom doesn't use DB directly
         'Poracle/config/local.json': 'database.client.user',
         'init/01.sql': None  # Special handling via template
@@ -12225,7 +12237,8 @@ SHARED_VARIABLE_PATHS = {
         '.env': 'MYSQL_PASSWORD',
         'unown/dragonite_config.toml': 'db.dragonite.password',
         'unown/golbat_config.toml': 'database.password',
-        'reactmap/local.json': 'database.schemas.1.password',  # schemas[1] has DB config
+        'reactmap/local.json (golbat db)': 'database.schemas.1.password',  # Golbat DB schema
+        'reactmap/local.json (reactmap db)': 'database.schemas.2.password',  # ReactMap DB schema
         'Poracle/config/local.json': 'database.client.password',
         'init/01.sql': None  # Special handling via template
     },
@@ -12233,13 +12246,13 @@ SHARED_VARIABLE_PATHS = {
         '.env': 'KOJI_SECRET',
         'unown/dragonite_config.toml': 'koji.bearer_token',
         'unown/golbat_config.toml': 'koji.bearer_token',
-        'reactmap/local.json': 'api.kojiSecret'
+        'reactmap/local.json': 'api.kojiOptions.bearerToken'
     },
     'GOLBAT_API_SECRET': {
         '.env': 'GOLBAT_API_SECRET',
         'unown/dragonite_config.toml': 'processors.golbat_api_secret',
         'unown/golbat_config.toml': 'api_secret',
-        'reactmap/local.json': 'api.golbatSecret'
+        'reactmap/local.json': 'database.schemas.0.secret'  # Golbat API schema (type: "golbat")
     },
     'GOLBAT_RAW_SECRET': {
         '.env': 'GOLBAT_RAW_SECRET',
@@ -12253,18 +12266,19 @@ SHARED_VARIABLE_PATHS = {
 }
 
 # Shared field indicators (simplified for config editor display)
+# Note: ReactMap has TWO database schemas - golbat DB (index 1) and reactmap DB (index 2)
 SHARED_FIELDS = {
     'db_user': {
-        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json (golbat db)', 'reactmap/local.json (reactmap db)'],
         'label': 'Database Username',
-        'desc': 'Must match MYSQL_USER in .env - used by all services',
+        'desc': 'Must match MYSQL_USER in .env - used by all services (ReactMap uses same user for both DBs)',
         'color': '#3b82f6',
         'secret_key': 'MYSQL_USER'
     },
     'db_password': {
-        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json (golbat db)', 'reactmap/local.json (reactmap db)'],
         'label': 'Database Password',
-        'desc': 'Must match MYSQL_PASSWORD in .env - used by all services',
+        'desc': 'Must match MYSQL_PASSWORD in .env - used by all services (ReactMap uses same password for both DBs)',
         'color': '#3b82f6',
         'secret_key': 'MYSQL_PASSWORD'
     },
@@ -12276,9 +12290,9 @@ SHARED_FIELDS = {
         'secret_key': 'KOJI_SECRET'
     },
     'golbat_api_secret': {
-        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json'],
+        'configs': ['unown/dragonite_config.toml', 'unown/golbat_config.toml', 'reactmap/local.json (golbat api)'],
         'label': 'Golbat API Secret',
-        'desc': 'Must match across configs - Dragonite/ReactMap use this to request data from Golbat',
+        'desc': 'Must match across configs - Dragonite/ReactMap use this to request data from Golbat API',
         'color': '#10b981',
         'secret_key': 'GOLBAT_API_SECRET'
     },
@@ -16558,8 +16572,12 @@ def parse_config_value(aegis_root, config_file, field_path):
     Supports:
     - Dot notation for nested objects: 'db.dragonite.user'
     - Numeric indices for arrays: 'database.schemas.1.username'
+    - Annotated file paths: 'reactmap/local.json (golbat db)' -> 'reactmap/local.json'
     """
-    full_path = os.path.join(aegis_root, config_file)
+    # Strip any annotations in parentheses from config_file path
+    # e.g., 'reactmap/local.json (golbat db)' -> 'reactmap/local.json'
+    actual_file = config_file.split(' (')[0].strip()
+    full_path = os.path.join(aegis_root, actual_file)
     
     if not os.path.exists(full_path):
         return None, 'file_missing'
@@ -16638,8 +16656,10 @@ def api_config_debug_variable(var_name):
         if config_file == '.env' or field_path is None:
             continue
         
-        full_path = os.path.join(aegis_root, config_file)
-        file_info = {'path': full_path, 'field_path': field_path}
+        # Strip any annotations in parentheses from config_file path
+        actual_file = config_file.split(' (')[0].strip()
+        full_path = os.path.join(aegis_root, actual_file)
+        file_info = {'path': full_path, 'field_path': field_path, 'config_key': config_file}
         
         if not os.path.exists(full_path):
             file_info['exists'] = False
@@ -16724,7 +16744,10 @@ def api_config_sync_from_env():
             if config_file == '.env' or field_path is None:
                 continue
             
-            full_path = os.path.join(aegis_root, config_file)
+            # Strip any annotations in parentheses from config_file path
+            # e.g., 'reactmap/local.json (golbat db)' -> 'reactmap/local.json'
+            actual_file = config_file.split(' (')[0].strip()
+            full_path = os.path.join(aegis_root, actual_file)
             if not os.path.exists(full_path):
                 continue
             
@@ -16748,7 +16771,7 @@ def api_config_sync_from_env():
                     content = f.read()
                 
                 # Update based on file type
-                if config_file.endswith('.toml'):
+                if actual_file.endswith('.toml'):
                     # For TOML, use sed-like replacement
                     field_name = field_path.split('.')[-1]
                     # Match: field_name = "old_value" or field_name = "placeholder"
@@ -16766,7 +16789,7 @@ def api_config_sync_from_env():
                         })
                         continue
                         
-                elif config_file.endswith('.json'):
+                elif actual_file.endswith('.json'):
                     # For JSON, parse and update
                     import json
                     data = json.loads(content)
