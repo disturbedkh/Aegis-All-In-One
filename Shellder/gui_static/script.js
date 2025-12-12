@@ -12758,9 +12758,21 @@ function updateWizardUI() {
     updateStepStatus('passwords', wizardStatus.steps.passwords?.complete,
         wizardStatus.steps.passwords?.complete ? 'Passwords configured' : 'Passwords not set');
     
-    updateStepStatus('mariadb', wizardStatus.steps.mariadb_setup?.complete,
-        wizardStatus.steps.mariadb_setup?.complete ? 'Databases ready' : 
-        (wizardStatus.steps.mariadb_setup?.databases_created ? 'Needs optimization' : 'Needs setup'));
+    // Update MariaDB step - show detailed status
+    const mariadbStep = wizardStatus.steps.mariadb_setup;
+    let mariadbDetails = 'Needs setup';
+    if (mariadbStep) {
+        if (mariadbStep.complete) {
+            mariadbDetails = mariadbStep.optimized ? 'Databases ready & optimized ✓' : 'Databases ready ✓';
+        } else if (!mariadbStep.container_running) {
+            mariadbDetails = 'Start database container first';
+        } else if (!mariadbStep.accessible) {
+            mariadbDetails = 'Container running, not accessible';
+        } else if (!mariadbStep.databases_created) {
+            mariadbDetails = 'Click Setup to create databases';
+        }
+    }
+    updateStepStatus('mariadb', mariadbStep?.complete, mariadbDetails);
     
     updateStepStatus('logging', wizardStatus.steps.docker_logging?.complete,
         wizardStatus.steps.docker_logging?.complete ? 'Log rotation enabled' : 'Not configured');

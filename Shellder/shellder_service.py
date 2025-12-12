@@ -12492,9 +12492,10 @@ def api_wizard_status():
         'container_running': db_container_running,
         'accessible': db_accessible,
         'databases_created': databases_created,
-        'config_exists': mariadb_configured,
-        'configured': mariadb_configured and (db_accessible or mariadb_installed),
-        'complete': databases_created and mariadb_configured
+        'optimized': mariadb_configured,  # Optional optimization config
+        'configured': db_accessible and databases_created,
+        # Complete when databases exist and are accessible (optimization is optional)
+        'complete': databases_created and db_accessible
     }
     
     # Step 6: Config Files
