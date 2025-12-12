@@ -15629,6 +15629,243 @@ def parse_config_value(aegis_root, config_file, field_path):
         return None, f'error:{str(e)[:30]}'
 
 
+@app.route('/api/config/debug-variable/<var_name>')
+def api_config_debug_variable(var_name):
+    """Debug endpoint to trace how a variable is being read from each config file"""
+    aegis_root = str(AEGIS_ROOT)
+    
+    if var_name not in SHARED_VARIABLE_PATHS:
+        return jsonify({'error': f'Unknown variable: {var_name}', 'available': list(SHARED_VARIABLE_PATHS.keys())}), 400
+    
+    paths = SHARED_VARIABLE_PATHS[var_name]
+    debug_info = {
+        'variable': var_name,
+        'aegis_root': aegis_root,
+        'paths_config': paths,
+        'files': {}
+    }
+    
+    # Read .env
+    env_file = os.path.join(aegis_root, '.env')
+    if os.path.exists(env_file):
+        try:
+            with open(env_file) as f:
+                env_content = f.read()
+            # Find the line
+            for line in env_content.split('\n'):
+                if line.startswith(f'{var_name}='):
+                    debug_info['files']['.env'] = {
+                        'exists': True,
+                        'raw_line': line,
+                        'parsed_value': line.split('=', 1)[1].strip('"\'') if '=' in line else None
+                    }
+                    break
+            else:
+                debug_info['files']['.env'] = {'exists': True, 'raw_line': None, 'note': 'Variable not found in file'}
+        except Exception as e:
+            debug_info['files']['.env'] = {'exists': True, 'error': str(e)}
+    else:
+        debug_info['files']['.env'] = {'exists': False}
+    
+    # Read each config file
+    for config_file, field_path in paths.items():
+        if config_file == '.env' or field_path is None:
+            continue
+        
+        full_path = os.path.join(aegis_root, config_file)
+        file_info = {'path': full_path, 'field_path': field_path}
+        
+        if not os.path.exists(full_path):
+            file_info['exists'] = False
+        else:
+            file_info['exists'] = True
+            try:
+                with open(full_path) as f:
+                    raw_content = f.read()
+                
+                # Show relevant lines from raw content
+                relevant_lines = []
+                for i, line in enumerate(raw_content.split('\n')):
+                    # Look for the field name in the line
+                    field_name = field_path.split('.')[-1]  # Get last part of path
+                    if field_name in line and '=' in line:
+                        relevant_lines.append({'line_num': i+1, 'content': line.strip()})
+                
+                file_info['relevant_raw_lines'] = relevant_lines
+                
+                # Parse and get value
+                value, status = parse_config_value(aegis_root, config_file, field_path)
+                file_info['parse_result'] = {
+                    'value': value,
+                    'status': status,
+                    'value_type': type(value).__name__ if value is not None else 'None'
+                }
+                
+                # If TOML, show parsed structure
+                if config_file.endswith('.toml'):
+                    parsed = parse_simple_toml(full_path)
+                    # Navigate to show the section
+                    parts = field_path.split('.')
+                    if len(parts) == 1:
+                        file_info['toml_root_keys'] = list(parsed.keys())[:20]
+                        file_info['toml_field_value'] = parsed.get(parts[0], 'KEY_NOT_FOUND')
+                    else:
+                        section = parsed.get(parts[0], {})
+                        file_info['toml_section_keys'] = list(section.keys()) if isinstance(section, dict) else 'NOT_A_DICT'
+                        if isinstance(section, dict):
+                            file_info['toml_field_value'] = section.get(parts[1], 'KEY_NOT_FOUND')
+                
+            except Exception as e:
+                file_info['error'] = str(e)
+                import traceback
+                file_info['traceback'] = traceback.format_exc()
+        
+        debug_info['files'][config_file] = file_info
+    
+    return jsonify(debug_info)
+
+
+@app.route('/api/config/sync-from-env', methods=['POST'])
+def api_config_sync_from_env():
+    """Sync all secrets from .env to their respective config files"""
+    aegis_root = str(AEGIS_ROOT)
+    env_file = os.path.join(aegis_root, '.env')
+    
+    if not os.path.exists(env_file):
+        return jsonify({'error': '.env file not found'}), 404
+    
+    # Load .env values
+    env_values = {}
+    with open(env_file) as f:
+        for line in f:
+            line = line.strip()
+            if '=' in line and not line.startswith('#'):
+                key, value = line.split('=', 1)
+                env_values[key] = value.strip('"\'')
+    
+    results = []
+    
+    for var_name, paths in SHARED_VARIABLE_PATHS.items():
+        env_value = env_values.get(var_name)
+        if not env_value:
+            results.append({'variable': var_name, 'status': 'skipped', 'reason': 'Not in .env'})
+            continue
+        
+        # Get default placeholder to check if we should sync
+        default_placeholder = AEGIS_SECRETS.get(var_name, {}).get('default_placeholder', '')
+        
+        for config_file, field_path in paths.items():
+            if config_file == '.env' or field_path is None:
+                continue
+            
+            full_path = os.path.join(aegis_root, config_file)
+            if not os.path.exists(full_path):
+                continue
+            
+            try:
+                # Read current value
+                current_value, status = parse_config_value(aegis_root, config_file, field_path)
+                
+                # Check if needs sync (current is default or different from env)
+                needs_sync = (current_value == default_placeholder) or (current_value != env_value)
+                
+                if not needs_sync:
+                    results.append({
+                        'variable': var_name,
+                        'file': config_file,
+                        'status': 'already_synced'
+                    })
+                    continue
+                
+                # Read file content
+                with open(full_path) as f:
+                    content = f.read()
+                
+                # Update based on file type
+                if config_file.endswith('.toml'):
+                    # For TOML, use sed-like replacement
+                    field_name = field_path.split('.')[-1]
+                    # Match: field_name = "old_value" or field_name = "placeholder"
+                    import re
+                    pattern = rf'^(\s*{re.escape(field_name)}\s*=\s*")[^"]*(")'
+                    replacement = rf'\g<1>{env_value}\g<2>'
+                    new_content, count = re.subn(pattern, replacement, content, flags=re.MULTILINE)
+                    
+                    if count == 0:
+                        results.append({
+                            'variable': var_name,
+                            'file': config_file,
+                            'status': 'error',
+                            'reason': f'Pattern not found for {field_name}'
+                        })
+                        continue
+                        
+                elif config_file.endswith('.json'):
+                    # For JSON, parse and update
+                    import json
+                    data = json.loads(content)
+                    parts = field_path.split('.')
+                    
+                    # Navigate to parent
+                    current = data
+                    for part in parts[:-1]:
+                        if part.isdigit():
+                            current = current[int(part)]
+                        else:
+                            current = current[part]
+                    
+                    # Set value
+                    last_part = parts[-1]
+                    if last_part.isdigit():
+                        current[int(last_part)] = env_value
+                    else:
+                        current[last_part] = env_value
+                    
+                    new_content = json.dumps(data, indent=2)
+                else:
+                    results.append({
+                        'variable': var_name,
+                        'file': config_file,
+                        'status': 'error',
+                        'reason': 'Unsupported file type'
+                    })
+                    continue
+                
+                # Write back
+                success, error = safe_write_file(full_path, new_content)
+                if success:
+                    results.append({
+                        'variable': var_name,
+                        'file': config_file,
+                        'status': 'synced',
+                        'from': current_value[:10] + '...' if current_value and len(str(current_value)) > 10 else current_value,
+                        'to': env_value[:10] + '...' if len(env_value) > 10 else env_value
+                    })
+                else:
+                    results.append({
+                        'variable': var_name,
+                        'file': config_file,
+                        'status': 'error',
+                        'reason': error
+                    })
+                    
+            except Exception as e:
+                results.append({
+                    'variable': var_name,
+                    'file': config_file,
+                    'status': 'error',
+                    'reason': str(e)
+                })
+    
+    synced_count = sum(1 for r in results if r.get('status') == 'synced')
+    return jsonify({
+        'success': True,
+        'synced_count': synced_count,
+        'results': results,
+        'note': 'Restart services (docker compose restart) for changes to take effect' if synced_count > 0 else None
+    })
+
+
 @app.route('/api/config/variables-status')
 def api_config_variables_status():
     """Get status of REQUIRED config variables (secrets that must be changed from defaults)"""
