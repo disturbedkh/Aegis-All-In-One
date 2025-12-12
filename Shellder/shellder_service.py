@@ -13453,93 +13453,69 @@ def api_mariadb_setup():
         'errors': []
     }
     
-    # Find mysql CLI
-    mysql_cmd = shutil.which('mariadb') or shutil.which('mysql')
-    
-    # Determine connection method: try localhost:3306 first, then docker exec
-    import socket
+    # For setup wizard, ALWAYS use Docker container (not localhost MariaDB)
+    # The Aegis stack uses containerized MariaDB, not a local installation
     import time
-    use_localhost = False
     use_docker = False
     
-    # Check if port 3306 is accessible on localhost
+    # Check if database container is running
     try:
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        sock.settimeout(3)
-        if sock.connect_ex(('127.0.0.1', 3306)) == 0:
-            use_localhost = True
-            results['steps'].append('✓ MariaDB accessible on localhost:3306')
-        sock.close()
+        result = subprocess.run(
+            ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
+            capture_output=True, text=True, timeout=5
+        )
+        if 'database' in result.stdout:
+            use_docker = True
+            results['steps'].append('✓ Database container already running')
     except:
         pass
     
-    # If localhost not available, check/start container
-    if not use_localhost:
-        # Check if database container is running
+    # If container not running, start it
+    if not use_docker:
+        results['steps'].append('⏳ Database container not running, starting it...')
         try:
-            result = subprocess.run(
-                ['docker', 'ps', '--filter', 'name=database', '--format', '{{.Names}}'],
-                capture_output=True, text=True, timeout=5
+            # Start only the database service
+            start_result = subprocess.run(
+                ['docker', 'compose', 'up', '-d', 'database'],
+                capture_output=True, text=True, timeout=120, cwd=aegis_root
             )
-            if 'database' in result.stdout:
-                use_docker = True
-                results['steps'].append('✓ Database container already running')
-        except:
-            pass
-        
-        # If container not running, try to start it
-        if not use_docker:
-            results['steps'].append('⏳ Database container not running, starting it...')
-            try:
-                # Start only the database service
-                start_result = subprocess.run(
-                    ['docker', 'compose', 'up', '-d', 'database'],
-                    capture_output=True, text=True, timeout=60, cwd=aegis_root
-                )
+            
+            if start_result.returncode == 0:
+                results['steps'].append('✓ Database container started')
                 
-                if start_result.returncode == 0:
-                    results['steps'].append('✓ Database container started')
-                    
-                    # Wait for MariaDB to be ready (up to 30 seconds)
-                    results['steps'].append('⏳ Waiting for MariaDB to initialize...')
-                    for i in range(30):
-                        time.sleep(1)
-                        # Check if we can connect
-                        check_result = subprocess.run(
-                            ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
-                            capture_output=True, text=True, timeout=5
-                        )
-                        if check_result.returncode == 0:
-                            use_docker = True
-                            results['steps'].append(f'✓ MariaDB ready after {i+1} seconds')
-                            break
-                    
-                    if not use_docker:
-                        results['errors'].append('Database container started but MariaDB not responding after 30 seconds')
-                else:
-                    results['errors'].append(f'Failed to start database container: {start_result.stderr}')
-            except Exception as e:
-                results['errors'].append(f'Error starting database container: {e}')
+                # Wait for MariaDB to be ready (up to 45 seconds - first start can be slow)
+                results['steps'].append('⏳ Waiting for MariaDB to initialize (first start may take 30-45 seconds)...')
+                for i in range(45):
+                    time.sleep(1)
+                    # Check if we can connect
+                    check_result = subprocess.run(
+                        ['docker', 'exec', 'database', 'mysql', '-u', 'root', f'-p{root_password}', '-e', 'SELECT 1'],
+                        capture_output=True, text=True, timeout=5
+                    )
+                    if check_result.returncode == 0:
+                        use_docker = True
+                        results['steps'].append(f'✓ MariaDB ready after {i+1} seconds')
+                        break
+                
+                if not use_docker:
+                    results['errors'].append('Database container started but MariaDB not responding after 45 seconds. Check container logs.')
+            else:
+                results['errors'].append(f'Failed to start database container: {start_result.stderr}')
+        except Exception as e:
+            results['errors'].append(f'Error starting database container: {e}')
     
-    if not use_localhost and not use_docker:
-        results['errors'].append('No database connection available. Check Docker and docker-compose.yaml.')
+    if not use_docker:
+        results['errors'].append('Could not connect to database container. Check Docker is running and docker-compose.yaml exists.')
         results['success'] = False
         return jsonify(results)
     
-    # Helper function to run mysql commands
+    # Helper function to run mysql commands via Docker container
     def run_mysql(user, password, query, check_db=None):
-        if use_localhost and mysql_cmd:
-            cmd = [mysql_cmd, '-u', user, f'-p{password}', '-h', '127.0.0.1', '-P', '3306']
-            if check_db:
-                cmd.extend(['-D', check_db])
-            cmd.extend(['-e', query])
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
-        else:
-            cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
-            if check_db:
-                cmd.extend(['-D', check_db])
-            cmd.extend(['-e', query])
-            return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        cmd = ['docker', 'exec', 'database', 'mysql', '-u', user, f'-p{password}']
+        if check_db:
+            cmd.extend(['-D', check_db])
+        cmd.extend(['-e', query])
+        return subprocess.run(cmd, capture_output=True, text=True, timeout=30)
     
     # Test root connection
     try:
