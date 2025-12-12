@@ -213,26 +213,30 @@ setup_venv() {
 check_dependencies() {
     echo -e "${CYAN}Checking dependencies...${NC}"
     
-    # Check if Flask is installed in venv
-    if ! "$PYTHON_CMD" -c "import flask" 2>/dev/null; then
-        echo -e "${YELLOW}Installing dependencies...${NC}"
+    local REQUIREMENTS_FILE="$SCRIPT_DIR/Shellder/requirements.txt"
+    
+    # Check ALL required modules from requirements.txt
+    # If any are missing, reinstall from requirements.txt
+    if ! "$PYTHON_CMD" -c "import flask, flask_socketio, docker, psutil, pymysql, toml, requests" 2>/dev/null; then
+        echo -e "${YELLOW}Installing/updating dependencies...${NC}"
         "$PIP_CMD" install --upgrade pip -q 2>/dev/null
         
-        # Install all required dependencies for shellder_service.py
-        "$PIP_CMD" install flask flask-cors flask-socketio python-socketio eventlet requests psutil -q
+        # Install from requirements.txt for consistency
+        if [ -f "$REQUIREMENTS_FILE" ]; then
+            "$PIP_CMD" install -q -r "$REQUIREMENTS_FILE"
+        else
+            # Fallback if requirements.txt not found
+            "$PIP_CMD" install flask flask-cors flask-socketio python-socketio eventlet requests psutil docker pymysql toml -q
+        fi
+        
         if [ $? -ne 0 ]; then
             echo -e "${RED}Failed to install dependencies${NC}"
             exit 1
         fi
+        echo -e "${GREEN}✓ Dependencies installed${NC}"
+    else
+        echo -e "${GREEN}✓ Dependencies OK${NC}"
     fi
-    
-    # Check for optional docker package
-    if ! "$PYTHON_CMD" -c "import docker" 2>/dev/null; then
-        echo -e "${YELLOW}Installing docker package...${NC}"
-        "$PIP_CMD" install docker -q 2>/dev/null || true
-    fi
-    
-    echo -e "${GREEN}✓ Dependencies OK${NC}"
 }
 
 is_running() {
