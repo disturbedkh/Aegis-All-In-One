@@ -8496,8 +8496,7 @@ function renderServicesList() {
     const servicesList = document.getElementById('nginxServicesList');
     if (!servicesList) return;
     
-    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
-    const isSubdomain = structure === 'subdomain';
+    const defaultStructure = document.getElementById('setupStructure')?.value || 'subdomain';
     const defaultDomain = baseDomains[0] || 'example.com';
     
     let html = '<div class="services-config-list">';
@@ -8505,7 +8504,6 @@ function renderServicesList() {
     runningContainers.forEach(container => {
         const serviceId = container.id;
         const defaultPort = container.port;
-        const defaultPath = isSubdomain ? `${serviceId}.${defaultDomain}` : `/${serviceId}/`;
         
         html += `
             <div class="service-config-item" id="item_${serviceId}">
@@ -8534,36 +8532,43 @@ function renderServicesList() {
                 </div>
                 
                 <div class="service-config-details" id="details_${serviceId}">
-                    <!-- Domain Selection -->
-                    <div class="form-group-inline" style="margin-bottom: 10px;">
-                        <label>Domain:</label>
-                        <select id="domain_${serviceId}" class="service-domain-select" onchange="updateServicePreview('${serviceId}')">
-                            ${baseDomains.length > 0 
-                                ? baseDomains.map((d, i) => `<option value="${d}" ${i === 0 ? 'selected' : ''}>${d}</option>`).join('')
-                                : '<option value="">-- Add a domain first --</option>'
-                            }
-                        </select>
+                    <!-- Domain & Structure Selection Row -->
+                    <div class="service-structure-row">
+                        <div>
+                            <label>Domain:</label>
+                            <select id="domain_${serviceId}" class="service-domain-select" onchange="updateServicePreview('${serviceId}')">
+                                ${baseDomains.length > 0 
+                                    ? baseDomains.map((d, i) => `<option value="${d}" ${i === 0 ? 'selected' : ''}>${d}</option>`).join('')
+                                    : '<option value="">-- Add a domain first --</option>'
+                                }
+                            </select>
+                        </div>
+                        <div>
+                            <label>Structure:</label>
+                            <select id="structure_${serviceId}" class="service-structure-select" onchange="updateServiceStructure('${serviceId}')">
+                                <option value="subdomain" ${defaultStructure === 'subdomain' ? 'selected' : ''}>Subdomain</option>
+                                <option value="directory" ${defaultStructure === 'directory' ? 'selected' : ''}>Directory</option>
+                            </select>
+                        </div>
                     </div>
                     
                     <!-- Subdomain/Path Configuration -->
                     <div class="form-group-inline" style="margin-bottom: 10px;">
-                        <label>${isSubdomain ? 'Subdomain' : 'Path'}:</label>
+                        <label id="pathLabel_${serviceId}">Subdomain:</label>
                         <input type="text" 
                                id="path_${serviceId}" 
                                class="form-input-sm" 
-                               placeholder="${isSubdomain ? serviceId : `/${serviceId}/`}"
-                               value="${isSubdomain ? serviceId : serviceId}"
+                               placeholder="${serviceId}"
+                               value="${serviceId}"
                                oninput="updateServicePreview('${serviceId}')">
-                        <small class="text-muted">
-                            ${isSubdomain 
-                                ? 'Subdomain prefix (leave empty to use base domain directly)' 
-                                : 'URL path (e.g., "map" for /map/)'}
+                        <small class="text-muted" id="pathHint_${serviceId}">
+                            Subdomain prefix (e.g., "map" for map.example.com)
                         </small>
                     </div>
                     
                     <!-- Preview -->
                     <div class="service-preview" id="preview_${serviceId}">
-                        <small class="text-muted">Preview: <code>${getServicePreviewUrl(serviceId, defaultDomain, isSubdomain ? serviceId : serviceId, isSubdomain)}</code></small>
+                        <small class="text-muted">Preview: <code>https://${serviceId}.${defaultDomain}</code></small>
                     </div>
                 </div>
             </div>
@@ -8575,6 +8580,32 @@ function renderServicesList() {
     
     // Initialize all previews
     runningContainers.forEach(c => updateServicePreview(c.id));
+}
+
+// Update service structure (subdomain vs directory) when changed
+function updateServiceStructure(serviceId) {
+    const structureSelect = document.getElementById(`structure_${serviceId}`);
+    const pathLabel = document.getElementById(`pathLabel_${serviceId}`);
+    const pathHint = document.getElementById(`pathHint_${serviceId}`);
+    const pathInput = document.getElementById(`path_${serviceId}`);
+    
+    if (!structureSelect || !pathLabel || !pathHint) return;
+    
+    const isSubdomain = structureSelect.value === 'subdomain';
+    const domainSelect = document.getElementById(`domain_${serviceId}`);
+    const domain = domainSelect?.value || baseDomains[0] || 'example.com';
+    
+    if (isSubdomain) {
+        pathLabel.textContent = 'Subdomain:';
+        pathHint.textContent = `Subdomain prefix (e.g., "map" for map.${domain})`;
+        if (pathInput) pathInput.placeholder = serviceId;
+    } else {
+        pathLabel.textContent = 'Path:';
+        pathHint.textContent = `URL path (e.g., "map" for ${domain}/map/)`;
+        if (pathInput) pathInput.placeholder = `/${serviceId}/`;
+    }
+    
+    updateServicePreview(serviceId);
 }
 
 // Get preview URL for a service
@@ -8611,7 +8642,8 @@ function toggleServiceConfig(serviceId) {
 
 // Update service preview when input changes
 function updateServicePreview(serviceId) {
-    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
+    const structureSelect = document.getElementById(`structure_${serviceId}`);
+    const structure = structureSelect?.value || document.getElementById('setupStructure')?.value || 'subdomain';
     const isSubdomain = structure === 'subdomain';
     
     const domainSelect = document.getElementById(`domain_${serviceId}`);
@@ -8634,9 +8666,18 @@ function updateServicePreview(serviceId) {
     previewEl.innerHTML = `<small class="text-muted">Preview: <code>${previewUrl}</code></small>`;
 }
 
-// Update all service previews (called when structure changes)
+// Update all service previews (called when default structure changes)
 function updateAllServicePreviews() {
-    renderServicesList();
+    const defaultStructure = document.getElementById('setupStructure')?.value || 'subdomain';
+    
+    // Update each service's structure select to match the default (if not manually changed)
+    runningContainers.forEach(container => {
+        const structureSelect = document.getElementById(`structure_${container.id}`);
+        if (structureSelect) {
+            structureSelect.value = defaultStructure;
+            updateServiceStructure(container.id);
+        }
+    });
 }
 
 // Update UI when structure changes
@@ -8647,8 +8688,7 @@ function updateServiceConfigUI() {
 // Run multi-service nginx setup
 async function runMultiServiceNginxSetup() {
     const email = document.getElementById('setupEmail')?.value.trim();
-    const structure = document.getElementById('setupStructure')?.value || 'subdomain';
-    const isSubdomain = structure === 'subdomain';
+    const defaultStructure = document.getElementById('setupStructure')?.value || 'subdomain';
     
     if (baseDomains.length === 0) {
         showToast('Please add at least one domain first', 'warning');
@@ -8667,11 +8707,14 @@ async function runMultiServiceNginxSetup() {
         const serviceId = container.id;
         const checkbox = document.getElementById(`service_${serviceId}`);
         const domainSelect = document.getElementById(`domain_${serviceId}`);
+        const structureSelect = document.getElementById(`structure_${serviceId}`);
         const pathInput = document.getElementById(`path_${serviceId}`);
         const portInput = document.getElementById(`port_${serviceId}`);
         
         if (checkbox && checkbox.checked) {
             const selectedDomain = domainSelect?.value || baseDomains[0];
+            const structure = structureSelect?.value || defaultStructure;
+            const isSubdomain = structure === 'subdomain';
             const path = pathInput?.value.trim() || serviceId;
             const port = parseInt(portInput?.value) || container.port;
             

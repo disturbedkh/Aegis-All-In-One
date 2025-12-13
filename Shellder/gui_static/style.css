@@ -4508,12 +4508,34 @@ select:focus {
 
 .services-list {
     margin-top: 16px;
+    width: 100%;
+}
+
+/* Nginx Quick Setup Services Step - overrides generic setup-step flex */
+.nginx-services-step {
+    display: block !important;
+    margin-bottom: 24px;
+    padding: 20px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-md);
+    border: 1px solid var(--border-color);
+}
+
+.nginx-services-step h3 {
+    margin: 0 0 12px 0;
+    font-size: 16px;
+    color: var(--text-primary);
+}
+
+.nginx-services-step p {
+    margin: 0 0 12px 0;
 }
 
 .services-config-list {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(280px, 1fr));
     gap: 16px;
+    width: 100%;
 }
 
 .service-config-item {
@@ -4612,7 +4634,8 @@ select:focus {
     display: none;
 }
 
-.service-domain-select {
+.service-domain-select,
+.service-structure-select {
     width: 100%;
     padding: 6px 10px;
     background: var(--bg-primary);
@@ -4623,9 +4646,27 @@ select:focus {
     margin-bottom: 8px;
 }
 
-.service-domain-select:focus {
+.service-domain-select:focus,
+.service-structure-select:focus {
     outline: none;
     border-color: var(--accent-color);
+}
+
+.service-structure-row {
+    display: flex;
+    gap: 8px;
+    margin-bottom: 10px;
+}
+
+.service-structure-row > div {
+    flex: 1;
+}
+
+.service-structure-row label {
+    display: block;
+    font-size: 12px;
+    color: var(--text-muted);
+    margin-bottom: 4px;
 }
 
 .form-group-inline {
