@@ -3018,17 +3018,22 @@
                             <div class="setup-step">
                                 <h3>Step 1: Base Configuration</h3>
                                 <div class="form-group">
-                                    <label>Base Domain:</label>
-                                    <input type="text" id="setupBaseDomain" placeholder="example.com" class="form-input">
-                                    <small class="text-muted">Your main domain (e.g., example.com)</small>
+                                    <label>Domains:</label>
+                                    <div class="add-domain-group">
+                                        <input type="text" id="newDomainInput" placeholder="example.com" class="form-input" 
+                                               onkeypress="if(event.key==='Enter'){addBaseDomain(); event.preventDefault();}">
+                                        <button class="btn btn-sm btn-success" onclick="addBaseDomain()">+ Add</button>
+                                    </div>
+                                    <div id="domainTagsContainer" class="domain-tags-container"></div>
+                                    <small class="text-muted">Add one or more domains. Each service can use any of these domains.</small>
                                 </div>
                                 <div class="form-group">
-                                    <label>URL Structure:</label>
-                                    <select id="setupStructure" class="form-input" onchange="updateServiceConfigUI()">
+                                    <label>Default URL Structure:</label>
+                                    <select id="setupStructure" class="form-input" onchange="updateAllServicePreviews()">
                                         <option value="subdomain">Subdomain (e.g., reactmap.example.com)</option>
                                         <option value="directory">Directory (e.g., example.com/reactmap)</option>
                                     </select>
-                                    <small class="text-muted">Choose how services are accessed</small>
+                                    <small class="text-muted">Choose how services are accessed by default</small>
                                 </div>
                                 <div class="form-group">
                                     <label>Email (for SSL Certificate):</label>
@@ -3040,7 +3045,10 @@
                             <!-- Step 2: Service Configuration -->
                             <div class="setup-step">
                                 <h3>Step 2: Configure Services</h3>
-                                <p class="text-muted">Select which services to configure and customize their domains/paths:</p>
+                                <p class="text-muted">Select services to configure. Customize domains, subdomains/paths, and ports for each:</p>
+                                <div class="text-warning" style="margin-bottom: 12px; font-size: 13px;">
+                                    ⚠️ <strong>Note:</strong> Rotom requires WebSocket support and special configuration - use the dedicated Rotom setup instead.
+                                </div>
                                 <div id="nginxServicesList" class="services-list">
                                     <div class="loading">Loading running containers...</div>
                                 </div>

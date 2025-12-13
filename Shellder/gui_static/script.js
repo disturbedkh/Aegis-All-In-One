@@ -8344,6 +8344,79 @@ document.getElementById('setupService')?.addEventListener('change', function() {
 // =============================================================================
 
 let runningContainers = [];
+let baseDomains = []; // Array of configured base domains
+
+// Shellder service definition (always available)
+const shellderService = {
+    id: 'shellder',
+    name: 'Shellder GUI',
+    description: 'Aegis Control Panel',
+    port: 5000,
+    status: 'running',
+    websocket: false,
+    isBuiltIn: true
+};
+
+// Services to exclude from quick setup (require special handling)
+const excludedServices = ['rotom']; // Rotom needs WebSocket config
+
+// =============================================================================
+// DOMAIN MANAGEMENT
+// =============================================================================
+
+function addBaseDomain() {
+    const input = document.getElementById('newDomainInput');
+    const domain = input?.value.trim().toLowerCase();
+    
+    if (!domain) {
+        showToast('Please enter a domain', 'warning');
+        return;
+    }
+    
+    // Basic domain validation
+    if (!/^[a-z0-9]+([\-\.]{1}[a-z0-9]+)*\.[a-z]{2,}$/.test(domain)) {
+        showToast('Please enter a valid domain (e.g., example.com)', 'warning');
+        return;
+    }
+    
+    if (baseDomains.includes(domain)) {
+        showToast('Domain already added', 'warning');
+        return;
+    }
+    
+    baseDomains.push(domain);
+    input.value = '';
+    renderDomainTags();
+    renderServicesList();
+    showToast(`Added domain: ${domain}`, 'success');
+}
+
+function removeBaseDomain(domain) {
+    baseDomains = baseDomains.filter(d => d !== domain);
+    renderDomainTags();
+    renderServicesList();
+}
+
+function renderDomainTags() {
+    const container = document.getElementById('domainTagsContainer');
+    if (!container) return;
+    
+    if (baseDomains.length === 0) {
+        container.innerHTML = '<span class="text-muted" style="font-size: 13px;">No domains added yet. Add at least one domain above.</span>';
+        return;
+    }
+    
+    container.innerHTML = baseDomains.map(domain => `
+        <span class="domain-tag">
+            ${domain}
+            <span class="remove-domain" onclick="removeBaseDomain('${domain}')" title="Remove domain">×</span>
+        </span>
+    `).join('');
+}
+
+// =============================================================================
+// CONTAINER LOADING
+// =============================================================================
 
 // Load running containers for nginx setup
 async function loadRunningContainers() {
@@ -8351,7 +8424,6 @@ async function loadRunningContainers() {
     const servicesList = document.getElementById('nginxServicesList');
     if (!servicesList) {
         console.error('[Nginx Setup] nginxServicesList element not found');
-        // Try to find it with a delay in case DOM isn't ready
         setTimeout(() => {
             const retryList = document.getElementById('nginxServicesList');
             if (retryList) {
@@ -8367,12 +8439,14 @@ async function loadRunningContainers() {
     console.log('[Nginx Setup] Setting loading message...');
     servicesList.innerHTML = '<div class="loading">Loading running containers...</div>';
     
+    // Initialize domain tags display
+    renderDomainTags();
+    
     try {
         console.log('[Nginx Setup] Fetching running containers from API...');
         const result = await fetchAPI('/api/nginx/running-containers', { force: true });
         console.log('[Nginx Setup] API response:', result ? 'received' : 'null');
         
-        // Check for API error response
         if (result && result.error) {
             const errorMsg = `Error: ${result.error}`;
             console.error('[Nginx Setup] API returned error:', result.error);
@@ -8386,7 +8460,15 @@ async function loadRunningContainers() {
             return;
         }
         
-        runningContainers = result.containers || [];
+        // Filter out excluded services (like Rotom) and add Shellder
+        let containers = (result.containers || []).filter(c => !excludedServices.includes(c.id));
+        
+        // Add Shellder GUI if not already present
+        if (!containers.find(c => c.id === 'shellder')) {
+            containers.push(shellderService);
+        }
+        
+        runningContainers = containers;
         console.log('[Nginx Setup] Found containers:', runningContainers.length);
         
         if (runningContainers.length === 0) {
@@ -8399,7 +8481,6 @@ async function loadRunningContainers() {
         renderServicesList();
     } catch (e) {
         console.error('[Nginx Setup] Exception loading containers:', e);
-        console.error('[Nginx Setup] Error stack:', e.stack);
         const errorMsg = `Error loading containers: ${e.message || 'Unknown error'}`;
         if (servicesList) {
             servicesList.innerHTML = `<div class="text-danger">${errorMsg}</div>`;
@@ -8407,63 +8488,82 @@ async function loadRunningContainers() {
     }
 }
 
-// Render the services configuration list
+// =============================================================================
+// SERVICE LIST RENDERING
+// =============================================================================
+
 function renderServicesList() {
     const servicesList = document.getElementById('nginxServicesList');
     if (!servicesList) return;
     
     const structure = document.getElementById('setupStructure')?.value || 'subdomain';
-    const baseDomain = document.getElementById('setupBaseDomain')?.value || 'example.com';
+    const isSubdomain = structure === 'subdomain';
+    const defaultDomain = baseDomains[0] || 'example.com';
     
     let html = '<div class="services-config-list">';
     
     runningContainers.forEach(container => {
         const serviceId = container.id;
-        const isSubdomain = structure === 'subdomain';
-        const defaultPath = isSubdomain ? `${serviceId}.${baseDomain}` : `/${serviceId}/`;
+        const defaultPort = container.port;
+        const defaultPath = isSubdomain ? `${serviceId}.${defaultDomain}` : `/${serviceId}/`;
         
         html += `
-            <div class="service-config-item">
+            <div class="service-config-item" id="item_${serviceId}">
                 <div class="service-config-header">
                     <label class="service-checkbox">
                         <input type="checkbox" 
                                id="service_${serviceId}" 
                                checked 
-                               onchange="updateServicePreview('${serviceId}')">
+                               onchange="toggleServiceConfig('${serviceId}')">
                         <span class="service-name">${container.name}</span>
                     </label>
-                    <span class="service-desc">${container.description} (Port ${container.port})</span>
+                    <span class="service-desc">${container.description}</span>
                 </div>
+                
+                <!-- Port Configuration -->
+                <div class="service-port-group">
+                    <label>Port:</label>
+                    <input type="number" 
+                           id="port_${serviceId}" 
+                           class="service-port-input" 
+                           value="${defaultPort}"
+                           min="1" 
+                           max="65535"
+                           onchange="updateServicePreview('${serviceId}')">
+                    <small class="text-muted">(default: ${defaultPort})</small>
+                </div>
+                
                 <div class="service-config-details" id="details_${serviceId}">
-                    <div class="form-group-inline" style="margin-bottom: 12px;">
-                        <label>
-                            <input type="checkbox" 
-                                   id="usebase_${serviceId}" 
-                                   onchange="updateServicePreview('${serviceId}')">
-                            <span style="margin-left: 6px;">Use base domain (${baseDomain})</span>
-                        </label>
-                        <small class="text-muted">
-                            ${isSubdomain 
-                                ? 'Check to use base domain, or enter custom subdomain below' 
-                                : 'Check to use root path (/), or enter custom path below'}
-                        </small>
+                    <!-- Domain Selection -->
+                    <div class="form-group-inline" style="margin-bottom: 10px;">
+                        <label>Domain:</label>
+                        <select id="domain_${serviceId}" class="service-domain-select" onchange="updateServicePreview('${serviceId}')">
+                            ${baseDomains.length > 0 
+                                ? baseDomains.map((d, i) => `<option value="${d}" ${i === 0 ? 'selected' : ''}>${d}</option>`).join('')
+                                : '<option value="">-- Add a domain first --</option>'
+                            }
+                        </select>
                     </div>
-                    <div class="form-group-inline">
-                        <label>${isSubdomain ? 'Custom Subdomain' : 'Custom Path'} (optional):</label>
+                    
+                    <!-- Subdomain/Path Configuration -->
+                    <div class="form-group-inline" style="margin-bottom: 10px;">
+                        <label>${isSubdomain ? 'Subdomain' : 'Path'}:</label>
                         <input type="text" 
                                id="path_${serviceId}" 
                                class="form-input-sm" 
-                               placeholder="${defaultPath}"
-                               oninput="updateServicePreview('${serviceId}')"
-                               disabled>
+                               placeholder="${isSubdomain ? serviceId : `/${serviceId}/`}"
+                               value="${isSubdomain ? serviceId : serviceId}"
+                               oninput="updateServicePreview('${serviceId}')">
                         <small class="text-muted">
                             ${isSubdomain 
-                                ? `Enter custom subdomain (e.g., "map" for map.${baseDomain})` 
-                                : `Enter custom path (e.g., "dashboard" for /dashboard/)`}
+                                ? 'Subdomain prefix (leave empty to use base domain directly)' 
+                                : 'URL path (e.g., "map" for /map/)'}
                         </small>
                     </div>
+                    
+                    <!-- Preview -->
                     <div class="service-preview" id="preview_${serviceId}">
-                        <small class="text-muted">Preview: <code>${isSubdomain ? `https://${serviceId}.${baseDomain}` : `https://${baseDomain}/${serviceId}/`}</code></small>
+                        <small class="text-muted">Preview: <code>${getServicePreviewUrl(serviceId, defaultDomain, isSubdomain ? serviceId : serviceId, isSubdomain)}</code></small>
                     </div>
                 </div>
             </div>
@@ -8472,61 +8572,71 @@ function renderServicesList() {
     
     html += '</div>';
     servicesList.innerHTML = html;
+    
+    // Initialize all previews
+    runningContainers.forEach(c => updateServicePreview(c.id));
+}
+
+// Get preview URL for a service
+function getServicePreviewUrl(serviceId, domain, path, isSubdomain) {
+    if (!domain) return 'https://[add-domain-first]/';
+    
+    if (isSubdomain) {
+        if (path && path.trim()) {
+            return `https://${path.trim()}.${domain}`;
+        }
+        return `https://${domain}`;
+    } else {
+        const cleanPath = path ? path.trim().replace(/^\/+|\/+$/g, '') : serviceId;
+        return `https://${domain}/${cleanPath}/`;
+    }
+}
+
+// Toggle service configuration visibility
+function toggleServiceConfig(serviceId) {
+    const checkbox = document.getElementById(`service_${serviceId}`);
+    const item = document.getElementById(`item_${serviceId}`);
+    const details = document.getElementById(`details_${serviceId}`);
+    
+    if (!checkbox || !details) return;
+    
+    if (checkbox.checked) {
+        item?.classList.remove('disabled');
+        details.style.display = 'block';
+    } else {
+        item?.classList.add('disabled');
+        details.style.display = 'none';
+    }
 }
 
 // Update service preview when input changes
 function updateServicePreview(serviceId) {
     const structure = document.getElementById('setupStructure')?.value || 'subdomain';
-    const baseDomain = document.getElementById('setupBaseDomain')?.value || 'example.com';
-    const customPath = document.getElementById(`path_${serviceId}`)?.value.trim() || '';
-    const useBase = document.getElementById(`usebase_${serviceId}`)?.checked || false;
-    const previewEl = document.getElementById(`preview_${serviceId}`);
-    const detailsEl = document.getElementById(`details_${serviceId}`);
-    const checkbox = document.getElementById(`service_${serviceId}`);
+    const isSubdomain = structure === 'subdomain';
+    
+    const domainSelect = document.getElementById(`domain_${serviceId}`);
     const pathInput = document.getElementById(`path_${serviceId}`);
+    const previewEl = document.getElementById(`preview_${serviceId}`);
+    const checkbox = document.getElementById(`service_${serviceId}`);
     
-    if (!previewEl || !detailsEl || !checkbox) return;
+    if (!previewEl || !checkbox) return;
     
-    // Show/hide details based on checkbox state
-    if (checkbox.checked) {
-        detailsEl.style.display = 'block';
-    } else {
-        detailsEl.style.display = 'none';
+    // Hide if unchecked
+    if (!checkbox.checked) {
+        toggleServiceConfig(serviceId);
         return;
     }
     
-    // Enable/disable path input based on useBase checkbox
-    if (pathInput) {
-        pathInput.disabled = useBase;
-        if (useBase) {
-            pathInput.value = '';
-        }
-    }
+    const domain = domainSelect?.value || baseDomains[0] || '';
+    const path = pathInput?.value.trim() || serviceId;
     
-    let preview = '';
-    if (useBase) {
-        // Use base domain
-        preview = `https://${baseDomain}${structure === 'directory' ? '/' : ''}`;
-    } else if (structure === 'subdomain') {
-        if (customPath) {
-            preview = `https://${customPath}`;
-        } else {
-            preview = `https://${serviceId}.${baseDomain}`;
-        }
-    } else {
-        if (customPath) {
-            const cleanPath = customPath.startsWith('/') ? customPath : `/${customPath}`;
-            if (!cleanPath.endsWith('/')) {
-                preview = `https://${baseDomain}${cleanPath}/`;
-            } else {
-                preview = `https://${baseDomain}${cleanPath}`;
-            }
-        } else {
-            preview = `https://${baseDomain}/${serviceId}/`;
-        }
-    }
-    
-    previewEl.innerHTML = `<small class="text-muted">Preview: <code>${preview}</code></small>`;
+    const previewUrl = getServicePreviewUrl(serviceId, domain, path, isSubdomain);
+    previewEl.innerHTML = `<small class="text-muted">Preview: <code>${previewUrl}</code></small>`;
+}
+
+// Update all service previews (called when structure changes)
+function updateAllServicePreviews() {
+    renderServicesList();
 }
 
 // Update UI when structure changes
@@ -8536,12 +8646,12 @@ function updateServiceConfigUI() {
 
 // Run multi-service nginx setup
 async function runMultiServiceNginxSetup() {
-    const baseDomain = document.getElementById('setupBaseDomain')?.value.trim();
     const email = document.getElementById('setupEmail')?.value.trim();
     const structure = document.getElementById('setupStructure')?.value || 'subdomain';
+    const isSubdomain = structure === 'subdomain';
     
-    if (!baseDomain) {
-        showToast('Base domain is required', 'warning');
+    if (baseDomains.length === 0) {
+        showToast('Please add at least one domain first', 'warning');
         return;
     }
     
@@ -8556,17 +8666,33 @@ async function runMultiServiceNginxSetup() {
     runningContainers.forEach(container => {
         const serviceId = container.id;
         const checkbox = document.getElementById(`service_${serviceId}`);
+        const domainSelect = document.getElementById(`domain_${serviceId}`);
         const pathInput = document.getElementById(`path_${serviceId}`);
-        const useBase = document.getElementById(`usebase_${serviceId}`)?.checked || false;
+        const portInput = document.getElementById(`port_${serviceId}`);
         
         if (checkbox && checkbox.checked) {
+            const selectedDomain = domainSelect?.value || baseDomains[0];
+            const path = pathInput?.value.trim() || serviceId;
+            const port = parseInt(portInput?.value) || container.port;
+            
+            // Build the full domain
+            let fullDomain;
+            if (isSubdomain) {
+                fullDomain = path ? `${path}.${selectedDomain}` : selectedDomain;
+            } else {
+                fullDomain = selectedDomain;
+            }
+            
             services.push({
                 id: serviceId,
-                port: container.port,
-                domain: useBase ? baseDomain : (pathInput?.value.trim() || ''),
+                name: container.name,
+                port: port,
+                domain: fullDomain,
+                base_domain: selectedDomain,
+                path: isSubdomain ? '' : `/${path}/`,
                 enabled: true,
                 websocket: container.websocket || false,
-                use_base: useBase
+                structure: structure
             });
         }
     });
@@ -8580,12 +8706,14 @@ async function runMultiServiceNginxSetup() {
     const preEl = outputEl.querySelector('pre');
     outputEl.style.display = 'block';
     preEl.textContent = 'Setting up nginx for multiple services...\n\n';
+    preEl.textContent += `Domains: ${baseDomains.join(', ')}\n`;
+    preEl.textContent += `Services: ${services.length}\n\n`;
     
     try {
         const result = await fetchAPI('/api/nginx/setup', {
             method: 'POST',
             body: JSON.stringify({
-                base_domain: baseDomain,
+                domains: baseDomains,
                 email: email,
                 structure: structure,
                 services: services
@@ -8595,15 +8723,15 @@ async function runMultiServiceNginxSetup() {
         
         if (result.success) {
             let output = `✓ Nginx setup completed successfully!\n\n`;
-            output += `Base Domain: ${baseDomain}\n`;
-            output += `Structure: ${structure === 'subdomain' ? 'Subdomain' : 'Directory'}\n`;
+            output += `Domains: ${baseDomains.join(', ')}\n`;
+            output += `Structure: ${isSubdomain ? 'Subdomain' : 'Directory'}\n`;
             output += `Services Configured: ${result.results?.length || 0}\n\n`;
             
             if (result.results) {
                 output += 'Service Results:\n';
                 result.results.forEach(r => {
                     if (r.success) {
-                        output += `  ✓ ${r.service}: ${r.domain} (Port ${r.port})\n`;
+                        output += `  ✓ ${r.service}: ${r.domain} → localhost:${r.port}\n`;
                     } else {
                         output += `  ✗ ${r.service}: ${r.error || 'Failed'}\n`;
                     }
@@ -8646,18 +8774,8 @@ async function runMultiServiceNginxSetup() {
 
 // Auto-load containers when Sites & Security tab is opened
 document.addEventListener('DOMContentLoaded', function() {
-    // Update previews when base domain changes
-    const baseDomainInput = document.getElementById('setupBaseDomain');
-    if (baseDomainInput) {
-        baseDomainInput.addEventListener('input', function() {
-            // Update all service previews
-            if (runningContainers.length > 0) {
-                runningContainers.forEach(container => {
-                    updateServicePreview(container.id);
-                });
-            }
-        });
-    }
+    // Initialize domain tags container
+    renderDomainTags();
     
     // Also load on initial page load if nginx page is active
     if (document.getElementById('page-nginx')?.classList.contains('active')) {

@@ -4511,9 +4511,9 @@ select:focus {
 }
 
 .services-config-list {
-    display: flex;
-    flex-direction: column;
-    gap: 12px;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+    gap: 16px;
 }
 
 .service-config-item {
@@ -4522,6 +4522,8 @@ select:focus {
     border: 1px solid var(--border-color);
     border-radius: var(--radius-md);
     transition: all 0.2s ease;
+    display: flex;
+    flex-direction: column;
 }
 
 .service-config-item:hover {
@@ -4529,11 +4531,16 @@ select:focus {
     box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
 }
 
+.service-config-item.disabled {
+    opacity: 0.5;
+}
+
 .service-config-header {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 12px;
     margin-bottom: 12px;
+    flex-wrap: wrap;
 }
 
 .service-checkbox {
@@ -4558,18 +4565,67 @@ select:focus {
 
 .service-desc {
     color: var(--text-muted);
+    font-size: 12px;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.service-port-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-top: 8px;
+    padding: 8px;
+    background: var(--bg-tertiary);
+    border-radius: var(--radius-sm);
+}
+
+.service-port-group label {
+    font-size: 12px;
+    color: var(--text-muted);
+    white-space: nowrap;
+}
+
+.service-port-input {
+    width: 80px;
+    padding: 4px 8px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
     font-size: 13px;
-    margin-left: auto;
+    text-align: center;
+}
+
+.service-port-input:focus {
+    outline: none;
+    border-color: var(--accent-color);
 }
 
 .service-config-details {
-    margin-left: 26px;
+    margin-top: auto;
     padding-top: 12px;
     border-top: 1px solid var(--border-color);
 }
 
 .service-config-details:empty {
     display: none;
+}
+
+.service-domain-select {
+    width: 100%;
+    padding: 6px 10px;
+    background: var(--bg-primary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    color: var(--text-primary);
+    font-size: 13px;
+    margin-bottom: 8px;
+}
+
+.service-domain-select:focus {
+    outline: none;
+    border-color: var(--accent-color);
 }
 
 .form-group-inline {
@@ -4592,13 +4648,52 @@ select:focus {
     color: var(--text-primary);
     font-size: 14px;
     width: 100%;
-    max-width: 400px;
 }
 
 .form-input-sm:focus {
     outline: none;
     border-color: var(--accent-color);
     box-shadow: 0 0 0 3px rgba(var(--accent-rgb), 0.1);
+}
+
+/* Domain tags for multiple domains */
+.domain-tags-container {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.domain-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 10px;
+    background: var(--accent-color);
+    color: white;
+    border-radius: 20px;
+    font-size: 13px;
+}
+
+.domain-tag .remove-domain {
+    cursor: pointer;
+    opacity: 0.7;
+    font-size: 14px;
+    line-height: 1;
+}
+
+.domain-tag .remove-domain:hover {
+    opacity: 1;
+}
+
+.add-domain-group {
+    display: flex;
+    gap: 8px;
+    margin-top: 8px;
+}
+
+.add-domain-group input {
+    flex: 1;
 }
 
 .service-preview {
