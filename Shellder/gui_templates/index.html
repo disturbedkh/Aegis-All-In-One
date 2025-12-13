@@ -3055,8 +3055,9 @@
                             </div>
                             
                             <div class="form-actions">
-                                <button class="btn btn-primary" onclick="runMultiServiceNginxSetup()">🔧 Setup All Services with SSL</button>
+                                <button class="btn btn-primary" onclick="runMultiServiceNginxSetup()">🔧 Setup Selected Services with SSL</button>
                                 <button class="btn btn-sm" onclick="loadRunningContainers()">🔄 Refresh Services</button>
+                                <button class="btn btn-sm btn-secondary" onclick="clearNginxSetupStorage()" title="Clear saved domains and email">🗑️ Clear Saved</button>
                             </div>
                         </div>
                         <div id="nginxSetupOutput" class="setup-output" style="display: none;">

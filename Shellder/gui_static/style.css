@@ -1671,6 +1671,17 @@ html, body {
     color: white;
 }
 
+.btn-secondary {
+    background: rgba(100, 116, 139, 0.2);
+    border-color: var(--text-muted);
+    color: var(--text-muted);
+}
+
+.btn-secondary:hover {
+    background: rgba(100, 116, 139, 0.4);
+    color: var(--text-primary);
+}
+
 .btn-icon {
     width: 36px;
     height: 36px;
