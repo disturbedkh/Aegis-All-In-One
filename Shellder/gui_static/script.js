@@ -3850,66 +3850,11 @@ async function checkDuplicateDocker() {
     showToast('🔍 Checking for duplicate Docker installations...', 'info');
     
     try {
-        const result = await fetchAPI('/api/exec', {
-            method: 'POST',
-            body: JSON.stringify({
-                command: `
-                    echo "=== Checking Docker Installations ==="
-                    APT_DOCKER=""
-                    SNAP_DOCKER=""
-                    
-                    # Check for APT Docker
-                    if dpkg -l docker-ce 2>/dev/null | grep -q "^ii"; then
-                        APT_DOCKER="docker-ce (Official)"
-                    elif dpkg -l docker.io 2>/dev/null | grep -q "^ii"; then
-                        APT_DOCKER="docker.io (Ubuntu)"
-                    fi
-                    
-                    # Check for Snap Docker
-                    if snap list docker 2>/dev/null | grep -q "docker"; then
-                        SNAP_DOCKER="docker (Snap)"
-                    fi
-                    
-                    # Report findings
-                    echo "APT_DOCKER: $APT_DOCKER"
-                    echo "SNAP_DOCKER: $SNAP_DOCKER"
-                    
-                    # Check for conflicts
-                    if [ -n "$APT_DOCKER" ] && [ -n "$SNAP_DOCKER" ]; then
-                        echo "STATUS: CONFLICT"
-                        echo "CONFLICT: Both APT and Snap versions of Docker are installed!"
-                    elif [ -n "$APT_DOCKER" ]; then
-                        echo "STATUS: OK_APT"
-                    elif [ -n "$SNAP_DOCKER" ]; then
-                        echo "STATUS: OK_SNAP"
-                    else
-                        echo "STATUS: NONE"
-                    fi
-                    
-                    # Check which docker binary is being used
-                    echo ""
-                    echo "Docker binary: $(which docker 2>/dev/null || echo 'Not found')"
-                    echo "Docker version: $(docker --version 2>/dev/null || echo 'Not available')"
-                    
-                    # Check socket
-                    if [ -S /var/run/docker.sock ]; then
-                        echo "Socket: /var/run/docker.sock exists"
-                    elif [ -S /run/docker.sock ]; then
-                        echo "Socket: /run/docker.sock exists"
-                    else
-                        echo "Socket: Not found - Docker may not be running"
-                    fi
-                `
-            })
-        });
+        const result = await fetchAPI('/api/docker/check-duplicate');
         
-        const output = result.stdout || '';
-        const hasConflict = output.includes('STATUS: CONFLICT');
-        const hasApt = output.includes('STATUS: OK_APT');
-        const hasSnap = output.includes('STATUS: OK_SNAP');
-        const hasNone = output.includes('STATUS: NONE');
+        const detailsText = (result.details || []).join('\n');
         
-        if (hasConflict) {
+        if (result.has_conflict || result.status === 'conflict') {
             // Show conflict warning modal
             openModal('⚠️ Duplicate Docker Installation Detected!', `
                 <div class="docker-conflict-warning">
@@ -3925,8 +3870,12 @@ async function checkDuplicateDocker() {
                     </div>
                     
                     <div class="conflict-details" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
-                        <h4 style="margin: 0 0 10px 0;">📋 Detection Output</h4>
-                        <pre style="background: var(--bg-tertiary); padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${output}</pre>
+                        <h4 style="margin: 0 0 10px 0;">📋 Detection Details</h4>
+                        <div style="margin-bottom: 10px;">
+                            <strong>APT Docker:</strong> ${result.apt_docker || 'Not found'}<br>
+                            <strong>Snap Docker:</strong> ${result.snap_docker || 'Not found'}
+                        </div>
+                        <pre style="background: var(--bg-tertiary); padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${detailsText}</pre>
                     </div>
                     
                     <div class="conflict-solution" style="background: var(--success-bg, #d4edda); border: 1px solid var(--success-color, #c3e6cb); padding: 15px; border-radius: 8px;">
@@ -3954,7 +3903,7 @@ sudo systemctl restart docker</pre>
             
             showToast('⚠️ Duplicate Docker installations found! Check the modal for details.', 'error', 8000);
             
-        } else if (hasApt) {
+        } else if (result.status === 'ok_apt') {
             if (statusEl) {
                 statusEl.textContent = '✅ APT only (OK)';
                 statusEl.className = 'install-status ok';
@@ -3966,7 +3915,7 @@ sudo systemctl restart docker</pre>
             }
             showToast('✅ Docker check passed - Only APT version installed (recommended)', 'success');
             
-        } else if (hasSnap) {
+        } else if (result.status === 'ok_snap') {
             if (statusEl) {
                 statusEl.textContent = '⚠️ Snap only';
                 statusEl.className = 'install-status warning';
@@ -3974,7 +3923,7 @@ sudo systemctl restart docker</pre>
             }
             showToast('⚠️ Docker is installed via Snap. APT version is recommended for servers.', 'warning');
             
-        } else if (hasNone) {
+        } else if (result.status === 'none') {
             if (statusEl) {
                 statusEl.textContent = '❌ Not installed';
                 statusEl.className = 'install-status not-installed';
@@ -3989,7 +3938,7 @@ sudo systemctl restart docker</pre>
             // Show output anyway
             openModal('🔍 Docker Installation Check', `
                 <div class="docker-check-output">
-                    <pre style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${output || 'No output received'}</pre>
+                    <pre style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${detailsText || 'No details available'}</pre>
                 </div>
             `);
         }

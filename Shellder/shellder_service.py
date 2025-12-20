@@ -10174,6 +10174,113 @@ def api_docker_install_status():
     
     return jsonify(status)
 
+@app.route('/api/docker/check-duplicate')
+def api_docker_check_duplicate():
+    """Check for duplicate Docker installations (Snap vs APT)"""
+    result = {
+        'apt_docker': None,
+        'snap_docker': None,
+        'has_conflict': False,
+        'status': 'unknown',
+        'docker_binary': None,
+        'docker_version': None,
+        'socket_status': None,
+        'details': []
+    }
+    
+    try:
+        # Check for APT Docker (docker-ce or docker.io)
+        try:
+            apt_check = subprocess.run(
+                ['dpkg', '-l', 'docker-ce'],
+                capture_output=True, text=True, timeout=10
+            )
+            if apt_check.returncode == 0 and 'ii' in apt_check.stdout:
+                result['apt_docker'] = 'docker-ce (Official)'
+                result['details'].append('✓ APT: docker-ce (Official Docker) is installed')
+        except:
+            pass
+        
+        if not result['apt_docker']:
+            try:
+                apt_check = subprocess.run(
+                    ['dpkg', '-l', 'docker.io'],
+                    capture_output=True, text=True, timeout=10
+                )
+                if apt_check.returncode == 0 and 'ii' in apt_check.stdout:
+                    result['apt_docker'] = 'docker.io (Ubuntu)'
+                    result['details'].append('✓ APT: docker.io (Ubuntu package) is installed')
+            except:
+                pass
+        
+        # Check for Snap Docker
+        try:
+            snap_check = subprocess.run(
+                ['snap', 'list', 'docker'],
+                capture_output=True, text=True, timeout=10
+            )
+            if snap_check.returncode == 0 and 'docker' in snap_check.stdout:
+                result['snap_docker'] = 'docker (Snap)'
+                result['details'].append('✓ SNAP: docker snap package is installed')
+        except:
+            pass
+        
+        # Determine status
+        if result['apt_docker'] and result['snap_docker']:
+            result['has_conflict'] = True
+            result['status'] = 'conflict'
+            result['details'].append('⚠️ CONFLICT: Both APT and Snap Docker are installed!')
+            result['details'].append('This can cause "Cannot connect to Docker daemon" errors')
+        elif result['apt_docker']:
+            result['status'] = 'ok_apt'
+            result['details'].append('✓ Status: Only APT Docker installed (recommended)')
+        elif result['snap_docker']:
+            result['status'] = 'ok_snap'
+            result['details'].append('⚠️ Status: Only Snap Docker installed (APT recommended for servers)')
+        else:
+            result['status'] = 'none'
+            result['details'].append('ℹ️ Status: No Docker installation detected')
+        
+        # Get current docker binary info
+        try:
+            which_docker = subprocess.run(
+                ['which', 'docker'],
+                capture_output=True, text=True, timeout=5
+            )
+            if which_docker.returncode == 0:
+                result['docker_binary'] = which_docker.stdout.strip()
+                result['details'].append(f'Docker binary: {result["docker_binary"]}')
+        except:
+            pass
+        
+        # Get docker version
+        try:
+            version_check = subprocess.run(
+                ['docker', '--version'],
+                capture_output=True, text=True, timeout=10
+            )
+            if version_check.returncode == 0:
+                result['docker_version'] = version_check.stdout.strip()
+                result['details'].append(f'Version: {result["docker_version"]}')
+        except:
+            result['details'].append('Docker version: Not available')
+        
+        # Check socket status
+        import os
+        if os.path.exists('/var/run/docker.sock'):
+            result['socket_status'] = '/var/run/docker.sock exists'
+        elif os.path.exists('/run/docker.sock'):
+            result['socket_status'] = '/run/docker.sock exists'
+        else:
+            result['socket_status'] = 'Socket not found - Docker may not be running'
+        result['details'].append(f'Socket: {result["socket_status"]}')
+        
+    except Exception as e:
+        result['error'] = str(e)
+        result['details'].append(f'Error during check: {e}')
+    
+    return jsonify(result)
+
 @app.route('/api/docker/install/<component>', methods=['POST'])
 def api_docker_install_component(component):
     """Install Docker components"""
