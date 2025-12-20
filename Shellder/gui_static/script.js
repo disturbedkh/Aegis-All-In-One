@@ -3837,6 +3837,172 @@ async function installDockerComponent(component) {
     }
 }
 
+// Check for duplicate Docker installations (Snap vs Apt)
+async function checkDuplicateDocker() {
+    const statusEl = document.getElementById('duplicateDockerStatus');
+    const itemEl = document.getElementById('checkDuplicateDocker');
+    
+    if (statusEl) {
+        statusEl.textContent = 'Checking...';
+        statusEl.className = 'install-status checking';
+    }
+    
+    showToast('🔍 Checking for duplicate Docker installations...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/exec', {
+            method: 'POST',
+            body: JSON.stringify({
+                command: `
+                    echo "=== Checking Docker Installations ==="
+                    APT_DOCKER=""
+                    SNAP_DOCKER=""
+                    
+                    # Check for APT Docker
+                    if dpkg -l docker-ce 2>/dev/null | grep -q "^ii"; then
+                        APT_DOCKER="docker-ce (Official)"
+                    elif dpkg -l docker.io 2>/dev/null | grep -q "^ii"; then
+                        APT_DOCKER="docker.io (Ubuntu)"
+                    fi
+                    
+                    # Check for Snap Docker
+                    if snap list docker 2>/dev/null | grep -q "docker"; then
+                        SNAP_DOCKER="docker (Snap)"
+                    fi
+                    
+                    # Report findings
+                    echo "APT_DOCKER: $APT_DOCKER"
+                    echo "SNAP_DOCKER: $SNAP_DOCKER"
+                    
+                    # Check for conflicts
+                    if [ -n "$APT_DOCKER" ] && [ -n "$SNAP_DOCKER" ]; then
+                        echo "STATUS: CONFLICT"
+                        echo "CONFLICT: Both APT and Snap versions of Docker are installed!"
+                    elif [ -n "$APT_DOCKER" ]; then
+                        echo "STATUS: OK_APT"
+                    elif [ -n "$SNAP_DOCKER" ]; then
+                        echo "STATUS: OK_SNAP"
+                    else
+                        echo "STATUS: NONE"
+                    fi
+                    
+                    # Check which docker binary is being used
+                    echo ""
+                    echo "Docker binary: $(which docker 2>/dev/null || echo 'Not found')"
+                    echo "Docker version: $(docker --version 2>/dev/null || echo 'Not available')"
+                    
+                    # Check socket
+                    if [ -S /var/run/docker.sock ]; then
+                        echo "Socket: /var/run/docker.sock exists"
+                    elif [ -S /run/docker.sock ]; then
+                        echo "Socket: /run/docker.sock exists"
+                    else
+                        echo "Socket: Not found - Docker may not be running"
+                    fi
+                `
+            })
+        });
+        
+        const output = result.stdout || '';
+        const hasConflict = output.includes('STATUS: CONFLICT');
+        const hasApt = output.includes('STATUS: OK_APT');
+        const hasSnap = output.includes('STATUS: OK_SNAP');
+        const hasNone = output.includes('STATUS: NONE');
+        
+        if (hasConflict) {
+            // Show conflict warning modal
+            openModal('⚠️ Duplicate Docker Installation Detected!', `
+                <div class="docker-conflict-warning">
+                    <div class="conflict-alert" style="background: var(--danger-bg, #f8d7da); border: 1px solid var(--danger-color, #f5c6cb); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <h4 style="color: var(--danger-color, #721c24); margin: 0 0 10px 0;">⚠️ Conflict Found!</h4>
+                        <p>You have <strong>both Snap and APT versions</strong> of Docker installed. This can cause:</p>
+                        <ul style="margin: 10px 0; padding-left: 20px;">
+                            <li>Docker daemon socket conflicts</li>
+                            <li>"Cannot connect to Docker daemon" errors</li>
+                            <li>Containers failing to start</li>
+                            <li>Inconsistent behavior</li>
+                        </ul>
+                    </div>
+                    
+                    <div class="conflict-details" style="background: var(--bg-secondary); padding: 15px; border-radius: 8px; margin-bottom: 15px;">
+                        <h4 style="margin: 0 0 10px 0;">📋 Detection Output</h4>
+                        <pre style="background: var(--bg-tertiary); padding: 10px; border-radius: 4px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${output}</pre>
+                    </div>
+                    
+                    <div class="conflict-solution" style="background: var(--success-bg, #d4edda); border: 1px solid var(--success-color, #c3e6cb); padding: 15px; border-radius: 8px;">
+                        <h4 style="color: var(--success-dark, #155724); margin: 0 0 10px 0;">✅ Recommended Fix</h4>
+                        <p><strong>Remove the Snap version</strong> (APT version is recommended for servers):</p>
+                        <pre style="background: var(--bg-tertiary); padding: 10px; border-radius: 4px; font-family: monospace; margin: 10px 0;">sudo snap remove docker
+sudo systemctl daemon-reload
+sudo systemctl restart docker</pre>
+                        <p style="margin-top: 10px; color: var(--text-muted); font-size: 12px;">
+                            💡 After removing, restart Docker and your containers should work again.
+                        </p>
+                    </div>
+                </div>
+            `);
+            
+            if (statusEl) {
+                statusEl.textContent = '⚠️ CONFLICT FOUND';
+                statusEl.className = 'install-status conflict';
+                statusEl.style.color = 'var(--danger-color, #dc3545)';
+            }
+            if (itemEl) {
+                itemEl.classList.add('has-conflict');
+                itemEl.style.borderColor = 'var(--danger-color, #dc3545)';
+            }
+            
+            showToast('⚠️ Duplicate Docker installations found! Check the modal for details.', 'error', 8000);
+            
+        } else if (hasApt) {
+            if (statusEl) {
+                statusEl.textContent = '✅ APT only (OK)';
+                statusEl.className = 'install-status ok';
+                statusEl.style.color = 'var(--success-color, #28a745)';
+            }
+            if (itemEl) {
+                itemEl.classList.remove('has-conflict');
+                itemEl.style.borderColor = '';
+            }
+            showToast('✅ Docker check passed - Only APT version installed (recommended)', 'success');
+            
+        } else if (hasSnap) {
+            if (statusEl) {
+                statusEl.textContent = '⚠️ Snap only';
+                statusEl.className = 'install-status warning';
+                statusEl.style.color = 'var(--warning-color, #ffc107)';
+            }
+            showToast('⚠️ Docker is installed via Snap. APT version is recommended for servers.', 'warning');
+            
+        } else if (hasNone) {
+            if (statusEl) {
+                statusEl.textContent = '❌ Not installed';
+                statusEl.className = 'install-status not-installed';
+            }
+            showToast('ℹ️ Docker is not installed. Use the Install buttons to set it up.', 'info');
+            
+        } else {
+            if (statusEl) {
+                statusEl.textContent = 'Check complete';
+                statusEl.className = 'install-status';
+            }
+            // Show output anyway
+            openModal('🔍 Docker Installation Check', `
+                <div class="docker-check-output">
+                    <pre style="background: var(--bg-tertiary); padding: 15px; border-radius: 8px; font-size: 12px; overflow-x: auto; white-space: pre-wrap;">${output || 'No output received'}</pre>
+                </div>
+            `);
+        }
+        
+    } catch (error) {
+        if (statusEl) {
+            statusEl.textContent = 'Check failed';
+            statusEl.className = 'install-status error';
+        }
+        showToast(`❌ Failed to check Docker: ${error.message}`, 'error');
+    }
+}
+
 async function loadDockerInstallStatus() {
     try {
         const status = await fetchAPI('/api/docker/install-status');

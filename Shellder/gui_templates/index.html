@@ -567,6 +567,15 @@
                                     </div>
                                     <button class="btn btn-sm btn-success" onclick="installDockerComponent('all')" title="Install complete Docker setup">Install All</button>
                                 </div>
+                                <div class="docker-install-item" id="checkDuplicateDocker">
+                                    <div class="install-icon">🔍</div>
+                                    <div class="install-info">
+                                        <div class="install-title">Check Duplicate Docker</div>
+                                        <div class="install-desc">Detect conflicting Snap vs Apt installs</div>
+                                        <div class="install-status" id="duplicateDockerStatus">Not checked</div>
+                                    </div>
+                                    <button class="btn btn-sm btn-warning" onclick="checkDuplicateDocker()" title="Check for duplicate Docker installations">Check</button>
+                                </div>
                             </div>
                         </div>
                         

@@ -7588,6 +7588,32 @@ select:focus {
     color: var(--warning);
 }
 
+.install-status.conflict {
+    color: var(--danger);
+    font-weight: 600;
+}
+
+.install-status.checking {
+    color: var(--accent-primary);
+}
+
+.install-status.ok {
+    color: var(--success);
+}
+
+.install-status.warning {
+    color: var(--warning);
+}
+
+.install-status.error {
+    color: var(--danger);
+}
+
+.docker-install-item.has-conflict {
+    border-left: 4px solid var(--danger);
+    background: rgba(220, 53, 69, 0.05);
+}
+
 /* =============================================================================
    DOCKER CONFIGURATION SECTION
    ============================================================================= */
