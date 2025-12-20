@@ -7273,6 +7273,11 @@ select:focus {
     opacity: 0.7;
 }
 
+.port-health-item.internal {
+    border-left-color: var(--accent-secondary, #8b5cf6);
+    background: rgba(139, 92, 246, 0.05);
+}
+
 .port-icon {
     font-size: 20px;
     min-width: 30px;
@@ -7313,6 +7318,11 @@ select:focus {
 .port-status.inaccessible {
     background: rgba(239, 68, 68, 0.2);
     color: var(--danger);
+}
+
+.port-status.internal {
+    background: rgba(139, 92, 246, 0.2);
+    color: var(--accent-secondary, #8b5cf6);
 }
 
 .port-status.not-running {

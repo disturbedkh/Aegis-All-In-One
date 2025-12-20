@@ -3666,14 +3666,44 @@ async function checkAllContainerPorts() {
         const result = await fetchAPI('/api/docker/port-check');
         
         if (!result.ports || result.ports.length === 0) {
-            gridEl.innerHTML = '<div class="loading">No containers with exposed ports found</div>';
+            gridEl.innerHTML = '<div class="loading">No containers found</div>';
             return;
         }
         
         gridEl.innerHTML = result.ports.map(port => {
-            const statusClass = port.running ? (port.accessible ? 'accessible' : 'inaccessible') : 'not-running';
-            const icon = port.running ? (port.accessible ? '✅' : '❌') : '⏸️';
-            const statusText = port.running ? (port.accessible ? 'Accessible' : 'Unreachable') : 'Not Running';
+            // Determine status - internal-only ports are considered OK
+            let statusClass, icon, statusText;
+            
+            if (!port.running) {
+                statusClass = 'not-running';
+                icon = '⏸️';
+                statusText = 'Not Running';
+            } else if (port.exposed === false) {
+                // Internal Docker network only - this is normal for databases, internal services
+                statusClass = 'internal';
+                icon = '🔒';
+                statusText = 'Internal Only';
+            } else if (port.accessible) {
+                statusClass = 'accessible';
+                icon = '✅';
+                statusText = 'Accessible';
+            } else {
+                statusClass = 'inaccessible';
+                icon = '❌';
+                statusText = 'Unreachable';
+            }
+            
+            // Port display
+            let portDisplay = '';
+            if (port.internal_port) {
+                if (port.host_port && port.host_port !== port.internal_port) {
+                    portDisplay = `${port.host_port} → ${port.internal_port}`;
+                } else if (port.host_port) {
+                    portDisplay = `${port.host_port}`;
+                } else {
+                    portDisplay = `${port.internal_port} (internal)`;
+                }
+            }
             
             return `
                 <div class="port-health-item ${statusClass}">
@@ -3681,9 +3711,9 @@ async function checkAllContainerPorts() {
                     <div class="port-info">
                         <div class="port-name">${port.container}</div>
                         <div class="port-details">
-                            <span>Port: ${port.internal_port}</span>
-                            ${port.host_port ? `<span>→ ${port.host_port}</span>` : ''}
+                            ${portDisplay ? `<span>Port: ${portDisplay}</span>` : '<span>No ports</span>'}
                         </div>
+                        ${port.note ? `<div class="port-note" style="font-size: 10px; color: var(--text-muted);">${port.note}</div>` : ''}
                     </div>
                     <span class="port-status ${statusClass}">${statusText}</span>
                     ${port.response_time ? `<span class="port-response-time ${port.response_time < 100 ? 'fast' : 'slow'}">${port.response_time}ms</span>` : ''}
@@ -3691,14 +3721,10 @@ async function checkAllContainerPorts() {
             `;
         }).join('');
         
-        // Add summary
-        const accessible = result.ports.filter(p => p.accessible).length;
-        const running = result.ports.filter(p => p.running).length;
-        const total = result.ports.length;
-        
+        // Add summary from API
         gridEl.innerHTML += `
             <div class="port-health-summary" style="grid-column: 1 / -1; margin-top: 12px; padding: 10px; background: var(--bg-secondary); border-radius: var(--radius-sm); text-align: center; font-size: 12px; color: var(--text-muted);">
-                📊 Summary: ${accessible}/${running} running containers accessible | ${running}/${total} containers running
+                📊 ${result.summary || `${result.accessible_count}/${result.ports.length} ports OK | ${result.running_count} containers running`}
             </div>
         `;
         

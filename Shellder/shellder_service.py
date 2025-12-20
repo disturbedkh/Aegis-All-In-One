@@ -10018,76 +10018,121 @@ def api_docker_health():
 
 @app.route('/api/docker/port-check')
 def api_docker_port_check():
-    """Check accessibility of container internal ports"""
+    """Check accessibility of container ports - dynamically discovers from running containers"""
     import socket
+    import time
     
     ports = []
+    running_containers = []
     
-    # Known Aegis container ports
-    container_ports = {
-        'dragonite': {'port': 7272, 'host_port': 7272},
-        'golbat': {'port': 9001, 'host_port': 9001},
-        'rotom': {'port': 7070, 'host_port': 7070},
-        'koji': {'port': 8080, 'host_port': 8080},
-        'reactmap': {'port': 8080, 'host_port': 6001},
-        'grafana': {'port': 3000, 'host_port': 3000},
-        'victoriametrics': {'port': 8428, 'host_port': 8428},
-        'vmagent': {'port': 8429, 'host_port': 8429},
-        'mariadb': {'port': 3306, 'host_port': 3306},
-        'xilriws': {'port': 9002, 'host_port': 9002},
-    }
-    
-    # Get running containers
-    running_containers = set()
-    if docker_client:
-        try:
-            for c in docker_client.containers.list():
-                running_containers.add(c.name)
-        except:
-            pass
-    else:
-        try:
-            result = subprocess.run(
-                ['docker', 'ps', '--format', '{{.Names}}'],
-                capture_output=True, text=True, timeout=10
-            )
-            if result.returncode == 0:
-                running_containers = set(n.strip() for n in result.stdout.strip().split('\n') if n.strip())
-        except:
-            pass
-    
-    for container, port_info in container_ports.items():
-        port_data = {
-            'container': container,
-            'internal_port': port_info['port'],
-            'host_port': port_info.get('host_port'),
-            'running': container in running_containers,
-            'accessible': False,
-            'response_time': None
-        }
+    try:
+        # Get actual running containers with their port mappings
+        result = subprocess.run(
+            ['docker', 'ps', '--format', '{{.Names}}\t{{.Ports}}\t{{.Status}}'],
+            capture_output=True, text=True, timeout=10
+        )
         
-        if port_data['running']:
-            # Try to connect to the port
-            import time
-            start_time = time.time()
-            try:
-                sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                sock.settimeout(2)
-                result = sock.connect_ex(('127.0.0.1', port_info.get('host_port', port_info['port'])))
-                sock.close()
-                
-                if result == 0:
-                    port_data['accessible'] = True
-                    port_data['response_time'] = int((time.time() - start_time) * 1000)
-            except Exception as e:
-                port_data['error'] = str(e)
-        
-        ports.append(port_data)
+        if result.returncode == 0:
+            for line in result.stdout.strip().split('\n'):
+                if not line.strip():
+                    continue
+                    
+                parts = line.split('\t')
+                if len(parts) >= 2:
+                    container_name = parts[0].strip()
+                    port_mappings = parts[1].strip() if len(parts) > 1 else ''
+                    status = parts[2].strip() if len(parts) > 2 else ''
+                    
+                    running_containers.append(container_name)
+                    
+                    # Parse port mappings like "0.0.0.0:7272->7272/tcp, 0.0.0.0:7273->7273/tcp"
+                    # or "3306/tcp" (internal only)
+                    if port_mappings:
+                        # Find all port mappings
+                        import re
+                        # Match patterns like "0.0.0.0:7272->7272/tcp" or ":::7272->7272/tcp"
+                        exposed_ports = re.findall(r'(?:0\.0\.0\.0|::):(\d+)->(\d+)/(\w+)', port_mappings)
+                        # Also match internal-only ports like "3306/tcp"
+                        internal_only = re.findall(r'^(\d+)/(\w+)$|, (\d+)/(\w+)', port_mappings)
+                        
+                        if exposed_ports:
+                            # Container has ports exposed to host
+                            for host_port, internal_port, protocol in exposed_ports:
+                                port_data = {
+                                    'container': container_name,
+                                    'internal_port': int(internal_port),
+                                    'host_port': int(host_port),
+                                    'protocol': protocol,
+                                    'running': True,
+                                    'exposed': True,
+                                    'accessible': False,
+                                    'response_time': None
+                                }
+                                
+                                # Check if port is accessible
+                                start_time = time.time()
+                                try:
+                                    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                                    sock.settimeout(1)
+                                    conn_result = sock.connect_ex(('127.0.0.1', int(host_port)))
+                                    sock.close()
+                                    
+                                    if conn_result == 0:
+                                        port_data['accessible'] = True
+                                        port_data['response_time'] = int((time.time() - start_time) * 1000)
+                                except Exception as e:
+                                    port_data['error'] = str(e)
+                                
+                                ports.append(port_data)
+                        else:
+                            # No exposed ports - container uses internal Docker network only
+                            # This is normal for databases, internal services etc.
+                            # Extract internal ports
+                            internal_matches = re.findall(r'(\d+)/(\w+)', port_mappings)
+                            for internal_port, protocol in internal_matches:
+                                port_data = {
+                                    'container': container_name,
+                                    'internal_port': int(internal_port),
+                                    'host_port': None,
+                                    'protocol': protocol,
+                                    'running': True,
+                                    'exposed': False,
+                                    'accessible': True,  # Internal network = accessible to other containers
+                                    'response_time': None,
+                                    'note': 'Docker internal network only'
+                                }
+                                ports.append(port_data)
+                    else:
+                        # Container running but no ports defined
+                        ports.append({
+                            'container': container_name,
+                            'internal_port': None,
+                            'host_port': None,
+                            'running': True,
+                            'exposed': False,
+                            'accessible': True,
+                            'note': 'No ports defined (may use volumes/exec only)'
+                        })
+                        
+    except Exception as e:
+        return jsonify({
+            'error': str(e),
+            'ports': [],
+            'running_count': 0,
+            'accessible_count': 0
+        })
+    
+    # Count accessible (either exposed+reachable or internal-only)
+    accessible_count = sum(1 for p in ports if p.get('accessible', False))
+    exposed_count = sum(1 for p in ports if p.get('exposed', False))
     
     return jsonify({
         'ports': ports,
         'running_count': len(running_containers),
-        'accessible_count': sum(1 for p in ports if p['accessible'])
+        'containers': running_containers,
+        'accessible_count': accessible_count,
+        'exposed_count': exposed_count,
+        'summary': f"{accessible_count}/{len(ports)} ports accessible | {len(running_containers)} containers running"
     })
 
 # =============================================================================
