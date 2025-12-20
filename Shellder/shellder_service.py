@@ -24,8 +24,8 @@ Or standalone:
 # =============================================================================
 # VERSION - Update this with each significant change for debugging
 # =============================================================================
-SHELLDER_VERSION = "1.0.36"  # 2025-12-03: Add Setup & Config page with GitHub manager, config editor, env manager
-SHELLDER_BUILD = "20251203-12"  # Date-based build number
+SHELLDER_VERSION = "1.0.37"  # 2025-12-20: Add Xilriws Chrome temp file management
+SHELLDER_BUILD = "20251220-01"  # Date-based build number
 
 # =============================================================================
 # EVENTLET MUST BE FIRST - Before any other imports!
@@ -10910,6 +10910,378 @@ def api_xilriws_proxy_reset_all():
             conn.close()
     except Exception as e:
         return jsonify({'error': str(e)}), 500
+
+# =============================================================================
+# XILRIWS CHROME TEMP FILE MANAGEMENT
+# =============================================================================
+
+def get_xilriws_chrome_temp_info():
+    """Get information about Chrome temp files in Xilriws container"""
+    result = {
+        'enabled': False,
+        'temp_dir': None,
+        'file_count': 0,
+        'total_size_bytes': 0,
+        'total_size_human': '0 B',
+        'oldest_file': None,
+        'newest_file': None,
+        'files_by_age': {'day': 0, 'week': 0, 'month': 0, 'older': 0},
+        'error': None
+    }
+    
+    try:
+        if not docker_client:
+            result['error'] = 'Docker not available'
+            return result
+        
+        # Get xilriws container
+        try:
+            container = docker_client.containers.get('xilriws')
+            if container.status != 'running':
+                result['error'] = 'Xilriws container not running'
+                return result
+        except docker.errors.NotFound:
+            result['error'] = 'Xilriws container not found'
+            return result
+        
+        # Find Chrome temp files in /tmp
+        # Run a command inside the container to get file info
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            result['file_count'] = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Get total size
+        exec_result = container.exec_run(
+            "sh -c \"du -sb /tmp/.com.google.Chrome.* 2>/dev/null | awk '{sum+=$1} END {print sum}'\"",
+            demux=True
+        )
+        
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            size_str = exec_result.output[0].decode().strip()
+            if size_str:
+                result['total_size_bytes'] = int(size_str)
+                result['total_size_human'] = format_bytes(result['total_size_bytes'])
+        
+        # Get file age distribution
+        # Files modified in last day
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d -mtime -1 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            result['files_by_age']['day'] = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Files 1-7 days old
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d -mtime +0 -mtime -7 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            result['files_by_age']['week'] = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Files 7-30 days old
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d -mtime +6 -mtime -30 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            result['files_by_age']['month'] = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Files older than 30 days
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d -mtime +29 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            result['files_by_age']['older'] = int(exec_result.output[0].decode().strip() or 0)
+        
+        result['temp_dir'] = '/tmp'
+        result['enabled'] = True
+        
+    except Exception as e:
+        result['error'] = str(e)
+    
+    return result
+
+
+def format_bytes(bytes_val):
+    """Format bytes to human readable string"""
+    for unit in ['B', 'KB', 'MB', 'GB', 'TB']:
+        if abs(bytes_val) < 1024.0:
+            return f"{bytes_val:.1f} {unit}"
+        bytes_val /= 1024.0
+    return f"{bytes_val:.1f} PB"
+
+
+def clean_xilriws_chrome_temp(max_age_days=None, max_size_bytes=None, clean_all=False):
+    """Clean Chrome temp files in Xilriws container"""
+    result = {
+        'success': False,
+        'files_deleted': 0,
+        'bytes_freed': 0,
+        'bytes_freed_human': '0 B',
+        'error': None
+    }
+    
+    try:
+        if not docker_client:
+            result['error'] = 'Docker not available'
+            return result
+        
+        container = docker_client.containers.get('xilriws')
+        if container.status != 'running':
+            result['error'] = 'Xilriws container not running'
+            return result
+        
+        # Get size before cleanup
+        exec_result = container.exec_run(
+            "sh -c \"du -sb /tmp/.com.google.Chrome.* 2>/dev/null | awk '{sum+=$1} END {print sum}'\"",
+            demux=True
+        )
+        size_before = 0
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            size_str = exec_result.output[0].decode().strip()
+            if size_str:
+                size_before = int(size_str)
+        
+        # Build cleanup command based on parameters
+        if clean_all:
+            # Delete all Chrome temp files
+            cmd = "sh -c \"rm -rf /tmp/.com.google.Chrome.* 2>/dev/null; echo done\""
+        elif max_age_days is not None:
+            # Delete files older than N days
+            cmd = f"sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d -mtime +{max_age_days} -exec rm -rf {{}} \\; 2>/dev/null; echo done\""
+        else:
+            result['error'] = 'No cleanup criteria specified'
+            return result
+        
+        # Get count before
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        count_before = 0
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            count_before = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Execute cleanup
+        exec_result = container.exec_run(cmd, demux=True)
+        
+        # Get count after
+        exec_result = container.exec_run(
+            "sh -c \"find /tmp -maxdepth 1 -name '.com.google.Chrome.*' -type d 2>/dev/null | wc -l\"",
+            demux=True
+        )
+        count_after = 0
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            count_after = int(exec_result.output[0].decode().strip() or 0)
+        
+        # Get size after
+        exec_result = container.exec_run(
+            "sh -c \"du -sb /tmp/.com.google.Chrome.* 2>/dev/null | awk '{sum+=$1} END {print sum}'\"",
+            demux=True
+        )
+        size_after = 0
+        if exec_result.exit_code == 0 and exec_result.output[0]:
+            size_str = exec_result.output[0].decode().strip()
+            if size_str:
+                size_after = int(size_str)
+        
+        result['success'] = True
+        result['files_deleted'] = max(0, count_before - count_after)
+        result['bytes_freed'] = max(0, size_before - size_after)
+        result['bytes_freed_human'] = format_bytes(result['bytes_freed'])
+        
+    except docker.errors.NotFound:
+        result['error'] = 'Xilriws container not found'
+    except Exception as e:
+        result['error'] = str(e)
+    
+    return result
+
+
+# Chrome temp auto-cleanup settings (stored in shellder_config.toml)
+CHROME_TEMP_DEFAULTS = {
+    'enabled': False,
+    'max_size_gb': 10,
+    'max_age_days': 7,
+    'check_interval_minutes': 60
+}
+
+
+def get_chrome_temp_settings():
+    """Get Chrome temp cleanup settings from config"""
+    settings = CHROME_TEMP_DEFAULTS.copy()
+    
+    try:
+        config_file = Path(__file__).parent / 'shellder_config.toml'
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = toml.load(f)
+                chrome_settings = config.get('xilriws', {}).get('chrome_temp', {})
+                settings.update(chrome_settings)
+    except Exception as e:
+        info('CONFIG', f'Error loading chrome temp settings: {e}')
+    
+    return settings
+
+
+def save_chrome_temp_settings(settings):
+    """Save Chrome temp cleanup settings to config"""
+    try:
+        config_file = Path(__file__).parent / 'shellder_config.toml'
+        
+        # Load existing config
+        config = {}
+        if config_file.exists():
+            with open(config_file, 'r') as f:
+                config = toml.load(f)
+        
+        # Update xilriws section
+        if 'xilriws' not in config:
+            config['xilriws'] = {}
+        config['xilriws']['chrome_temp'] = settings
+        
+        # Save
+        with open(config_file, 'w') as f:
+            toml.dump(config, f)
+        
+        return True
+    except Exception as e:
+        error('CONFIG', f'Error saving chrome temp settings: {e}')
+        return False
+
+
+@app.route('/api/xilriws/chrome-temp')
+def api_xilriws_chrome_temp():
+    """Get Chrome temp file information"""
+    info = get_xilriws_chrome_temp_info()
+    settings = get_chrome_temp_settings()
+    return jsonify({
+        'info': info,
+        'settings': settings
+    })
+
+
+@app.route('/api/xilriws/chrome-temp/settings', methods=['GET', 'POST'])
+def api_xilriws_chrome_temp_settings():
+    """Get or update Chrome temp cleanup settings"""
+    if request.method == 'GET':
+        return jsonify(get_chrome_temp_settings())
+    
+    # POST - update settings
+    data = request.get_json()
+    settings = get_chrome_temp_settings()
+    
+    if 'enabled' in data:
+        settings['enabled'] = bool(data['enabled'])
+    if 'max_size_gb' in data:
+        settings['max_size_gb'] = float(data['max_size_gb'])
+    if 'max_age_days' in data:
+        settings['max_age_days'] = int(data['max_age_days'])
+    if 'check_interval_minutes' in data:
+        settings['check_interval_minutes'] = int(data['check_interval_minutes'])
+    
+    if save_chrome_temp_settings(settings):
+        return jsonify({'success': True, 'settings': settings})
+    else:
+        return jsonify({'success': False, 'error': 'Failed to save settings'}), 500
+
+
+@app.route('/api/xilriws/chrome-temp/clean', methods=['POST'])
+def api_xilriws_chrome_temp_clean():
+    """Clean Chrome temp files"""
+    data = request.get_json() or {}
+    
+    clean_all = data.get('clean_all', False)
+    max_age_days = data.get('max_age_days')
+    
+    if not clean_all and max_age_days is None:
+        # Use settings
+        settings = get_chrome_temp_settings()
+        max_age_days = settings.get('max_age_days', 7)
+    
+    result = clean_xilriws_chrome_temp(
+        max_age_days=max_age_days if not clean_all else None,
+        clean_all=clean_all
+    )
+    
+    return jsonify(result)
+
+
+# Background task for auto-cleanup
+_chrome_temp_cleanup_thread = None
+_chrome_temp_cleanup_running = False
+
+
+def chrome_temp_cleanup_worker():
+    """Background worker for automatic Chrome temp cleanup"""
+    global _chrome_temp_cleanup_running
+    
+    while _chrome_temp_cleanup_running:
+        try:
+            settings = get_chrome_temp_settings()
+            
+            if settings.get('enabled', False):
+                info('CHROME_TEMP', 'Running automatic Chrome temp cleanup check')
+                
+                # Get current info
+                temp_info = get_xilriws_chrome_temp_info()
+                
+                if temp_info.get('enabled'):
+                    max_size_bytes = settings.get('max_size_gb', 10) * 1024 * 1024 * 1024
+                    max_age_days = settings.get('max_age_days', 7)
+                    
+                    # Check if cleanup needed
+                    should_clean = False
+                    reason = ''
+                    
+                    if temp_info.get('total_size_bytes', 0) > max_size_bytes:
+                        should_clean = True
+                        reason = f"Size ({temp_info.get('total_size_human')}) exceeds limit ({settings.get('max_size_gb')}GB)"
+                    
+                    if should_clean:
+                        info('CHROME_TEMP', f'Auto-cleanup triggered: {reason}')
+                        result = clean_xilriws_chrome_temp(max_age_days=max_age_days)
+                        if result.get('success'):
+                            info('CHROME_TEMP', f"Cleaned {result.get('files_deleted')} files, freed {result.get('bytes_freed_human')}")
+                        else:
+                            warn('CHROME_TEMP', f"Cleanup failed: {result.get('error')}")
+            
+            # Sleep for check interval
+            interval = settings.get('check_interval_minutes', 60) * 60
+            for _ in range(int(interval)):
+                if not _chrome_temp_cleanup_running:
+                    break
+                time.sleep(1)
+                
+        except Exception as e:
+            error('CHROME_TEMP', f'Error in cleanup worker: {e}')
+            time.sleep(60)
+
+
+def start_chrome_temp_cleanup_worker():
+    """Start the background cleanup worker"""
+    global _chrome_temp_cleanup_thread, _chrome_temp_cleanup_running
+    
+    if _chrome_temp_cleanup_thread and _chrome_temp_cleanup_thread.is_alive():
+        return
+    
+    _chrome_temp_cleanup_running = True
+    _chrome_temp_cleanup_thread = threading.Thread(target=chrome_temp_cleanup_worker, daemon=True)
+    _chrome_temp_cleanup_thread.start()
+    info('CHROME_TEMP', 'Started background cleanup worker')
+
+
+def stop_chrome_temp_cleanup_worker():
+    """Stop the background cleanup worker"""
+    global _chrome_temp_cleanup_running
+    _chrome_temp_cleanup_running = False
+
 
 # =============================================================================
 # VICTORIAMETRICS / GRAFANA METRICS ENDPOINTS
@@ -22271,6 +22643,10 @@ def main():
     if device_monitor:
         device_monitor.start()
         print("Device monitor started for real-time activity tracking")
+    
+    # Start Chrome temp cleanup worker (for Xilriws auto-cleanup)
+    start_chrome_temp_cleanup_worker()
+    print("Chrome temp cleanup worker started")
     
     # Run Flask with SocketIO
     if SOCKETIO_AVAILABLE:

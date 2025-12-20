@@ -2530,6 +2530,246 @@ function filterXilriwsLogs() {
     logContent.textContent = filtered.join('\n');
 }
 
+// =============================================================================
+// CHROME TEMP FILE MANAGEMENT
+// =============================================================================
+
+let chromeTempRefreshInterval = null;
+
+async function loadChromeTempInfo() {
+    /**
+     * Load Chrome temp file information and settings
+     */
+    try {
+        const data = await fetchAPI('/api/xilriws/chrome-temp');
+        if (data._throttled) return;
+        
+        updateChromeTempUI(data);
+    } catch (error) {
+        console.error('Error loading Chrome temp info:', error);
+        showChromeTempMessage('Error loading temp file info', 'error');
+    }
+}
+
+function updateChromeTempUI(data) {
+    /**
+     * Update the Chrome temp manager UI with current data
+     */
+    const info = data.info || {};
+    const settings = data.settings || {};
+    
+    // Update stats
+    const countEl = document.getElementById('chromeTempCount');
+    const sizeEl = document.getElementById('chromeTempSize');
+    const autoEl = document.getElementById('chromeTempAutoStatus');
+    
+    if (countEl) {
+        countEl.textContent = info.file_count?.toLocaleString() || '0';
+        // Highlight if many files
+        countEl.classList.toggle('warning', info.file_count > 1000);
+        countEl.classList.toggle('danger', info.file_count > 10000);
+    }
+    
+    if (sizeEl) {
+        sizeEl.textContent = info.total_size_human || '0 B';
+        // Highlight based on size
+        const sizeGB = (info.total_size_bytes || 0) / (1024 * 1024 * 1024);
+        sizeEl.classList.toggle('warning', sizeGB > 5);
+        sizeEl.classList.toggle('danger', sizeGB > 20);
+    }
+    
+    if (autoEl) {
+        autoEl.textContent = settings.enabled ? 'Enabled' : 'Disabled';
+        autoEl.classList.toggle('success', settings.enabled);
+    }
+    
+    // Update age distribution bar
+    const total = info.file_count || 0;
+    if (total > 0) {
+        const ages = info.files_by_age || {};
+        const dayPct = ((ages.day || 0) / total * 100);
+        const weekPct = ((ages.week || 0) / total * 100);
+        const monthPct = ((ages.month || 0) / total * 100);
+        const olderPct = ((ages.older || 0) / total * 100);
+        
+        const dayEl = document.getElementById('chromeTempAgeDay');
+        const weekEl = document.getElementById('chromeTempAgeWeek');
+        const monthEl = document.getElementById('chromeTempAgeMonth');
+        const olderEl = document.getElementById('chromeTempAgeOlder');
+        
+        if (dayEl) dayEl.style.width = `${dayPct}%`;
+        if (weekEl) weekEl.style.width = `${weekPct}%`;
+        if (monthEl) monthEl.style.width = `${monthPct}%`;
+        if (olderEl) olderEl.style.width = `${olderPct}%`;
+        
+        // Update tooltips with counts
+        if (dayEl) dayEl.title = `< 1 day: ${ages.day || 0} files`;
+        if (weekEl) weekEl.title = `1-7 days: ${ages.week || 0} files`;
+        if (monthEl) monthEl.title = `7-30 days: ${ages.month || 0} files`;
+        if (olderEl) olderEl.title = `> 30 days: ${ages.older || 0} files`;
+    }
+    
+    // Update settings form
+    const enabledEl = document.getElementById('chromeTempEnabled');
+    const maxSizeEl = document.getElementById('chromeTempMaxSize');
+    const maxAgeEl = document.getElementById('chromeTempMaxAge');
+    const intervalEl = document.getElementById('chromeTempInterval');
+    
+    if (enabledEl) enabledEl.checked = settings.enabled || false;
+    if (maxSizeEl) maxSizeEl.value = settings.max_size_gb || 10;
+    if (maxAgeEl) maxAgeEl.value = settings.max_age_days || 7;
+    if (intervalEl) intervalEl.value = settings.check_interval_minutes || 60;
+    
+    // Show error if any
+    if (info.error) {
+        showChromeTempMessage(info.error, 'error');
+    }
+}
+
+async function saveChromeTempSettings() {
+    /**
+     * Save Chrome temp cleanup settings
+     */
+    const settings = {
+        enabled: document.getElementById('chromeTempEnabled')?.checked || false,
+        max_size_gb: parseFloat(document.getElementById('chromeTempMaxSize')?.value) || 10,
+        max_age_days: parseInt(document.getElementById('chromeTempMaxAge')?.value) || 7,
+        check_interval_minutes: parseInt(document.getElementById('chromeTempInterval')?.value) || 60
+    };
+    
+    try {
+        const result = await fetchAPI('/api/xilriws/chrome-temp/settings', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(settings)
+        });
+        
+        if (result.success) {
+            showChromeTempMessage('Settings saved', 'success');
+            // Update auto status display
+            const autoEl = document.getElementById('chromeTempAutoStatus');
+            if (autoEl) {
+                autoEl.textContent = settings.enabled ? 'Enabled' : 'Disabled';
+                autoEl.classList.toggle('success', settings.enabled);
+            }
+        } else {
+            showChromeTempMessage(result.error || 'Failed to save settings', 'error');
+        }
+    } catch (error) {
+        console.error('Error saving Chrome temp settings:', error);
+        showChromeTempMessage('Error saving settings', 'error');
+    }
+}
+
+async function cleanChromeTempByAge() {
+    /**
+     * Clean Chrome temp files older than the configured max age
+     */
+    const maxAge = parseInt(document.getElementById('chromeTempMaxAge')?.value) || 7;
+    
+    if (!confirm(`Delete Chrome temp files older than ${maxAge} days?`)) {
+        return;
+    }
+    
+    showChromeTempMessage('Cleaning old temp files...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/xilriws/chrome-temp/clean', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ max_age_days: maxAge })
+        });
+        
+        if (result.success) {
+            showChromeTempMessage(
+                `Cleaned ${result.files_deleted} files, freed ${result.bytes_freed_human}`,
+                'success'
+            );
+            // Refresh info
+            setTimeout(loadChromeTempInfo, 1000);
+        } else {
+            showChromeTempMessage(result.error || 'Cleanup failed', 'error');
+        }
+    } catch (error) {
+        console.error('Error cleaning Chrome temp:', error);
+        showChromeTempMessage('Error during cleanup', 'error');
+    }
+}
+
+async function cleanAllChromeTemp() {
+    /**
+     * Clean ALL Chrome temp files
+     */
+    if (!confirm('⚠️ This will delete ALL Chrome temp files!\n\nThis may temporarily affect Xilriws operation. Continue?')) {
+        return;
+    }
+    
+    showChromeTempMessage('Cleaning all temp files...', 'info');
+    
+    try {
+        const result = await fetchAPI('/api/xilriws/chrome-temp/clean', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ clean_all: true })
+        });
+        
+        if (result.success) {
+            showChromeTempMessage(
+                `Cleaned ${result.files_deleted} files, freed ${result.bytes_freed_human}`,
+                'success'
+            );
+            // Refresh info
+            setTimeout(loadChromeTempInfo, 1000);
+        } else {
+            showChromeTempMessage(result.error || 'Cleanup failed', 'error');
+        }
+    } catch (error) {
+        console.error('Error cleaning Chrome temp:', error);
+        showChromeTempMessage('Error during cleanup', 'error');
+    }
+}
+
+function showChromeTempMessage(message, type = 'info') {
+    /**
+     * Show a status message in the Chrome temp manager
+     */
+    const msgEl = document.getElementById('chromeTempMessage');
+    if (!msgEl) return;
+    
+    msgEl.textContent = message;
+    msgEl.className = 'chrome-temp-message ' + type;
+    
+    // Auto-hide success messages
+    if (type === 'success') {
+        setTimeout(() => {
+            msgEl.className = 'chrome-temp-message';
+        }, 5000);
+    }
+}
+
+function initChromeTempManager() {
+    /**
+     * Initialize Chrome temp manager when Xilriws page is loaded
+     */
+    loadChromeTempInfo();
+    
+    // Set up refresh interval
+    if (chromeTempRefreshInterval) {
+        clearInterval(chromeTempRefreshInterval);
+    }
+    chromeTempRefreshInterval = setInterval(loadChromeTempInfo, 30000); // Refresh every 30s
+}
+
+function stopChromeTempRefresh() {
+    /**
+     * Stop Chrome temp refresh when leaving Xilriws page
+     */
+    if (chromeTempRefreshInterval) {
+        clearInterval(chromeTempRefreshInterval);
+        chromeTempRefreshInterval = null;
+    }
+}
+
 function updatePortStatus(ports) {
     const portsEl = document.getElementById('portStatus');
     if (!portsEl) return;
@@ -6652,6 +6892,7 @@ navigateTo = function(page) {
             loadXilriwsLogs();
             updateXilriwsContainerStatus();
             loadProxyFile();
+            initChromeTempManager();  // Initialize Chrome temp file manager
             // Also fetch current stats
             fetchAPI('/api/xilriws/stats').then(data => updateXilriwsPage(data));
             break;

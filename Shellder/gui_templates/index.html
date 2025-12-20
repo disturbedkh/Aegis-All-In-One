@@ -3678,6 +3678,93 @@
                     </div>
                 </div>
                 
+                <!-- Chrome Temp File Manager -->
+                <div class="card">
+                    <div class="card-header">
+                        <h2>🗑️ Chrome Temp File Manager</h2>
+                        <div class="card-actions">
+                            <button class="btn btn-sm" onclick="loadChromeTempInfo()" title="Refresh info">🔄 Refresh</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div class="chrome-temp-manager">
+                            <!-- Current Status -->
+                            <div class="chrome-temp-status">
+                                <div class="chrome-temp-stat">
+                                    <span class="stat-label">Temp Files</span>
+                                    <span class="stat-value" id="chromeTempCount">--</span>
+                                </div>
+                                <div class="chrome-temp-stat">
+                                    <span class="stat-label">Total Size</span>
+                                    <span class="stat-value" id="chromeTempSize">--</span>
+                                </div>
+                                <div class="chrome-temp-stat">
+                                    <span class="stat-label">Auto-Cleanup</span>
+                                    <span class="stat-value" id="chromeTempAutoStatus">--</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Age Distribution -->
+                            <div class="chrome-temp-age-dist" id="chromeTempAgeDist">
+                                <div class="age-bar">
+                                    <div class="age-segment age-day" id="chromeTempAgeDay" title="< 1 day old"></div>
+                                    <div class="age-segment age-week" id="chromeTempAgeWeek" title="1-7 days old"></div>
+                                    <div class="age-segment age-month" id="chromeTempAgeMonth" title="7-30 days old"></div>
+                                    <div class="age-segment age-older" id="chromeTempAgeOlder" title="> 30 days old"></div>
+                                </div>
+                                <div class="age-legend">
+                                    <span class="legend-item"><span class="dot age-day"></span> &lt;1 day</span>
+                                    <span class="legend-item"><span class="dot age-week"></span> 1-7 days</span>
+                                    <span class="legend-item"><span class="dot age-month"></span> 7-30 days</span>
+                                    <span class="legend-item"><span class="dot age-older"></span> &gt;30 days</span>
+                                </div>
+                            </div>
+                            
+                            <!-- Settings -->
+                            <div class="chrome-temp-settings">
+                                <h4>Auto-Cleanup Settings</h4>
+                                <div class="settings-grid">
+                                    <div class="setting-item">
+                                        <label class="toggle-switch">
+                                            <input type="checkbox" id="chromeTempEnabled" onchange="saveChromeTempSettings()">
+                                            <span class="slider"></span>
+                                        </label>
+                                        <span class="setting-label">Enable Auto-Cleanup</span>
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>Max Size (GB)</label>
+                                        <input type="number" id="chromeTempMaxSize" min="1" max="500" value="10" class="setting-input" onchange="saveChromeTempSettings()">
+                                        <span class="setting-help">Clean when size exceeds this</span>
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>Max Age (days)</label>
+                                        <input type="number" id="chromeTempMaxAge" min="1" max="365" value="7" class="setting-input" onchange="saveChromeTempSettings()">
+                                        <span class="setting-help">Delete files older than this</span>
+                                    </div>
+                                    <div class="setting-item">
+                                        <label>Check Interval (minutes)</label>
+                                        <input type="number" id="chromeTempInterval" min="5" max="1440" value="60" class="setting-input" onchange="saveChromeTempSettings()">
+                                        <span class="setting-help">How often to check</span>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <!-- Manual Actions -->
+                            <div class="chrome-temp-actions">
+                                <button class="btn btn-warning" onclick="cleanChromeTempByAge()" title="Delete files older than the max age setting">
+                                    🧹 Clean Old Files
+                                </button>
+                                <button class="btn btn-danger" onclick="cleanAllChromeTemp()" title="Delete ALL Chrome temp files">
+                                    🗑️ Clean All Temp Files
+                                </button>
+                            </div>
+                            
+                            <!-- Status message -->
+                            <div id="chromeTempMessage" class="chrome-temp-message"></div>
+                        </div>
+                    </div>
+                </div>
+                
                 <!-- Live Logs -->
                 <div class="card full-height">
                     <div class="card-header">
